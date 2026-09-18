@@ -26,6 +26,9 @@ pub const AncestryBuilder = struct {
 
     /// Move up one level. Pairs are skipped unless `kind` is `.pair`.
     pub fn parent(self: *AncestryBuilder, kind: ?Kind) void {
+        // Once the walk has run off the top of the path it stays invalid;
+        // repeated calls must not underflow `index`.
+        if (self.index == invalid) return;
         self.index -= 1;
         if (self.get()) |n| {
             if (n.isPair() and (kind == null or kind.? != .pair)) self.index -= 1;
@@ -90,3 +93,18 @@ pub const AncestryBuilder = struct {
         return try out.toOwnedSlice();
     }
 };
+
+test "parent past root stays invalid" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const root = try a.create(Node);
+    root.* = .{ .kind = .map, .start = 0, .end = 0 };
+    const path = try a.alloc(*Node, 1);
+    path[0] = root;
+    var b = AncestryBuilder.init(a, path);
+    b.parent(.map);
+    b.parent(.map);
+    b.parent(.map);
+    try std.testing.expect(b.get() == null);
+}

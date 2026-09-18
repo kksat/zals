@@ -28,6 +28,9 @@ pub fn parse(allocator: Allocator, text: []const u8) !dom.Forest {
     defer c.ts_tree_delete(tree);
 
     const root = c.ts_tree_root_node(tree);
+    // tree-sitter is error-tolerant, but an error tree can lose the document
+    // structure entirely. Fall back to the subset parser in that case.
+    if (c.ts_node_has_error(root)) return error.ParseError;
     var roots = std.ArrayList(*Node).empty;
     const n = c.ts_node_named_child_count(root);
     var i: u32 = 0;
@@ -314,6 +317,37 @@ test "tree-sitter parses a playbook" {
     try std.testing.expect(play.isMap());
     try std.testing.expectEqualStrings("hosts", play.items[0].key.?.value.?);
     try std.testing.expectEqualStrings("all", play.items[0].val.?.value.?);
+}
+
+fn checkAcyclic(node: *const Node, depth: usize) !void {
+    if (depth > 200) return error.Cycle;
+    switch (node.kind) {
+        .map, .seq => for (node.items) |it| try checkAcyclic(it, depth + 1),
+        .pair => {
+            if (node.key) |k| try checkAcyclic(k, depth + 1);
+            if (node.val) |v| try checkAcyclic(v, depth + 1);
+        },
+        else => {},
+    }
+}
+
+test "tree-sitter DOM is acyclic" {
+    const src =
+        \\---
+        \\- hosts: all
+        \\  become: true
+        \\  tasks:
+        \\    - name: ping
+        \\      ansible.builtin.ping:
+        \\    - name: install
+        \\      ansible.builtin.package:
+        \\        name: nginx
+        \\        state: present
+        \\
+    ;
+    var forest = try parse(std.testing.allocator, src);
+    defer forest.deinit();
+    for (forest.roots) |root| try checkAcyclic(root, 0);
 }
 
 fn expectSameNode(a: *const Node, b: *const Node) !void {

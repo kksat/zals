@@ -10,7 +10,7 @@ const docs = @import("docs.zig");
 const DocsLibrary = docs.DocsLibrary;
 const json_util = @import("../lsp/json_util.zig");
 
-pub const format_version = 1;
+pub const format_version = 2;
 
 pub fn cacheDir(allocator: Allocator) ![]u8 {
     if (std.posix.getenv("XDG_CACHE_HOME")) |x|
@@ -57,12 +57,7 @@ pub fn save(allocator: Allocator, lib: *DocsLibrary, path: []const u8) !void {
         var opts = std.json.ObjectMap.init(a);
         var oit = m.options.iterator();
         while (oit.next()) |oe| {
-            const o = oe.value_ptr.*;
-            var oo = std.json.ObjectMap.init(a);
-            try oo.put("description", .{ .string = o.description });
-            try oo.put("type", .{ .string = o.type });
-            try oo.put("required", .{ .bool = o.required });
-            try opts.put(oe.key_ptr.*, .{ .object = oo });
+            try opts.put(oe.key_ptr.*, try optionToJson(a, oe.value_ptr.*));
         }
         try mo.put("options", .{ .object = opts });
         try mods.put(e.key_ptr.*, .{ .object = mo });
@@ -124,12 +119,9 @@ pub fn load(allocator: Allocator, lib: *DocsLibrary, path: []const u8) !bool {
                 var oi = opts.iterator();
                 while (oi.next()) |oe| {
                     const opt_name = try a.dupe(u8, oe.key_ptr.*);
-                    try options.put(opt_name, .{
-                        .name = opt_name,
-                        .description = try a.dupe(u8, json_util.string(oe.value_ptr.*, "description") orelse ""),
-                        .type = try a.dupe(u8, json_util.string(oe.value_ptr.*, "type") orelse ""),
-                        .required = json_util.boolean(oe.value_ptr.*, "required") orelse false,
-                    });
+                    var opt = try optionFromJson(a, oe.value_ptr.*);
+                    opt.name = opt_name;
+                    try options.put(opt_name, opt);
                 }
             }
             try lib.modules.put(name, .{
@@ -143,6 +135,40 @@ pub fn load(allocator: Allocator, lib: *DocsLibrary, path: []const u8) !bool {
 
     lib.ready = true;
     return true;
+}
+
+fn optionToJson(a: Allocator, o: docs.Option) !Value {
+    var oo = std.json.ObjectMap.init(a);
+    try oo.put("description", .{ .string = o.description });
+    try oo.put("type", .{ .string = o.type });
+    try oo.put("required", .{ .bool = o.required });
+    if (o.suboptions.len > 0) {
+        var subs = std.json.ObjectMap.init(a);
+        for (o.suboptions) |s| try subs.put(s.name, try optionToJson(a, s));
+        try oo.put("suboptions", .{ .object = subs });
+    }
+    return .{ .object = oo };
+}
+
+fn optionFromJson(a: Allocator, v: Value) !docs.Option {
+    var sub: []const docs.Option = &.{};
+    if (json_util.object(v, "suboptions")) |subs| {
+        var list = std.ArrayList(docs.Option).empty;
+        var it = subs.iterator();
+        while (it.next()) |e| {
+            var o = try optionFromJson(a, e.value_ptr.*);
+            o.name = try a.dupe(u8, e.key_ptr.*);
+            try list.append(a, o);
+        }
+        sub = try list.toOwnedSlice(a);
+    }
+    return .{
+        .name = "",
+        .description = try a.dupe(u8, json_util.string(v, "description") orelse ""),
+        .type = try a.dupe(u8, json_util.string(v, "type") orelse ""),
+        .required = json_util.boolean(v, "required") orelse false,
+        .suboptions = sub,
+    };
 }
 
 test "cache round trip" {

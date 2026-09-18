@@ -13,6 +13,7 @@ pub const Option = struct {
     required: bool = false,
     aliases: []const []const u8 = &.{},
     choices: []const []const u8 = &.{},
+    suboptions: []const Option = &.{},
 };
 
 pub const Module = struct {
@@ -187,6 +188,7 @@ pub const DocsLibrary = struct {
                         .description = try a.dupe(u8, descriptionOf(opt.value_ptr.*) orelse ""),
                         .type = try a.dupe(u8, json_util.string(opt.value_ptr.*, "type") orelse ""),
                         .required = json_util.boolean(opt.value_ptr.*, "required") orelse false,
+                        .suboptions = try parseSuboptions(a, opt.value_ptr.*),
                     });
                 }
             }
@@ -200,6 +202,22 @@ pub const DocsLibrary = struct {
         }
     }
 };
+
+fn parseSuboptions(a: Allocator, opt: Value) ![]const Option {
+    const subs = json_util.object(opt, "suboptions") orelse return &.{};
+    var list = std.ArrayList(Option).empty;
+    var it = subs.iterator();
+    while (it.next()) |e| {
+        try list.append(a, .{
+            .name = try a.dupe(u8, e.key_ptr.*),
+            .description = try a.dupe(u8, descriptionOf(e.value_ptr.*) orelse ""),
+            .type = try a.dupe(u8, json_util.string(e.value_ptr.*, "type") orelse ""),
+            .required = json_util.boolean(e.value_ptr.*, "required") orelse false,
+            .suboptions = try parseSuboptions(a, e.value_ptr.*),
+        });
+    }
+    return try list.toOwnedSlice(a);
+}
 
 fn descriptionOf(v: Value) ?[]const u8 {
     if (json_util.string(v, "description")) |s| return s;

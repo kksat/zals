@@ -13,13 +13,18 @@ endif
 
 ARGS ?=
 
-.PHONY: build test run fmt clean
+.PHONY: build test run fmt clean parity
 
 build:
 	zig build
 
 test:
 	zig build test
+
+# Compare zals against the upstream Ansible Language Server. Requires the
+# upstream package (see test/parity/compare.py) and a built zals binary.
+parity: build
+	python3 test/parity/compare.py $(ARGS)
 
 run: build
 	./zig-out/bin/zals $(ARGS)
