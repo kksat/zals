@@ -5,9 +5,16 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     // Core library: everything except the CLI entry point.
+    const schemas = b.createModule(.{
+        .root_source_file = b.path("vendor/schemas/embed.zig"),
+        .target = target,
+    });
     const mod = b.addModule("zals", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
+        .imports = &.{
+            .{ .name = "schemas", .module = schemas },
+        },
     });
 
     // CLI entry point.

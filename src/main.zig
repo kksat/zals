@@ -15,6 +15,40 @@ const usage =
     \\
 ;
 
+var log_file: ?std.fs.File = null;
+var runtime_log_level: std.log.Level = .info;
+
+pub const std_options: std.Options = .{
+    .log_level = .debug,
+    .logFn = logFn,
+};
+
+fn logFn(
+    comptime message_level: std.log.Level,
+    comptime scope: @TypeOf(.enum_literal),
+    comptime format: []const u8,
+    args: anytype,
+) void {
+    if (@intFromEnum(message_level) > @intFromEnum(runtime_log_level)) return;
+    const level_txt = comptime message_level.asText();
+    const prefix2 = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
+    var buf: [4096]u8 = undefined;
+    const msg = std.fmt.bufPrint(&buf, level_txt ++ prefix2 ++ format ++ "\n", args) catch blk: {
+        break :blk level_txt ++ prefix2 ++ format ++ "\n";
+    };
+    const fd = if (log_file) |f| f.handle else std.posix.STDERR_FILENO;
+    _ = std.posix.write(fd, msg) catch {};
+}
+
+fn applyLogLevel(level: zals.cli.LogLevel) std.log.Level {
+    return switch (level) {
+        .@"error" => .err,
+        .warn => .warn,
+        .info => .info,
+        .debug => .debug,
+    };
+}
+
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -38,6 +72,17 @@ pub fn main() !void {
         return;
     }
 
-    // TODO(M1): start the LSP server over stdio.
-    _ = options.stdio;
+    runtime_log_level = applyLogLevel(options.log_level);
+    if (options.log_file) |path| {
+        log_file = try std.fs.cwd().createFile(path, .{ .truncate = true });
+    }
+    defer if (log_file) |f| f.close();
+
+    const transport = zals.lsp.Transport.init(
+        std.fs.File.stdin().handle,
+        std.fs.File.stdout().handle,
+    );
+    var server = zals.lsp.Server.init(allocator, transport);
+    defer server.deinit();
+    try server.run();
 }

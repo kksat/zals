@@ -9,7 +9,10 @@ the Node.js runtime. New features will be considered after parity is reached.
 
 ## Status
 
-Early development. The design is captured in [`docs/DESIGN.md`](docs/DESIGN.md)
+M1–M8 skeleton is in place: stdio LSP, YAML subset parser, providers (semantic
+tokens, hover, completion, definition, validation), `ansible-doc` catalog, and
+bundled JSON-schema snapshots. See [`docs/deviations.md`](docs/deviations.md)
+for intentional gaps versus upstream. Design lives in [`docs/DESIGN.md`](docs/DESIGN.md)
 and the decision records under [`docs/adr/`](docs/adr/).
 
 ## Scope (v1)

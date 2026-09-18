@@ -1,0 +1,183 @@
+//! Module documentation loaded from `ansible-doc --json`.
+
+const std = @import("std");
+const Allocator = std.mem.Allocator;
+const Value = std.json.Value;
+const exec = @import("../exec/root.zig");
+const json_util = @import("../lsp/json_util.zig");
+
+pub const Option = struct {
+    name: []const u8,
+    description: []const u8,
+    type: []const u8,
+    required: bool = false,
+    aliases: []const []const u8 = &.{},
+    choices: []const []const u8 = &.{},
+};
+
+pub const Module = struct {
+    name: []const u8,
+    description: []const u8,
+    filename: []const u8,
+    options: std.StringHashMap(Option),
+};
+
+pub const CatalogEntry = struct {
+    name: []const u8,
+    description: []const u8,
+};
+
+pub const DocsLibrary = struct {
+    allocator: Allocator,
+    runner: exec.Runner,
+    ansible_doc: []const u8,
+    /// Short-name / FQCN → catalog description. Keys and values owned by `arena`.
+    catalog: std.StringHashMap(CatalogEntry),
+    modules: std.StringHashMap(Module),
+    arena: std.heap.ArenaAllocator,
+    ready: bool = false,
+
+    pub fn init(allocator: Allocator, runner: exec.Runner, ansible_doc: []const u8) DocsLibrary {
+        return .{
+            .allocator = allocator,
+            .runner = runner,
+            .ansible_doc = ansible_doc,
+            .catalog = std.StringHashMap(CatalogEntry).init(allocator),
+            .modules = std.StringHashMap(Module).init(allocator),
+            .arena = std.heap.ArenaAllocator.init(allocator),
+        };
+    }
+
+    pub fn deinit(self: *DocsLibrary) void {
+        self.catalog.deinit();
+        var it = self.modules.iterator();
+        while (it.next()) |e| e.value_ptr.options.deinit();
+        self.modules.deinit();
+        self.arena.deinit();
+    }
+
+    pub fn loadCatalog(self: *DocsLibrary) !void {
+        const argv = [_][]const u8{ self.ansible_doc, "-l", "--json", "-t", "module" };
+        const result = self.runner.run(self.allocator, &argv) catch return;
+        defer result.deinit(self.allocator);
+        if (result.stdout.len == 0) return;
+
+        const parsed = std.json.parseFromSlice(Value, self.allocator, result.stdout, .{}) catch return;
+        defer parsed.deinit();
+        const a = self.arena.allocator();
+        switch (parsed.value) {
+            .object => |obj| {
+                var it = obj.iterator();
+                while (it.next()) |e| {
+                    const name = try a.dupe(u8, e.key_ptr.*);
+                    const desc = descriptionOf(e.value_ptr.*) orelse "";
+                    try self.catalog.put(name, .{
+                        .name = name,
+                        .description = try a.dupe(u8, desc),
+                    });
+                }
+            },
+            else => {},
+        }
+        self.ready = true;
+    }
+
+    pub fn findModule(self: *DocsLibrary, name: []const u8) ?Module {
+        if (self.modules.get(name)) |m| return m;
+        self.fetchOne(name) catch {};
+        if (self.modules.get(name)) |m| return m;
+        return null;
+    }
+
+    /// Resolve `name` as an FQCN, `ansible.builtin.*`, or a declared collection.
+    pub fn findModuleInContext(self: *DocsLibrary, arena: Allocator, name: []const u8, collections: []const []const u8) ?Module {
+        if (self.findModule(name)) |m| return m;
+        if (std.mem.indexOfScalar(u8, name, '.') != null) return null;
+
+        const builtin = std.fmt.allocPrint(arena, "ansible.builtin.{s}", .{name}) catch return null;
+        if (self.findModule(builtin)) |m| return m;
+
+        for (collections) |c| {
+            const fqcn = std.fmt.allocPrint(arena, "{s}.{s}", .{ c, name }) catch continue;
+            if (self.findModule(fqcn)) |m| return m;
+        }
+
+        var it = self.catalog.iterator();
+        while (it.next()) |e| {
+            const key = e.key_ptr.*;
+            if (std.mem.endsWith(u8, key, name) and key.len > name.len and key[key.len - name.len - 1] == '.') {
+                if (self.findModule(key)) |m| return m;
+            }
+        }
+        return null;
+    }
+
+    pub fn ensureModule(self: *DocsLibrary, name: []const u8) void {
+        if (self.modules.contains(name)) return;
+        self.fetchOne(name) catch {};
+    }
+
+    fn fetchOne(self: *DocsLibrary, name: []const u8) !void {
+        const argv = [_][]const u8{ self.ansible_doc, "--json", "-t", "module", name };
+        const result = try self.runner.run(self.allocator, &argv);
+        defer result.deinit(self.allocator);
+        if (result.stdout.len == 0) return;
+        const parsed = std.json.parseFromSlice(Value, self.allocator, result.stdout, .{}) catch return;
+        defer parsed.deinit();
+        try self.ingestDocs(parsed.value);
+    }
+
+    fn ingestDocs(self: *DocsLibrary, value: Value) !void {
+        const a = self.arena.allocator();
+        const obj = switch (value) {
+            .object => |o| o,
+            else => return,
+        };
+        var it = obj.iterator();
+        while (it.next()) |e| {
+            const doc = json_util.field(e.value_ptr.*, "doc") orelse continue;
+            const filename = json_util.string(doc, "filename") orelse "";
+            const desc = descriptionOf(doc) orelse "";
+            var options = std.StringHashMap(Option).init(self.allocator);
+            if (json_util.object(doc, "options")) |opts| {
+                var oi = opts.iterator();
+                while (oi.next()) |opt| {
+                    const opt_name = try a.dupe(u8, opt.key_ptr.*);
+                    try options.put(opt_name, .{
+                        .name = opt_name,
+                        .description = try a.dupe(u8, descriptionOf(opt.value_ptr.*) orelse ""),
+                        .type = try a.dupe(u8, json_util.string(opt.value_ptr.*, "type") orelse ""),
+                        .required = json_util.boolean(opt.value_ptr.*, "required") orelse false,
+                    });
+                }
+            }
+            const stored_name = try a.dupe(u8, e.key_ptr.*);
+            try self.modules.put(stored_name, .{
+                .name = stored_name,
+                .description = try a.dupe(u8, desc),
+                .filename = try a.dupe(u8, filename),
+                .options = options,
+            });
+        }
+    }
+};
+
+fn descriptionOf(v: Value) ?[]const u8 {
+    if (json_util.string(v, "description")) |s| return s;
+    if (json_util.field(v, "description")) |d| {
+        switch (d) {
+            .array => |arr| {
+                if (arr.items.len > 0) {
+                    return switch (arr.items[0]) {
+                        .string => |s| s,
+                        else => null,
+                    };
+                }
+            },
+            .string => |s| return s,
+            else => {},
+        }
+    }
+    if (json_util.string(v, "short_description")) |s| return s;
+    return null;
+}

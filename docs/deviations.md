@@ -27,7 +27,11 @@ what differs, why, and whether it is expected to be permanent.
 | 7 | Schemas are a **pinned build-time snapshot**, not a 24-hour remote cache. | Reproducibility and offline use. See [ADR-0006](adr/0006-bundle-schema-snapshot.md). | Yes |
 | 8 | JSON-schema validation supports a **draft-07 subset**. | The bundled schemas use a bounded keyword set. See [ADR-0005](adr/0005-json-schema-validation-in-zig.md). | Maybe |
 | 9 | Schema diagnostics always use the **document root range**. | Matches upstream's observable behavior; avoids mapping schema paths to YAML ranges. See [ADR-0005](adr/0005-json-schema-validation-in-zig.md). | Yes |
-| 10 | Progress reporting is **best-effort**. | Clients tolerate missing progress updates. See [ADR-0015](adr/0015-validation-behavior.md). | Yes |
+| 11 | YAML is parsed by an **indent-based subset parser**, not tree-sitter-yaml. | Ships a working `YamlParser` seam now; tree-sitter backend is the planned replacement. See [ADR-0004](adr/0004-yaml-parsing-tree-sitter.md). | Until tree-sitter backend |
+| 12 | Schema snapshot is **committed** under `vendor/schemas/`, not fetched at build. | Offline clones; pin is ansible-lint v25.8.2. See [ADR-0006](adr/0006-bundle-schema-snapshot.md). | Maybe |
+| 13 | JSON Schema `pattern` is ignored (no regex engine). | Zig 0.15 std has no regex; other subset keywords are implemented. See [ADR-0005](adr/0005-json-schema-validation-in-zig.md). | Until regex |
+| 14 | Main thread does all work; no worker/docs/cache-writer pool yet. | Mutexed stdio writes are enough for v1 correctness. See [ADR-0011](adr/0011-threading-topology.md). | Until threading |
+| 15 | Docs catalog is loaded on `initialized`; no background prefetch or on-disk cache. | Lazy `ansible-doc --json` on hover/definition. See [ADR-0008](adr/0008-hybrid-docs-loading.md). | Until cache-writer |
 
 ## Adding an entry
 
