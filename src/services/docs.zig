@@ -36,6 +36,11 @@ pub const DocsLibrary = struct {
     modules: std.StringHashMap(Module),
     arena: std.heap.ArenaAllocator,
     ready: bool = false,
+    /// Guards `catalog` and `modules`. Held only while mutating/reading the
+    /// maps, never across an `ansible-doc` subprocess.
+    mutex: std.Thread.Mutex = .{},
+    /// Ansible version string used as part of the on-disk cache fingerprint.
+    ansible_version: []const u8 = "",
 
     pub fn init(allocator: Allocator, runner: exec.Runner, ansible_doc: []const u8) DocsLibrary {
         return .{
@@ -65,6 +70,8 @@ pub const DocsLibrary = struct {
         const parsed = std.json.parseFromSlice(Value, self.allocator, result.stdout, .{}) catch return;
         defer parsed.deinit();
         const a = self.arena.allocator();
+        self.mutex.lock();
+        defer self.mutex.unlock();
         switch (parsed.value) {
             .object => |obj| {
                 var it = obj.iterator();
@@ -83,10 +90,16 @@ pub const DocsLibrary = struct {
     }
 
     pub fn findModule(self: *DocsLibrary, name: []const u8) ?Module {
-        if (self.modules.get(name)) |m| return m;
+        self.mutex.lock();
+        if (self.modules.get(name)) |m| {
+            self.mutex.unlock();
+            return m;
+        }
+        self.mutex.unlock();
         self.fetchOne(name) catch {};
-        if (self.modules.get(name)) |m| return m;
-        return null;
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        return self.modules.get(name);
     }
 
     /// Resolve `name` as an FQCN, `ansible.builtin.*`, or a declared collection.
@@ -113,13 +126,37 @@ pub const DocsLibrary = struct {
     }
 
     pub fn ensureModule(self: *DocsLibrary, name: []const u8) void {
-        if (self.modules.contains(name)) return;
+        self.mutex.lock();
+        const present = self.modules.contains(name);
+        self.mutex.unlock();
+        if (present) return;
         self.fetchOne(name) catch {};
+    }
+
+    pub fn catalogCount(self: *DocsLibrary) usize {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        return self.catalog.count();
     }
 
     fn fetchOne(self: *DocsLibrary, name: []const u8) !void {
         const argv = [_][]const u8{ self.ansible_doc, "--json", "-t", "module", name };
         const result = try self.runner.run(self.allocator, &argv);
+        defer result.deinit(self.allocator);
+        if (result.stdout.len == 0) return;
+        const parsed = std.json.parseFromSlice(Value, self.allocator, result.stdout, .{}) catch return;
+        defer parsed.deinit();
+        try self.ingestDocs(parsed.value);
+    }
+
+    /// Fetch full docs for several modules in one `ansible-doc` invocation.
+    pub fn fetchMany(self: *DocsLibrary, names: []const []const u8) !void {
+        if (names.len == 0) return;
+        var argv = std.ArrayList([]const u8).empty;
+        defer argv.deinit(self.allocator);
+        try argv.appendSlice(self.allocator, &.{ self.ansible_doc, "--json", "-t", "module" });
+        try argv.appendSlice(self.allocator, names);
+        const result = try self.runner.run(self.allocator, argv.items);
         defer result.deinit(self.allocator);
         if (result.stdout.len == 0) return;
         const parsed = std.json.parseFromSlice(Value, self.allocator, result.stdout, .{}) catch return;
@@ -133,6 +170,8 @@ pub const DocsLibrary = struct {
             .object => |o| o,
             else => return,
         };
+        self.mutex.lock();
+        defer self.mutex.unlock();
         var it = obj.iterator();
         while (it.next()) |e| {
             const doc = json_util.field(e.value_ptr.*, "doc") orelse continue;

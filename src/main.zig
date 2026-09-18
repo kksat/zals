@@ -82,7 +82,7 @@ pub fn main() !void {
         std.fs.File.stdin().handle,
         std.fs.File.stdout().handle,
     );
-    var server = zals.lsp.Server.init(allocator, transport);
+    var server = try zals.lsp.Server.init(allocator, transport);
     defer server.deinit();
     try server.run();
 }

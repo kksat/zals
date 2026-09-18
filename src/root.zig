@@ -17,11 +17,13 @@ pub const workspace = struct {
 };
 pub const services = @import("services/root.zig");
 pub const providers = @import("providers/root.zig");
+pub const concurrency = @import("concurrency/root.zig");
 
 test {
     @import("std").testing.refAllDecls(@This());
     _ = @import("cli.zig");
     _ = @import("lsp/transport.zig");
+    _ = @import("lsp/writer.zig");
     _ = @import("lsp/server.zig");
     _ = @import("lsp/handlers.zig");
     _ = @import("workspace/document.zig");
@@ -33,4 +35,5 @@ test {
     _ = @import("yaml/jsonify.zig");
     _ = @import("services/schema.zig");
     _ = @import("services/schema_service.zig");
+    _ = @import("concurrency/pool.zig");
 }

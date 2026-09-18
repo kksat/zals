@@ -35,11 +35,9 @@ pub fn handleRequest(self: *Server, a: Allocator, id: Value, method: []const u8,
 pub fn handleNotification(self: *Server, a: Allocator, method: []const u8, params: Value) !void {
     if (std.mem.eql(u8, method, "initialized")) {
         self.initialized = true;
-        self.docs.loadCatalog() catch |err| {
-            std.log.warn("docs catalog: {s}", .{@errorName(err)});
-        };
+        self.docs_service.start(&self.docs, self.pool);
         var ready = json_util.obj(a);
-        try ready.put("modulesCount", json_util.num(self.docs.catalog.count()));
+        try ready.put("modulesCount", json_util.num(self.docs.catalogCount()));
         try self.notify(a, "ansible/docsLibraryReady", .{ .object = ready });
         return;
     }

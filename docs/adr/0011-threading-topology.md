@@ -28,6 +28,13 @@ Use a fixed topology:
 A **self-pipe** wakes the `poll()` loop when a worker finishes, so the main
 thread can apply results without busy-waiting.
 
+Implemented in `concurrency/pool.zig` (worker pool), `services/docs_service.zig`
+(docs prefetch + cache writes), and `lsp/writer.zig` (outgoing writer thread).
+The docs library guards its maps with a mutex held only during ingestion, never
+across an `ansible-doc` subprocess. Parsing, linting, and schema validation
+remain on the main thread for now; the self-pipe is not needed until those move
+to workers.
+
 ## Consequences
 
 - No locks on the main data structures; the single-writer rule removes a whole
