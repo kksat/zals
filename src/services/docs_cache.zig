@@ -10,7 +10,7 @@ const docs = @import("docs.zig");
 const DocsLibrary = docs.DocsLibrary;
 const json_util = @import("../lsp/json_util.zig");
 
-pub const format_version = 2;
+pub const format_version = 3;
 
 pub fn cacheDir(allocator: Allocator) ![]u8 {
     if (std.posix.getenv("XDG_CACHE_HOME")) |x|
@@ -53,6 +53,10 @@ pub fn save(allocator: Allocator, lib: *DocsLibrary, path: []const u8) !void {
         const m = e.value_ptr.*;
         var mo = std.json.ObjectMap.init(a);
         try mo.put("description", .{ .string = m.description });
+        try mo.put("long_description", try stringArray(a, m.long_description));
+        try mo.put("requirements", try stringArray(a, m.requirements));
+        try mo.put("notes", try stringArray(a, m.notes));
+        try mo.put("deprecated", .{ .bool = m.deprecated });
         try mo.put("filename", .{ .string = m.filename });
         var opts = std.json.ObjectMap.init(a);
         var oit = m.options.iterator();
@@ -127,6 +131,10 @@ pub fn load(allocator: Allocator, lib: *DocsLibrary, path: []const u8) !bool {
             try lib.modules.put(name, .{
                 .name = name,
                 .description = try a.dupe(u8, json_util.string(e.value_ptr.*, "description") orelse ""),
+                .long_description = try stringList(a, json_util.field(e.value_ptr.*, "long_description") orelse Value.null),
+                .requirements = try stringList(a, json_util.field(e.value_ptr.*, "requirements") orelse Value.null),
+                .notes = try stringList(a, json_util.field(e.value_ptr.*, "notes") orelse Value.null),
+                .deprecated = json_util.boolean(e.value_ptr.*, "deprecated") orelse false,
                 .filename = try a.dupe(u8, json_util.string(e.value_ptr.*, "filename") orelse ""),
                 .options = options,
             });
@@ -142,6 +150,8 @@ fn optionToJson(a: Allocator, o: docs.Option) !Value {
     try oo.put("description", .{ .string = o.description });
     try oo.put("type", .{ .string = o.type });
     try oo.put("required", .{ .bool = o.required });
+    try oo.put("default", if (o.default) |d| .{ .string = d } else .null);
+    try oo.put("elements", .{ .string = o.elements });
     if (o.suboptions.len > 0) {
         var subs = std.json.ObjectMap.init(a);
         for (o.suboptions) |s| try subs.put(s.name, try optionToJson(a, s));
@@ -168,7 +178,31 @@ fn optionFromJson(a: Allocator, v: Value) !docs.Option {
         .type = try a.dupe(u8, json_util.string(v, "type") orelse ""),
         .required = json_util.boolean(v, "required") orelse false,
         .suboptions = sub,
+        .default = if (json_util.string(v, "default")) |d| try a.dupe(u8, d) else null,
+        .elements = try a.dupe(u8, json_util.string(v, "elements") orelse ""),
     };
+}
+
+fn stringArray(a: Allocator, items: []const []const u8) !Value {
+    var arr = std.json.Array.init(a);
+    for (items) |s| try arr.append(.{ .string = s });
+    return .{ .array = arr };
+}
+
+fn stringList(a: Allocator, v: Value) ![]const []const u8 {
+    switch (v) {
+        .array => |arr| {
+            var list = std.ArrayList([]const u8).empty;
+            for (arr.items) |item| {
+                switch (item) {
+                    .string => |s| try list.append(a, try a.dupe(u8, s)),
+                    else => {},
+                }
+            }
+            return try list.toOwnedSlice(a);
+        },
+        else => return &.{},
+    }
 }
 
 test "cache round trip" {

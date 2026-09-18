@@ -30,6 +30,12 @@ Use **`ansible-doc --json`** behind a `DocsSource` interface. Batch module names
 into single invocations. The catalog comes from `-l --json`; full docs come from
 `--json <names>`.
 
+Module *names* for completion come from a filesystem scan
+(`services/module_index.zig`) that mirrors upstream's `docsFinder`: it walks the
+ansible-core modules path and installed collections, and reads `plugin_routing`
+redirects from `meta/runtime.yml`. `ansible-doc -l` only lists modules that
+resolve, so the scan is needed to offer the same completion set as upstream.
+
 ## Consequences
 
 - Documentation always matches the user's installed Ansible, including

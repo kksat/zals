@@ -178,7 +178,6 @@ fn parseMapStartingAt(p: *Parser, first: Line, indent: usize) anyerror!*Node {
 
     var line = first;
     while (true) {
-        if (keyColonPos(line.body) == null) break;
         const pair = try parsePair(p, line, indent) orelse break;
         pair.parent = map;
         try pairs.append(pair);
@@ -194,7 +193,20 @@ fn parseMapStartingAt(p: *Parser, first: Line, indent: usize) anyerror!*Node {
 }
 
 fn parsePair(p: *Parser, line: Line, indent: usize) anyerror!?*Node {
-    const colon = keyColonPos(line.body) orelse return null;
+    const colon = keyColonPos(line.body) orelse {
+        // A colon-less line at map indent is an incomplete key with no value
+        // (e.g. `ansible.builtin.` while typing). Upstream's YAML parser keeps
+        // it as a pair with a null value.
+        if (line.body.len == 0 or line.body[0] == '#') return null;
+        const key_node = try parseScalarFrom(p, line.body, line.body_start, line.end);
+        const pair = try p.allocNode(.pair, key_node.start, key_node.end);
+        pair.key = key_node;
+        key_node.parent = pair;
+        const empty = try emptyScalar(p, line.end);
+        empty.parent = pair;
+        pair.val = empty;
+        return pair;
+    };
     const key_raw = std.mem.trimRight(u8, line.body[0..colon], " \t");
     const key_node = try parseScalarFrom(p, key_raw, line.body_start, line.body_start + key_raw.len);
 

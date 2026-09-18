@@ -14,14 +14,9 @@ Environment:
 The harness starts both servers over stdio, initializes them, opens each corpus
 document, and issues hover / completion / semanticTokens / definition requests.
 Results are normalized (hover text, completion labels, decoded semantic tokens,
-definition targets) and compared. Exit code is 0 when every case matches, 1
-otherwise; pass --allow-diffs for report-only mode.
-
-Known differences (see docs/deviations.md):
-  * Module completion: upstream scans installed collections and includes
-    redirect routes (~4800 items); zals offers the `ansible-doc -l` catalog
-    (~860 items).
-  * Hover text is formatted differently, so hover is compared by word overlap.
+definition targets) and compared. Exit code is 0 when every case scores at or
+above the threshold (default 0.9), 1 otherwise; pass --allow-diffs for
+report-only mode.
 """
 
 import argparse
@@ -324,7 +319,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--json", help="write a JSON report to this path")
     ap.add_argument("--verbose", action="store_true")
-    ap.add_argument("--threshold", type=float, default=0.5, help="match threshold (default 0.5)")
+    ap.add_argument("--threshold", type=float, default=0.9, help="match threshold (default 0.9)")
     ap.add_argument(
         "--allow-diffs",
         action="store_true",

@@ -14,11 +14,19 @@ pub const Option = struct {
     aliases: []const []const u8 = &.{},
     choices: []const []const u8 = &.{},
     suboptions: []const Option = &.{},
+    default: ?[]const u8 = null,
+    elements: []const u8 = "",
 };
 
 pub const Module = struct {
     name: []const u8,
+    /// Short description (one line).
     description: []const u8,
+    /// Full description paragraphs.
+    long_description: []const []const u8 = &.{},
+    requirements: []const []const u8 = &.{},
+    notes: []const []const u8 = &.{},
+    deprecated: bool = false,
     filename: []const u8,
     options: std.StringHashMap(Option),
 };
@@ -35,6 +43,9 @@ pub const DocsLibrary = struct {
     /// Short-name / FQCN → catalog description. Keys and values owned by `arena`.
     catalog: std.StringHashMap(CatalogEntry),
     modules: std.StringHashMap(Module),
+    /// All module FQCNs discovered on disk (builtin + collections + redirects).
+    /// Used for completion; keys are owned by `arena`.
+    module_fqcns: std.StringHashMap(void),
     arena: std.heap.ArenaAllocator,
     ready: bool = false,
     /// Guards `catalog` and `modules`. Held only while mutating/reading the
@@ -50,6 +61,7 @@ pub const DocsLibrary = struct {
             .ansible_doc = ansible_doc,
             .catalog = std.StringHashMap(CatalogEntry).init(allocator),
             .modules = std.StringHashMap(Module).init(allocator),
+            .module_fqcns = std.StringHashMap(void).init(allocator),
             .arena = std.heap.ArenaAllocator.init(allocator),
         };
     }
@@ -59,7 +71,23 @@ pub const DocsLibrary = struct {
         var it = self.modules.iterator();
         while (it.next()) |e| e.value_ptr.options.deinit();
         self.modules.deinit();
+        self.module_fqcns.deinit();
         self.arena.deinit();
+    }
+
+    /// Scan installed collections and redirect routes for module FQCNs.
+    pub fn scanModuleIndex(self: *DocsLibrary) void {
+        var index = @import("module_index.zig").Index.init(self.allocator, self.runner);
+        defer index.deinit();
+        index.scan();
+        const a = self.arena.allocator();
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        var it = index.fqcns.iterator();
+        while (it.next()) |e| {
+            const key = a.dupe(u8, e.key_ptr.*) catch continue;
+            self.module_fqcns.put(key, {}) catch continue;
+        }
     }
 
     pub fn loadCatalog(self: *DocsLibrary) !void {
@@ -140,6 +168,13 @@ pub const DocsLibrary = struct {
         return self.catalog.count();
     }
 
+    /// Fast, non-fetching check for a known module FQCN.
+    pub fn hasModuleName(self: *DocsLibrary, name: []const u8) bool {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        return self.module_fqcns.contains(name) or self.catalog.contains(name);
+    }
+
     fn fetchOne(self: *DocsLibrary, name: []const u8) !void {
         const argv = [_][]const u8{ self.ansible_doc, "--json", "-t", "module", name };
         const result = try self.runner.run(self.allocator, &argv);
@@ -177,7 +212,6 @@ pub const DocsLibrary = struct {
         while (it.next()) |e| {
             const doc = json_util.field(e.value_ptr.*, "doc") orelse continue;
             const filename = json_util.string(doc, "filename") orelse "";
-            const desc = descriptionOf(doc) orelse "";
             var options = std.StringHashMap(Option).init(self.allocator);
             if (json_util.object(doc, "options")) |opts| {
                 var oi = opts.iterator();
@@ -189,13 +223,19 @@ pub const DocsLibrary = struct {
                         .type = try a.dupe(u8, json_util.string(opt.value_ptr.*, "type") orelse ""),
                         .required = json_util.boolean(opt.value_ptr.*, "required") orelse false,
                         .suboptions = try parseSuboptions(a, opt.value_ptr.*),
+                        .default = try defaultString(a, opt.value_ptr.*),
+                        .elements = try a.dupe(u8, json_util.string(opt.value_ptr.*, "elements") orelse ""),
                     });
                 }
             }
             const stored_name = try a.dupe(u8, e.key_ptr.*);
             try self.modules.put(stored_name, .{
                 .name = stored_name,
-                .description = try a.dupe(u8, desc),
+                .description = try a.dupe(u8, shortDescriptionOf(doc) orelse ""),
+                .long_description = try stringList(a, json_util.field(doc, "description") orelse Value.null),
+                .requirements = try stringList(a, json_util.field(doc, "requirements") orelse Value.null),
+                .notes = try stringList(a, json_util.field(doc, "notes") orelse Value.null),
+                .deprecated = json_util.field(doc, "deprecated") != null,
                 .filename = try a.dupe(u8, filename),
                 .options = options,
             });
@@ -214,9 +254,52 @@ fn parseSuboptions(a: Allocator, opt: Value) ![]const Option {
             .type = try a.dupe(u8, json_util.string(e.value_ptr.*, "type") orelse ""),
             .required = json_util.boolean(e.value_ptr.*, "required") orelse false,
             .suboptions = try parseSuboptions(a, e.value_ptr.*),
+            .default = try defaultString(a, e.value_ptr.*),
+            .elements = try a.dupe(u8, json_util.string(e.value_ptr.*, "elements") orelse ""),
         });
     }
     return try list.toOwnedSlice(a);
+}
+
+/// Coerce a string-or-list JSON value into a list of strings.
+fn stringList(a: Allocator, v: Value) ![]const []const u8 {
+    switch (v) {
+        .array => |arr| {
+            var list = std.ArrayList([]const u8).empty;
+            for (arr.items) |item| {
+                switch (item) {
+                    .string => |s| try list.append(a, try a.dupe(u8, s)),
+                    else => {},
+                }
+            }
+            return try list.toOwnedSlice(a);
+        },
+        .string => |s| {
+            const list = try a.alloc([]const u8, 1);
+            list[0] = try a.dupe(u8, s);
+            return list;
+        },
+        else => return &.{},
+    }
+}
+
+/// Render an option's default value as a string, or null when absent.
+fn defaultString(a: Allocator, opt: Value) !?[]const u8 {
+    const d = json_util.field(opt, "default") orelse return null;
+    return switch (d) {
+        .null => null,
+        .string => |s| try a.dupe(u8, s),
+        .bool => |b| if (b) "true" else "false",
+        .integer => |i| try std.fmt.allocPrint(a, "{d}", .{i}),
+        .float => |f| try std.fmt.allocPrint(a, "{d}", .{f}),
+        else => try std.json.Stringify.valueAlloc(a, d, .{}),
+    };
+}
+
+/// Prefer `short_description` for modules; fall back to `description`.
+fn shortDescriptionOf(v: Value) ?[]const u8 {
+    if (json_util.string(v, "short_description")) |s| return s;
+    return descriptionOf(v);
 }
 
 fn descriptionOf(v: Value) ?[]const u8 {

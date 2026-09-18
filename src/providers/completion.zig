@@ -28,7 +28,22 @@ pub fn complete(self: *Server, a: Allocator, params: Value) !Value {
             try addPlayWithoutTask(&items, a);
         }
         const modules = yaml.options.providedModuleNames(arena, path) catch &.{};
-        if (modules.len == 0) {
+        // Only treat a provided key as a module when it actually resolves;
+        // an incomplete key like `ansible.builtin.` should still get module
+        // completions (matching upstream's `findProvidedModule`).
+        var has_module = false;
+        for (modules) |n| {
+            if (self.docs.hasModuleName(n)) {
+                has_module = true;
+                break;
+            }
+            const builtin = std.fmt.allocPrint(arena, "ansible.builtin.{s}", .{n}) catch continue;
+            if (self.docs.hasModuleName(builtin)) {
+                has_module = true;
+                break;
+            }
+        }
+        if (!has_module) {
             try addKeywords(&items, a, &[_][]const u8{"block"}, 14);
             try addModules(self, &items, a);
         }
@@ -150,15 +165,18 @@ fn addPlayWithoutTask(items: *std.json.Array, a: Allocator) !void {
 }
 
 fn addModules(self: *Server, items: *std.json.Array, a: Allocator) !void {
-    var it = self.docs.catalog.iterator();
-    var n: usize = 0;
+    var it = self.docs.module_fqcns.iterator();
     while (it.next()) |e| {
-        if (n >= 500) break;
-        n += 1;
+        const fqcn = e.key_ptr.*;
         var item = json_util.obj(a);
-        try item.put("label", json_util.str(e.key_ptr.*));
+        try item.put("label", json_util.str(fqcn));
         try item.put("kind", json_util.num(7)); // class
-        try item.put("detail", json_util.str(e.value_ptr.description));
+        // detail is the namespace.collection prefix
+        if (std.mem.lastIndexOfScalar(u8, fqcn, '.')) |dot| {
+            if (std.mem.lastIndexOfScalar(u8, fqcn[0..dot], '.')) |dot2| {
+                try item.put("detail", json_util.str(fqcn[0..dot2]));
+            }
+        }
         try items.append(.{ .object = item });
     }
 }

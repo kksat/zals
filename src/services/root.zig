@@ -7,6 +7,8 @@ pub const regex = @import("regex.zig");
 pub const docs_cache = @import("docs_cache.zig");
 pub const docs_service = @import("docs_service.zig");
 pub const DocsService = docs_service.DocsService;
+pub const module_index = @import("module_index.zig");
+pub const markup = @import("markup.zig");
 
 test {
     @import("std").testing.refAllDecls(@This());

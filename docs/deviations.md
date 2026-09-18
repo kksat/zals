@@ -32,7 +32,6 @@ what differs, why, and whether it is expected to be permanent.
 | 13 | JSON Schema `pattern` uses a **built-in ECMA-262 subset regex engine**, not a full regex library. | Covers the patterns in the bundled schemas; unsupported constructs are treated as non-matching. See [ADR-0005](adr/0005-json-schema-validation-in-zig.md). | Maybe |
 | 14 | Parsing, linting, and schema validation still run on the **main thread**; the pool is used for docs prefetch and cache writes. | Keeps validation synchronous and deterministic; the docs path is the blocking one. See [ADR-0011](adr/0011-threading-topology.md). | Maybe |
 | 15 | Docs catalog is loaded on `initialized` (from an on-disk cache when warm); full docs are prefetched in the background and cached. | Implements the hybrid strategy. See [ADR-0008](adr/0008-hybrid-docs-loading.md). | No |
-| 16 | Module completion offers the `ansible-doc -l` catalog only, not modules discovered by scanning installed collections. | Upstream scans the collections path and includes redirect routes; zals uses the catalog. See [ADR-0007](adr/0007-module-docs-via-ansible-doc.md). | Maybe |
 
 ## Adding an entry
 

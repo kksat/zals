@@ -6,6 +6,7 @@ const Value = std.json.Value;
 const json_util = @import("../lsp/json_util.zig");
 const Server = @import("../lsp/server.zig").Server;
 const yaml = @import("../yaml/root.zig");
+const markup = @import("../services/markup.zig");
 const util = @import("util.zig");
 
 pub fn hover(self: *Server, a: Allocator, params: Value) !Value {
@@ -29,7 +30,7 @@ pub fn hover(self: *Server, a: Allocator, params: Value) !Value {
         } else {
             const collections = yaml.collections.getDeclaredCollections(arena, path) catch &.{};
             const mod = self.docs.findModuleInContext(arena, name, collections) orelse return Value.null;
-            text = try std.fmt.allocPrint(a, "**{s}**\n\n{s}", .{ mod.name, mod.description });
+            text = try markup.formatModule(a, mod);
         }
     } else if (optionHover(self, a, arena, path, name)) |t| {
         text = t;
@@ -42,7 +43,23 @@ pub fn hover(self: *Server, a: Allocator, params: Value) !Value {
     try contents.put("value", json_util.str(text));
     var result = json_util.obj(a);
     try result.put("contents", .{ .object = contents });
+
+    // Range of the hovered key, matching upstream's `getOrigRange`.
+    const key_node = path[path.len - 1];
+    const start = cur.doc.positionAt(key_node.start);
+    const end = cur.doc.positionAt(key_node.end);
+    var range = json_util.obj(a);
+    try range.put("start", try positionValue(a, start));
+    try range.put("end", try positionValue(a, end));
+    try result.put("range", .{ .object = range });
     return .{ .object = result };
+}
+
+fn positionValue(a: Allocator, p: @import("../lsp/types.zig").Position) !Value {
+    var o = json_util.obj(a);
+    try o.put("line", json_util.num(p.line));
+    try o.put("character", json_util.num(p.character));
+    return .{ .object = o };
 }
 
 fn optionHover(self: *Server, a: Allocator, arena: Allocator, path: []*yaml.Node, name: []const u8) ?[]const u8 {
@@ -51,5 +68,5 @@ fn optionHover(self: *Server, a: Allocator, arena: Allocator, path: []*yaml.Node
     const module_key = util.currentKey(traced.path) orelse return null;
     const mod = self.docs.findModuleInContext(arena, module_key, collections) orelse return null;
     const opt = mod.options.get(name) orelse return null;
-    return std.fmt.allocPrint(a, "**{s}** (`{s}`)\n\n{s}", .{ opt.name, opt.type, opt.description }) catch null;
+    return markup.formatOption(a, opt) catch null;
 }

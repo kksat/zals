@@ -51,6 +51,9 @@ pub const DocsService = struct {
         if (!loaded) {
             self.lib.loadCatalog() catch {};
         }
+        // Discover module FQCNs on disk for completion (builtin + collections +
+        // redirects). This is independent of the ansible-doc catalog.
+        self.lib.scanModuleIndex();
 
         self.prefetch_task = .{ .func = prefetchEntry, .ctx = self };
         self.pool.submit(&self.prefetch_task) catch {};
