@@ -5,6 +5,7 @@ const Allocator = std.mem.Allocator;
 const Value = std.json.Value;
 const json_util = @import("../lsp/json_util.zig");
 const types = @import("../lsp/types.zig");
+const regex = @import("regex.zig");
 
 pub const Diagnostic = struct {
     message: []const u8,
@@ -66,6 +67,15 @@ fn walk(arena: Allocator, out: *std.array_list.Managed(Diagnostic), schema: Valu
         if (json_util.integer(sch, "minLength")) |min| {
             if (instance.string.len < @as(usize, @intCast(min))) {
                 try out.append(.{ .message = "Incorrect type. Expected \"string\"." });
+            }
+        }
+        if (json_util.string(sch, "pattern")) |pat| {
+            const ok = regex.matches(arena, pat, instance.string) catch |err| switch (err) {
+                error.InvalidPattern => true,
+                error.OutOfMemory => return err,
+            };
+            if (!ok) {
+                try out.append(.{ .message = try std.fmt.allocPrint(arena, "String does not match pattern \"{s}\".", .{pat}) });
             }
         }
     }
@@ -176,4 +186,24 @@ test "required and type" {
     defer arena.deinit();
     const diags = try validate(arena.allocator(), parsed_schema.value, parsed_inst.value);
     try std.testing.expect(diags.len >= 1);
+}
+
+test "pattern keyword" {
+    const allocator = std.testing.allocator;
+    const schema_json =
+        \\{"type":"object","properties":{"name":{"type":"string","pattern":"^[a-z][a-z0-9_]*$"}}}
+    ;
+    const parsed_schema = try std.json.parseFromSlice(Value, allocator, schema_json, .{});
+    defer parsed_schema.deinit();
+
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    const good = try std.json.parseFromSlice(Value, allocator, "{\"name\":\"my_var1\"}", .{});
+    defer good.deinit();
+    try std.testing.expectEqual(@as(usize, 0), (try validate(arena.allocator(), parsed_schema.value, good.value)).len);
+
+    const bad = try std.json.parseFromSlice(Value, allocator, "{\"name\":\"Bad-Name\"}", .{});
+    defer bad.deinit();
+    try std.testing.expectEqual(@as(usize, 1), (try validate(arena.allocator(), parsed_schema.value, bad.value)).len);
 }

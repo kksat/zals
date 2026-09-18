@@ -25,6 +25,11 @@ Diagnostics always use the **document root range**, and only four custom message
 are produced: `required`, `additionalProperties`, `type`, and `enum`. This
 matches upstream's observable behavior.
 
+`pattern` is evaluated by a small in-tree ECMA-262 subset regex engine
+(`services/regex.zig`): literals, `.`, classes, anchors, quantifiers, groups,
+and alternation. Invalid patterns are treated as non-matching rather than
+errors.
+
 ## Consequences
 
 - No C or JS dependency for validation.

@@ -29,7 +29,7 @@ what differs, why, and whether it is expected to be permanent.
 | 9 | Schema diagnostics always use the **document root range**. | Matches upstream's observable behavior; avoids mapping schema paths to YAML ranges. See [ADR-0005](adr/0005-json-schema-validation-in-zig.md). | Yes |
 | 11 | YAML is parsed by **tree-sitter-yaml** (vendored C) by default, with an indent-based subset parser as fallback. | tree-sitter is the intended backend; the subset parser ships as a safety net. See [ADR-0004](adr/0004-yaml-parsing-tree-sitter.md). | No |
 | 12 | Schema snapshot is **committed** under `vendor/schemas/`, not fetched at build. | Offline clones; pin is ansible-lint v25.8.2. See [ADR-0006](adr/0006-bundle-schema-snapshot.md). | Maybe |
-| 13 | JSON Schema `pattern` is ignored (no regex engine). | Zig 0.15 std has no regex; other subset keywords are implemented. See [ADR-0005](adr/0005-json-schema-validation-in-zig.md). | Until regex |
+| 13 | JSON Schema `pattern` uses a **built-in ECMA-262 subset regex engine**, not a full regex library. | Covers the patterns in the bundled schemas; unsupported constructs are treated as non-matching. See [ADR-0005](adr/0005-json-schema-validation-in-zig.md). | Maybe |
 | 14 | Main thread does all work; no worker/docs/cache-writer pool yet. | Mutexed stdio writes are enough for v1 correctness. See [ADR-0011](adr/0011-threading-topology.md). | Until threading |
 | 15 | Docs catalog is loaded on `initialized`; no background prefetch or on-disk cache. | Lazy `ansible-doc --json` on hover/definition. See [ADR-0008](adr/0008-hybrid-docs-loading.md). | Until cache-writer |
 
