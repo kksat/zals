@@ -1,0 +1,15 @@
+# Zig build artifacts
+zig-out/
+.zig-cache/
+zig-cache/
+
+# OS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# pi agent state
+.pi/
