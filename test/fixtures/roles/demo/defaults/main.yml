@@ -1,0 +1,5 @@
+---
+# Role defaults: lowest precedence.
+app_name: demo
+app_port: 8080
+app_debug: false

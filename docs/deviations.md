@@ -33,6 +33,15 @@ what differs, why, and whether it is expected to be permanent.
 | 14 | Parsing, linting, and schema validation still run on the **main thread**; the pool is used for docs prefetch and cache writes. | Keeps validation synchronous and deterministic; the docs path is the blocking one. See [ADR-0011](adr/0011-threading-topology.md). | Maybe |
 | 15 | Docs catalog is loaded on `initialized` (from an on-disk cache when warm); full docs are prefetched in the background and cached. | Implements the hybrid strategy. See [ADR-0008](adr/0008-hybrid-docs-loading.md). | No |
 
+## Extensions beyond upstream
+
+These are features `zals` adds that upstream does not have. They are additions
+on top of parity, not deviations from it.
+
+| # | Feature | Rationale |
+| --- | --- | --- |
+| 16 | Find-references and go-to-definition for variables. | Post-parity feature. See [ADR-0024](adr/0024-variable-go-to-definition.md) and [ADR-0025](adr/0025-variable-references.md). |
+
 ## Adding an entry
 
 When you make a deliberate behavioral choice that differs from upstream, add a

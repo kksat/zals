@@ -22,9 +22,15 @@ Tier 1 — the client-agnostic language server surface:
 - Semantic tokens (syntax highlighting)
 - Hover (keyword / module / option documentation)
 - Completion (+ resolve)
-- Go to definition (jump to module source)
+- Go to definition (module source, and variable definitions)
+- Find references (variables, within the enclosing role or playbook)
 - Validation: `ansible-lint`, `ansible-playbook --syntax-check` fallback, and
   JSON-schema validation of Ansible metadata files
+
+Variable navigation (find-references and variable go-to-definition) is a
+post-parity extension; upstream has no counterpart. See
+[ADR-0024](docs/adr/0024-variable-go-to-definition.md) and
+[ADR-0025](docs/adr/0025-variable-references.md).
 
 Out of scope for v1: the VS Code extension, inventory/metadata notifications,
 and execution environments.

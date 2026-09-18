@@ -1,0 +1,16 @@
+---
+- name: Demo play
+  hosts: all
+  vars:
+    play_var: from-play
+  vars_prompt:
+    - name: prompted_var
+      prompt: "Enter a value"
+      private: false
+  roles:
+    - role: demo
+      app_port: 7070
+  tasks:
+    - name: Use play and role vars
+      ansible.builtin.debug:
+        msg: "{{ play_var }} {{ prompted_var }} {{ app_name }}"

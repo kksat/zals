@@ -1,4 +1,4 @@
-//! Go to definition: jump to the module source file.
+//! Go to definition: module source files and variable definitions.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -7,8 +7,37 @@ const json_util = @import("../lsp/json_util.zig");
 const Server = @import("../lsp/server.zig").Server;
 const util = @import("util.zig");
 const yaml = @import("../yaml/root.zig");
+const variables = @import("../variables/root.zig");
+const vs = @import("variable_source.zig");
 
 pub fn definition(self: *Server, a: Allocator, params: Value) !Value {
+    if (try variableDefinition(self, a, params)) |result| return result;
+    return moduleDefinition(self, a, params);
+}
+
+/// Jump from a variable reference to its visible definitions (ADR-0024).
+fn variableDefinition(self: *Server, a: Allocator, params: Value) !?Value {
+    const td = json_util.field(params, "textDocument") orelse return null;
+    const uri = json_util.string(td, "uri") orelse return null;
+    const pos_v = json_util.field(params, "position") orelse return null;
+    const pos = json_util.position(pos_v) orelse return null;
+    const doc = self.documents.get(uri) orelse return null;
+    const offset = doc.offsetAt(pos) orelse return null;
+
+    var src = vs.ServerSource{ .server = self };
+    var index = variables.Index.init(a, src.source());
+    const cur = (try index.occurrenceAt(a, uri, offset)) orelse return null;
+    if (cur.kind != .reference) return null;
+
+    const defs = try index.definitions(a, uri, cur.name);
+    if (defs.len == 0) return null;
+
+    var arr = std.json.Array.init(a);
+    for (defs) |d| try arr.append(try vs.location(a, self, &index, d));
+    return .{ .array = arr };
+}
+
+fn moduleDefinition(self: *Server, a: Allocator, params: Value) !Value {
     var cur = util.parseAt(self, a, params) orelse return Value.null;
     defer cur.forest.deinit();
     const name = util.currentKey(cur.path) orelse return Value.null;

@@ -19,7 +19,8 @@ The v1 target is **feature parity with upstream's Tier 1 surface**:
 | Semantic tokens | full-document token stream |
 | Hover | keywords, modules, module options |
 | Completion (+ resolve) | modules, options, values, keywords |
-| Go to definition | jump to the module's source file |
+| Go to definition | module source files, and variable definitions |
+| Find references | variables, within the enclosing role or playbook |
 | Validation | `ansible-lint`, `ansible-playbook --syntax-check` fallback, JSON-schema validation |
 
 Out of scope for v1 (Tier 2/3): the VS Code extension, inventory and metadata
@@ -62,7 +63,8 @@ it in this list.
 | Layer | Responsibility |
 | --- | --- |
 | `src/lsp/` | JSON-RPC framing, message types, capability negotiation, dispatch |
-| `src/providers/` | One module per LSP feature (semantic tokens, hover, completion, definition, validation) |
+| `src/providers/` | One module per LSP feature (semantic tokens, hover, completion, definition, references, validation) |
+| `src/variables/` | Jinja scanning, definition-site detection, role/playbook scope, the variable index |
 | `src/services/` | Docs library, schema cache/service/validator, validation manager, config |
 | `src/yaml/` | YAML parser interface, tree-sitter backend, semantic DOM, path utilities |
 | `src/exec/` | Command-runner interface and POSIX backend |
@@ -90,10 +92,23 @@ retains source ranges. Path utilities mirror upstream's `yamlAst` helpers:
 `getPathAt`, `AncestryBuilder`, `isTaskParam`, `isPlayParam`, `isBlockParam`,
 `isModuleParam`, and friends.
 
-The DOM is the shared substrate for semantic tokens, hover, completion, and
-definition.
+The DOM is the shared substrate for semantic tokens, hover, completion,
+definition, and variable references.
 
-## 5. Documentation data
+## 5. Variables
+
+Find-references and go-to-definition for variables share one model
+([ADR-0024](adr/0024-variable-go-to-definition.md),
+[ADR-0025](adr/0025-variable-references.md)). The `src/variables/` layer scans
+Jinja expressions and bare-expression keys for root identifiers, detects
+definition sites over the DOM, and resolves the enclosing role or playbook
+scope. The scope is the role's conventional directories or the playbook file,
+plus one level of `vars_files`/`include_vars` targets. References is name-based;
+go-to-definition is scope-aware and ranks visible definitions by precedence.
+Files are read through a `FileSource` seam (open documents first, then disk) so
+the model is testable in isolation.
+
+## 6. Documentation data
 
 Module documentation comes from `ansible-doc --json`, behind `DocsSource`.
 
@@ -105,7 +120,7 @@ Module documentation comes from `ansible-doc --json`, behind `DocsSource`.
 The cache is keyed by `ansible_version + config_fingerprint` and shared across
 workspace folders.
 
-## 6. Validation
+## 7. Validation
 
 Validation has three sources, merged into one diagnostic set per document:
 
@@ -120,7 +135,7 @@ the edited lines using a **sorted array** (upstream uses an interval tree).
 Multi-file diagnostics are ref-counted. `autoFixOnSave` is supported. Progress
 is reported best-effort via `$/progress`.
 
-## 7. Protocol and runtime
+## 8. Protocol and runtime
 
 - **Transport:** hand-rolled JSON-RPC over stdio using `std.json`.
 - **Sync:** incremental (`TextDocumentSyncKind.Incremental`); position encoding
@@ -131,32 +146,32 @@ is reported best-effort via `$/progress`.
   state; the debug allocator in tests.
 - **Workspace:** multi-root with per-folder contexts and a shared docs cache.
 
-## 8. Configuration
+## 9. Configuration
 
 Settings use upstream's exact names and defaults for the Tier 1 subset, so an
 existing `ansible.*` configuration works unchanged. See
 [ADR-0017](adr/0017-settings-compatibility.md).
 
-## 9. Custom messages
+## 10. Custom messages
 
 Three upstream custom messages are retained: `ansible/errorMessage`,
 `ansible/docsLibraryReady`, and `ansible/refreshConfiguration`. The Tier 2
 messages (`resync/ansible-inventory`, `update/ansible-metadata`) are dropped.
 
-## 10. Build and platforms
+## 11. Build and platforms
 
 - Zig **0.15.1** (pinned via `build.zig.zon`).
 - Linux and macOS first; Windows later.
 - Static binaries where feasible.
 - Schemas are materialized into `vendor/schemas/` at build time.
 
-## 11. Testing
+## 12. Testing
 
 - Upstream unit fixtures are ported and run under `zig build test`.
 - A dev-only **differential harness** (`tools/differential/`) runs the same
   inputs through upstream ALS and `zals` and diffs the results.
 - Behavioral differences are documented in `docs/deviations.md`.
 
-## 12. License
+## 13. License
 
 GPL-3.0-only. See [ADR-0020](adr/0020-license.md).

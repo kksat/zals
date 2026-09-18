@@ -17,6 +17,7 @@ pub const workspace = struct {
 };
 pub const services = @import("services/root.zig");
 pub const providers = @import("providers/root.zig");
+pub const variables = @import("variables/root.zig");
 pub const concurrency = @import("concurrency/root.zig");
 
 test {
@@ -35,5 +36,6 @@ test {
     _ = @import("yaml/jsonify.zig");
     _ = @import("services/schema.zig");
     _ = @import("services/schema_service.zig");
+    _ = @import("variables/root.zig");
     _ = @import("concurrency/pool.zig");
 }

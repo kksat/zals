@@ -1,0 +1,17 @@
+---
+galaxy_info:
+  author: zals
+  description: Demo role
+  license: GPL-3.0-only
+  min_ansible_version: "2.15"
+
+argument_specs:
+  main:
+    short_description: Demo entry point
+    options:
+      app_name:
+        type: str
+        description: Name of the application.
+      app_port:
+        type: int
+        description: Port the application listens on.

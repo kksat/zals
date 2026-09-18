@@ -1,0 +1,22 @@
+---
+- name: Show the app
+  ansible.builtin.debug:
+    msg: "{{ app_name }} listening on {{ app_port }} as {{ app_user }}"
+  when: app_debug | bool
+
+- name: Register a fact
+  ansible.builtin.command: /bin/true
+  register: app_result
+
+- name: Use the fact
+  ansible.builtin.debug:
+    msg: "{{ app_result.rc }}"
+
+- name: Loop with a custom var
+  ansible.builtin.debug:
+    msg: "{{ entry }}"
+  loop:
+    - one
+    - two
+  loop_control:
+    loop_var: entry

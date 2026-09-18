@@ -13,7 +13,7 @@ endif
 
 ARGS ?=
 
-.PHONY: build test run fmt clean parity
+.PHONY: build test run fmt clean parity smoke
 
 build:
 	zig build
@@ -25,6 +25,11 @@ test:
 # upstream package (see test/parity/compare.py) and a built zals binary.
 parity: build
 	python3 test/parity/compare.py $(ARGS)
+
+# Exercise the references and definition providers over stdio against the
+# committed fixtures.
+smoke: build
+	python3 test/smoke_references.py
 
 run: build
 	./zig-out/bin/zals $(ARGS)

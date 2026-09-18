@@ -23,6 +23,8 @@ pub fn handleRequest(self: *Server, a: Allocator, id: Value, method: []const u8,
         return self.sendResult(a, id, try providers.hover.hover(self, a, params));
     if (std.mem.eql(u8, method, "textDocument/definition"))
         return self.sendResult(a, id, try providers.definition.definition(self, a, params));
+    if (std.mem.eql(u8, method, "textDocument/references"))
+        return self.sendResult(a, id, try providers.references.references(self, a, params));
     if (std.mem.eql(u8, method, "textDocument/semanticTokens/full"))
         return self.sendResult(a, id, try providers.semantic_tokens.full(self, a, params));
     if (std.mem.eql(u8, method, "ansible/refreshConfiguration")) {

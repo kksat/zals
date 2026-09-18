@@ -1,0 +1,4 @@
+---
+# Role vars: higher precedence than defaults.
+app_port: 9090
+app_user: deploy

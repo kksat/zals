@@ -28,6 +28,8 @@ Each ADR captures one decision, its context, and its consequences. Statuses are
 | [0021](0021-testing-and-parity.md) | Testing and parity | Accepted |
 | [0022](0022-repository-structure.md) | Repository structure | Accepted |
 | [0023](0023-implementation-order.md) | Implementation order | Accepted |
+| [0024](0024-variable-go-to-definition.md) | Variable go-to-definition | Accepted |
+| [0025](0025-variable-references.md) | Variable references | Accepted |
 
 ## Template
 
