@@ -63,6 +63,22 @@ pub const Document = struct {
     }
 };
 
+/// A parsed YAML source: an arena owning the nodes, the source text, and one
+/// root node per YAML document. Produced by any `YamlParser` backend.
+pub const Forest = struct {
+    arena: std.heap.ArenaAllocator,
+    text: []const u8,
+    roots: []*Node,
+
+    pub fn deinit(self: *Forest) void {
+        self.arena.deinit();
+    }
+
+    pub fn allocator(self: *Forest) Allocator {
+        return self.arena.allocator();
+    }
+};
+
 /// Keys of a map node, in order, for scalar keys only.
 pub fn mapKeys(allocator: Allocator, map: *const Node) ![]const []const u8 {
     var list = std.array_list.Managed([]const u8).init(allocator);

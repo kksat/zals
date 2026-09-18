@@ -1,8 +1,38 @@
 const std = @import("std");
 
+const tree_sitter_c = [_][]const u8{
+    "vendor/tree-sitter/src/alloc.c",
+    "vendor/tree-sitter/src/get_changed_ranges.c",
+    "vendor/tree-sitter/src/language.c",
+    "vendor/tree-sitter/src/lexer.c",
+    "vendor/tree-sitter/src/node.c",
+    "vendor/tree-sitter/src/parser.c",
+    "vendor/tree-sitter/src/query.c",
+    "vendor/tree-sitter/src/stack.c",
+    "vendor/tree-sitter/src/subtree.c",
+    "vendor/tree-sitter/src/tree.c",
+    "vendor/tree-sitter/src/tree_cursor.c",
+    "vendor/tree-sitter/src/wasm_store.c",
+    "vendor/tree-sitter-yaml/src/parser.c",
+    "vendor/tree-sitter-yaml/src/scanner.c",
+    "vendor/tree-sitter-yaml/src/schema.core.c",
+};
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+
+    // Vendored tree-sitter runtime + tree-sitter-yaml grammar (ADR-0004).
+    const ts = b.addLibrary(.{
+        .name = "tree_sitter",
+        .root_module = b.createModule(.{ .target = target, .optimize = optimize }),
+        .linkage = .static,
+    });
+    ts.addCSourceFiles(.{ .files = &tree_sitter_c, .flags = &.{"-std=c11"} });
+    ts.addIncludePath(b.path("vendor/tree-sitter/include"));
+    ts.addIncludePath(b.path("vendor/tree-sitter/src"));
+    ts.addIncludePath(b.path("vendor/tree-sitter-yaml/src"));
+    ts.linkLibC();
 
     // Core library: everything except the CLI entry point.
     const schemas = b.createModule(.{
@@ -16,6 +46,9 @@ pub fn build(b: *std.Build) void {
             .{ .name = "schemas", .module = schemas },
         },
     });
+    mod.addIncludePath(b.path("vendor/tree-sitter/include"));
+    mod.addIncludePath(b.path("vendor/tree-sitter/src"));
+    mod.addIncludePath(b.path("vendor/tree-sitter-yaml/src"));
 
     // CLI entry point.
     const exe = b.addExecutable(.{
@@ -29,6 +62,7 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
+    exe.linkLibrary(ts);
     b.installArtifact(exe);
 
     const run_step = b.step("run", "Run the server");
@@ -39,9 +73,11 @@ pub fn build(b: *std.Build) void {
 
     // Tests.
     const mod_tests = b.addTest(.{ .root_module = mod });
+    mod_tests.linkLibrary(ts);
     const run_mod_tests = b.addRunArtifact(mod_tests);
 
     const exe_tests = b.addTest(.{ .root_module = exe.root_module });
+    exe_tests.linkLibrary(ts);
     const run_exe_tests = b.addRunArtifact(exe_tests);
 
     const test_step = b.step("test", "Run unit tests");

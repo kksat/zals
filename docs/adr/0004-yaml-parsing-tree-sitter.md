@@ -23,8 +23,10 @@ and `Pair` nodes that retain source ranges. Path utilities mirror upstream's
 `yamlAst` helpers: `getPathAt`, `AncestryBuilder`, `isTaskParam`, `isPlayParam`,
 `isBlockParam`, `isModuleParam`, and friends.
 
-The parser sits behind a **`YamlParser` interface** so a pure-Zig parser can
-replace it later.
+The parser sits behind a **`YamlParser` interface** (`yaml.Backend`) with two
+backends: the vendored **tree-sitter-yaml** backend (default) and a pure-Zig
+indent-based subset parser used as a fallback. `yaml.parse` dispatches on the
+active backend and falls back to the subset parser if tree-sitter fails.
 
 ## Consequences
 
@@ -38,3 +40,5 @@ replace it later.
   ([ADR-0023](0023-implementation-order.md)).
 - tree-sitter's tree is not a YAML data model; we own the lowering logic and its
   edge cases (anchors, aliases, multi-line scalars, tags).
+- The subset parser remains as a fallback and as a reference for the DOM shape;
+  a parity test asserts both backends agree on block-style YAML.

@@ -16,6 +16,10 @@ fixtures.
   Licensed under the GNU General Public License v3.0.
   The JSON schemas bundled by `zals` originate from this project.
 
+- **tree-sitter** — <https://github.com/tree-sitter/tree-sitter>
+  Copyright (c) 2018 Max Brunsfeld.
+  Licensed under the MIT License. Vendored as a C runtime dependency.
+
 - **tree-sitter-yaml** — <https://github.com/tree-sitter-grammars/tree-sitter-yaml>
   Licensed under the MIT License. Vendored as a C dependency.
 

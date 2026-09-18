@@ -9,19 +9,7 @@ const Allocator = std.mem.Allocator;
 const dom = @import("dom.zig");
 const Node = dom.Node;
 
-pub const Forest = struct {
-    arena: std.heap.ArenaAllocator,
-    text: []const u8,
-    roots: []*Node,
-
-    pub fn deinit(self: *Forest) void {
-        self.arena.deinit();
-    }
-
-    pub fn allocator(self: *Forest) Allocator {
-        return self.arena.allocator();
-    }
-};
+pub const Forest = dom.Forest;
 
 const Line = struct {
     /// Indent of the first non-space character (the `-` if this is a seq item).
@@ -230,7 +218,7 @@ fn parsePair(p: *Parser, line: Line, indent: usize) anyerror!?*Node {
             value = try emptyScalar(p, line.end);
         }
     } else if (after[0] == '|' or after[0] == '>') {
-        value = try parseBlockScalar(p, after_off, after[0], indent);
+        value = try parseBlockScalar(p, after_off, after, indent);
     } else {
         const comment = unquotedHash(after);
         const scalar_text = if (comment) |c| std.mem.trimRight(u8, after[0..c], " \t") else after;
@@ -248,17 +236,22 @@ fn emptyScalar(p: *Parser, at: usize) !*Node {
     return n;
 }
 
-fn parseBlockScalar(p: *Parser, start: usize, ch: u8, parent_indent: usize) !*Node {
-    _ = ch;
+fn parseBlockScalar(p: *Parser, start: usize, header: []const u8, parent_indent: usize) !*Node {
+    const folded = header.len > 0 and header[0] == '>';
+    const strip = std.mem.indexOfScalar(u8, header, '-') != null;
+    const keep = std.mem.indexOfScalar(u8, header, '+') != null;
     var buf = std.array_list.Managed(u8).init(p.arena);
     var end = start;
     while (p.peek()) |line| {
         if (line.indent <= parent_indent and !line.has_dash) break;
-        if (buf.items.len > 0) try buf.append('\n');
+        if (buf.items.len > 0) try buf.append(if (folded) ' ' else '\n');
         try buf.appendSlice(p.text[line.start..line.end]);
         end = line.end;
         p.bump();
     }
+    // Clip chomping keeps a single trailing newline; `-` strips it, `+` keeps all.
+    if (!strip) try buf.append('\n');
+    if (keep) try buf.append('\n');
     const n = try p.allocNode(.scalar, start, end);
     n.value = try buf.toOwnedSlice();
     return n;
