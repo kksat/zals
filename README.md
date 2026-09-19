@@ -41,6 +41,33 @@ and execution environments.
 - Ansible (`ansible`, `ansible-config`, `ansible-doc`)
 - `ansible-lint` (optional; validation falls back to `ansible-playbook --syntax-check`)
 
+## Install
+
+Prebuilt binaries for Linux, macOS, and Windows are attached to every
+[release](https://github.com/kksat/zals/releases).
+
+### Homebrew (macOS and Linux)
+
+```sh
+brew tap kksat/tap
+brew install zals
+```
+
+### pip (Linux, macOS, and Windows)
+
+The [`zals`](https://pypi.org/project/zals/) package is a thin wrapper that
+bundles the binary for your platform:
+
+```sh
+pip install zals
+zals --version
+```
+
+### Direct download
+
+Download `zals-<version>-<target>.tar.gz` (or `.zip` on Windows) from the
+release page and put `zals` on your `PATH`.
+
 ## Build
 
 ```sh
@@ -72,6 +99,33 @@ zals --stdio
 ```
 
 Point any LSP client at the binary with `ansible` as the document language.
+
+## Releasing
+
+Releases are driven by [release-please](https://github.com/googleapis/release-please)
+from [Conventional Commits](https://www.conventionalcommits.org/). Push commits
+to `main`; release-please opens a release PR that bumps the version, updates
+`CHANGELOG.md`, and rewrites the version in `src/main.zig` and `build.zig.zon`.
+Merging that PR creates the `vX.Y.Z` tag and a GitHub release, which triggers the
+release workflow to build and attach the Linux, macOS, and Windows binaries, to
+publish the `zals` Python package to PyPI, and to update the Homebrew tap. See
+[ADR-0026](docs/adr/0026-release-process.md).
+
+To (re)build assets for an existing tag, run the **release** workflow manually
+and pass the tag (for example `v1.0.0`). The current baseline is `1.0.0`, so the
+initial `v1.0.0` release is bootstrapped this way; later releases flow through
+release-please.
+
+Publishing the Homebrew formula requires a `HOMEBREW_TAP_TOKEN` secret with
+write access to the tap repository (default `kksat/homebrew-tap`, overridable
+with the `HOMEBREW_TAP_REPO` repository variable). Without it, the release still
+succeeds and the formula is only rendered in the workflow log.
+
+Publishing to PyPI uses [trusted
+publishing](https://docs.pypi.org/trusted-publishers/): configure a trusted
+publisher for this repository and the `release.yml` workflow. To use an API
+token instead, add `password: ${{ secrets.PYPI_API_TOKEN }}` to the publish step
+in `.github/workflows/release.yml`.
 
 ## License
 

@@ -13,3 +13,11 @@ zig-cache/
 
 # pi agent state
 .pi/
+
+# Python build artifacts
+__pycache__/
+*.py[cod]
+python/build/
+python/dist/
+python/wheelhouse/
+python/src/*.egg-info/

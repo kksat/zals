@@ -28,7 +28,7 @@ pub fn build(b: *std.Build) void {
         .root_module = b.createModule(.{ .target = target, .optimize = optimize }),
         .linkage = .static,
     });
-    ts.addCSourceFiles(.{ .files = &tree_sitter_c, .flags = &.{"-std=c11"} });
+    ts.addCSourceFiles(.{ .files = &tree_sitter_c, .flags = &.{"-std=gnu11"} });
     ts.addIncludePath(b.path("vendor/tree-sitter/include"));
     ts.addIncludePath(b.path("vendor/tree-sitter/src"));
     ts.addIncludePath(b.path("vendor/tree-sitter-yaml/src"));

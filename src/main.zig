@@ -1,7 +1,7 @@
 const std = @import("std");
 const zals = @import("zals");
 
-const version = "0.0.0";
+const version = "1.0.0"; // x-release-please-version
 
 const usage =
     \\Usage: zals [options]
@@ -36,8 +36,8 @@ fn logFn(
     const msg = std.fmt.bufPrint(&buf, level_txt ++ prefix2 ++ format ++ "\n", args) catch blk: {
         break :blk level_txt ++ prefix2 ++ format ++ "\n";
     };
-    const fd = if (log_file) |f| f.handle else std.posix.STDERR_FILENO;
-    _ = std.posix.write(fd, msg) catch {};
+    const fd = if (log_file) |f| f else std.fs.File.stderr();
+    fd.writeAll(msg) catch {};
 }
 
 fn applyLogLevel(level: zals.cli.LogLevel) std.log.Level {
@@ -79,8 +79,8 @@ pub fn main() !void {
     defer if (log_file) |f| f.close();
 
     const transport = zals.lsp.Transport.init(
-        std.fs.File.stdin().handle,
-        std.fs.File.stdout().handle,
+        std.fs.File.stdin(),
+        std.fs.File.stdout(),
     );
     var server = try zals.lsp.Server.init(allocator, transport);
     defer server.deinit();

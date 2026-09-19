@@ -41,7 +41,7 @@ pub const Server = struct {
         const runner = exec.Posix.posixRunner();
         const pool = try concurrency.ThreadPool.init(allocator, 2);
         errdefer pool.deinit();
-        const writer = try Writer.init(allocator, transport.out_fd);
+        const writer = try Writer.init(allocator, transport.out_file);
         errdefer writer.deinit();
 
         var server = Server{

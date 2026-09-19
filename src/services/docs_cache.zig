@@ -4,6 +4,7 @@
 //! Ansible-version fingerprint, so a warm start avoids `ansible-doc` entirely.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 const Value = std.json.Value;
 const docs = @import("docs.zig");
@@ -13,10 +14,21 @@ const json_util = @import("../lsp/json_util.zig");
 pub const format_version = 3;
 
 pub fn cacheDir(allocator: Allocator) ![]u8 {
-    if (std.posix.getenv("XDG_CACHE_HOME")) |x|
-        return std.fs.path.join(allocator, &.{ x, "zals" });
-    if (std.posix.getenv("HOME")) |h|
-        return std.fs.path.join(allocator, &.{ h, ".cache", "zals" });
+    if (builtin.os.tag == .windows) {
+        if (std.process.getEnvVarOwned(allocator, "LOCALAPPDATA")) |base| {
+            defer allocator.free(base);
+            return std.fs.path.join(allocator, &.{ base, "zals", "cache" });
+        } else |_| {}
+    } else {
+        if (std.process.getEnvVarOwned(allocator, "XDG_CACHE_HOME")) |x| {
+            defer allocator.free(x);
+            return std.fs.path.join(allocator, &.{ x, "zals" });
+        } else |_| {}
+        if (std.process.getEnvVarOwned(allocator, "HOME")) |h| {
+            defer allocator.free(h);
+            return std.fs.path.join(allocator, &.{ h, ".cache", "zals" });
+        } else |_| {}
+    }
     return error.NoCacheDir;
 }
 

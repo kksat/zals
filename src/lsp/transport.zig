@@ -7,20 +7,20 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 pub const Transport = struct {
-    in_fd: std.posix.fd_t,
-    out_fd: std.posix.fd_t,
+    in_file: std.fs.File,
+    out_file: std.fs.File,
     in_buf: [16 * 1024]u8 = undefined,
     in_len: usize = 0,
     in_pos: usize = 0,
     write_mutex: std.Thread.Mutex = .{},
 
-    pub fn init(in_fd: std.posix.fd_t, out_fd: std.posix.fd_t) Transport {
-        return .{ .in_fd = in_fd, .out_fd = out_fd };
+    pub fn init(in_file: std.fs.File, out_file: std.fs.File) Transport {
+        return .{ .in_file = in_file, .out_file = out_file };
     }
 
     fn fill(self: *Transport) !void {
         if (self.in_pos < self.in_len) return;
-        const n = std.posix.read(self.in_fd, &self.in_buf) catch |err| switch (err) {
+        const n = self.in_file.read(&self.in_buf) catch |err| switch (err) {
             error.WouldBlock => return error.WouldBlock,
             else => return err,
         };
@@ -89,7 +89,7 @@ pub const Transport = struct {
     fn writeAll(self: *Transport, bytes: []const u8) !void {
         var written: usize = 0;
         while (written < bytes.len) {
-            written += std.posix.write(self.out_fd, bytes[written..]) catch |err| switch (err) {
+            written += self.out_file.write(bytes[written..]) catch |err| switch (err) {
                 error.WouldBlock => continue,
                 else => return err,
             };
@@ -109,14 +109,16 @@ pub const Transport = struct {
 
 test "frame round trip" {
     const allocator = std.testing.allocator;
-    const fds = try std.posix.pipe();
-    defer std.posix.close(fds[0]);
-    defer std.posix.close(fds[1]);
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const file = try tmp.dir.createFile("frame", .{ .read = true });
+    defer file.close();
 
-    var writer = Transport.init(fds[1], fds[1]);
+    var writer = Transport.init(file, file);
     try writer.writeMessage("{\"jsonrpc\":\"2.0\"}");
+    try file.seekTo(0);
 
-    var reader = Transport.init(fds[0], fds[0]);
+    var reader = Transport.init(file, file);
     const msg = (try reader.readMessage(allocator)).?;
     defer allocator.free(msg);
     try std.testing.expectEqualStrings("{\"jsonrpc\":\"2.0\"}", msg);

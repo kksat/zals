@@ -1,0 +1,208 @@
+name: release
+
+# Triggered when release-please publishes a GitHub release (which also creates
+# the version tag), or manually to (re)build assets for an existing tag.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build and attach binaries to (e.g. v1.0.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  ZIG_VERSION: "0.15.1"
+  TAG: ${{ github.event.release.tag_name || github.event.inputs.tag }}
+
+jobs:
+  build:
+    name: build ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-linux
+            archive: tar.gz
+          - target: aarch64-linux
+            archive: tar.gz
+          - target: x86_64-macos
+            archive: tar.gz
+          - target: aarch64-macos
+            archive: tar.gz
+          - target: x86_64-windows
+            archive: zip
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      # Zig cross-compiles every target from a single Linux runner, so no
+      # per-OS runner matrix is needed.
+      - name: Build
+        run: zig build -Doptimize=ReleaseSafe -Dtarget=${{ matrix.target }}
+
+      - name: Package
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          name="zals-${version}-${{ matrix.target }}"
+          mkdir -p dist
+          if [ "${{ matrix.archive }}" = "zip" ]; then
+            cp zig-out/bin/zals.exe dist/zals.exe
+            (cd dist && zip -q "${name}.zip" zals.exe)
+            rm dist/zals.exe
+          else
+            cp zig-out/bin/zals dist/zals
+            tar -C dist -czf "dist/${name}.tar.gz" zals
+            rm dist/zals
+          fi
+          ls -la dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: publish release assets
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Attach binaries to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          files: dist/*
+          fail_on_unmatched_files: true
+
+  pypi:
+    name: publish python package
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tooling
+        run: python -m pip install --upgrade build
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      # Each wheel bundles the binary for one platform and is tagged for it.
+      - name: Build wheels
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          mkdir -p wheelhouse
+          work="$(mktemp -d)"
+          trap 'rm -rf "$work"' EXIT
+
+          build_wheel() {
+            local target="$1" plat="$2" archive="$3" bin
+            rm -rf "$work/pkg" python/build python/src/*.egg-info
+            mkdir -p "$work/pkg"
+            if [ "$archive" = "zip" ]; then
+              unzip -q "dist/zals-${version}-${target}.zip" -d "$work/pkg"
+              bin="$work/pkg/zals.exe"
+            else
+              tar -xzf "dist/zals-${version}-${target}.tar.gz" -C "$work/pkg"
+              bin="$work/pkg/zals"
+            fi
+            ZALS_BINARY="$bin" ZALS_PLATFORM_TAG="$plat" \
+              python -m build --wheel --outdir wheelhouse python/
+          }
+
+          build_wheel x86_64-linux  manylinux_2_17_x86_64 tar.gz
+          build_wheel aarch64-linux manylinux_2_17_aarch64 tar.gz
+          build_wheel x86_64-macos  macosx_13_0_x86_64 tar.gz
+          build_wheel aarch64-macos macosx_13_0_arm64 tar.gz
+          build_wheel x86_64-windows win_amd64 zip
+
+          ls -la wheelhouse
+
+      # Uses PyPI trusted publishing (OIDC). To use an API token instead, add
+      # `password: ${{ secrets.PYPI_API_TOKEN }}` to the step below.
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: wheelhouse
+
+  homebrew:
+    name: update homebrew tap
+    needs: [build, release]
+    runs-on: ubuntu-latest
+    env:
+      # Secrets cannot be referenced directly in `if:`; expose a boolean instead.
+      HAS_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Render formula
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          sha() { sha256sum "dist/zals-${version}-$1.tar.gz" | awk '{print $1}'; }
+          mkdir -p rendered
+          sed \
+            -e "s/__VERSION__/${version}/g" \
+            -e "s/__SHA256_X86_64_LINUX__/$(sha x86_64-linux)/g" \
+            -e "s/__SHA256_AARCH64_LINUX__/$(sha aarch64-linux)/g" \
+            -e "s/__SHA256_X86_64_MACOS__/$(sha x86_64-macos)/g" \
+            -e "s/__SHA256_AARCH64_MACOS__/$(sha aarch64-macos)/g" \
+            Formula/zals.rb > rendered/zals.rb
+          cat rendered/zals.rb
+
+      # Requires a HOMEBREW_TAP_TOKEN secret with write access to the tap repo.
+      # Optionally override the tap with the HOMEBREW_TAP_REPO repository variable.
+      - name: Push to tap
+        if: env.HAS_TAP_TOKEN == 'true'
+        shell: bash
+        env:
+          TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO || 'kksat/homebrew-tap' }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          git clone --depth 1 "https://x-access-token:${TOKEN}@github.com/${TAP_REPO}.git" tap
+          mkdir -p tap/Formula
+          cp rendered/zals.rb tap/Formula/zals.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/zals.rb
+          if git diff --cached --quiet; then
+            echo "formula unchanged"
+            exit 0
+          fi
+          git commit -m "zals ${version}"
+          git push

@@ -9,7 +9,7 @@ const Allocator = std.mem.Allocator;
 
 pub const Writer = struct {
     allocator: Allocator,
-    out_fd: std.posix.fd_t,
+    out_file: std.fs.File,
     mutex: std.Thread.Mutex = .{},
     cond: std.Thread.Condition = .{},
     queue: std.ArrayList([]u8) = .empty,
@@ -17,10 +17,10 @@ pub const Writer = struct {
     shutdown: bool = false,
     thread: ?std.Thread = null,
 
-    pub fn init(allocator: Allocator, out_fd: std.posix.fd_t) !*Writer {
+    pub fn init(allocator: Allocator, out_file: std.fs.File) !*Writer {
         const self = try allocator.create(Writer);
         errdefer allocator.destroy(self);
-        self.* = .{ .allocator = allocator, .out_fd = out_fd };
+        self.* = .{ .allocator = allocator, .out_file = out_file };
         self.thread = try std.Thread.spawn(.{}, run, .{self});
         return self;
     }
@@ -68,23 +68,23 @@ pub const Writer = struct {
             }
             self.mutex.unlock();
 
-            writeFramed(self.out_fd, body) catch {};
+            writeFramed(self.out_file, body) catch {};
             self.allocator.free(body);
         }
     }
 };
 
-fn writeFramed(fd: std.posix.fd_t, body: []const u8) !void {
+fn writeFramed(file: std.fs.File, body: []const u8) !void {
     var header_buf: [64]u8 = undefined;
     const header = try std.fmt.bufPrint(&header_buf, "Content-Length: {d}\r\n\r\n", .{body.len});
-    try writeAll(fd, header);
-    try writeAll(fd, body);
+    try writeAll(file, header);
+    try writeAll(file, body);
 }
 
-fn writeAll(fd: std.posix.fd_t, bytes: []const u8) !void {
+fn writeAll(file: std.fs.File, bytes: []const u8) !void {
     var written: usize = 0;
     while (written < bytes.len) {
-        written += std.posix.write(fd, bytes[written..]) catch |err| switch (err) {
+        written += file.write(bytes[written..]) catch |err| switch (err) {
             error.WouldBlock => continue,
             else => return err,
         };
@@ -93,15 +93,17 @@ fn writeAll(fd: std.posix.fd_t, bytes: []const u8) !void {
 
 test "writer frames and writes" {
     const allocator = std.testing.allocator;
-    const fds = try std.posix.pipe();
-    defer std.posix.close(fds[0]);
-    defer std.posix.close(fds[1]);
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const file = try tmp.dir.createFile("out", .{ .read = true });
+    defer file.close();
 
-    var writer = try Writer.init(allocator, fds[1]);
+    var writer = try Writer.init(allocator, file);
     try writer.writeMessage("{\"jsonrpc\":\"2.0\"}");
     writer.deinit();
 
+    try file.seekTo(0);
     var buf: [128]u8 = undefined;
-    const n = try std.posix.read(fds[0], &buf);
+    const n = try file.read(&buf);
     try std.testing.expectEqualStrings("Content-Length: 17\r\n\r\n{\"jsonrpc\":\"2.0\"}", buf[0..n]);
 }

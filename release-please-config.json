@@ -1,0 +1,24 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "simple",
+  "packages": {
+    ".": {
+      "package-name": "zals",
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [
+        {
+          "type": "generic",
+          "path": "src/main.zig"
+        },
+        {
+          "type": "generic",
+          "path": "build.zig.zon"
+        },
+        {
+          "type": "generic",
+          "path": "python/pyproject.toml"
+        }
+      ]
+    }
+  }
+}
