@@ -128,13 +128,10 @@ fn onlyKinds(a: Allocator, params: Value) !?[]const []const u8 {
 // Add
 // ---------------------------------------------------------------------------
 
-const Insertion = struct {
-    offset: usize,
-    /// Indent of the inserted task's `-` (or of the play for a `tasks:` header).
-    indent: usize,
-    prepend_newline: bool,
-    /// Emit a `tasks:` header before the task (play with no `tasks:` section).
-    with_tasks_header: bool,
+const Edit = struct {
+    start: usize,
+    end: usize,
+    text: []const u8,
 };
 
 fn addAction(
@@ -145,105 +142,124 @@ fn addAction(
     var_name: []const u8,
 ) !?Action {
     const eol = detectEol(text);
-    const ins = blk: {
-        if (task) |t| break :blk taskInsertion(text, t);
+    var edit: Edit = undefined;
+    if (task) |t| {
+        edit = (try taskInsertion(a, text, t, var_name, eol)) orelse return null;
+    } else {
         const play = if (container) |c| enclosingPlay(c) else null;
         const p = play orelse return null;
         if (isImportPlaybook(p)) return null;
-        break :blk playInsertion(text, p);
-    } orelse return null;
+        edit = (try playInsertion(a, text, p, var_name, eol)) orelse return null;
+    }
 
     return .{
         .title = try std.fmt.allocPrint(a, "Add debug statement for '{s}'", .{var_name}),
         .kind = kind,
-        .start = ins.offset,
-        .end = ins.offset,
-        .new_text = try taskText(a, ins, var_name, eol),
+        .start = edit.start,
+        .end = edit.end,
+        .new_text = edit.text,
     };
 }
 
-/// Insert after the task: at the next sibling's line start, or after the
-/// task's last line when it is last in its sequence.
-fn taskInsertion(text: []const u8, task: *Node) ?Insertion {
+/// Insert after the task, surrounded by a blank line before and after. The
+/// blank-line run that already follows the task is replaced, so the result has
+/// exactly one blank line on each side.
+fn taskInsertion(
+    a: Allocator,
+    text: []const u8,
+    task: *Node,
+    var_name: []const u8,
+    eol: []const u8,
+) !?Edit {
     const seq = task.parent orelse return null;
     if (!seq.isSeq()) return null;
-    const idx = indexOf(seq, task) orelse return null;
-    if (idx + 1 < seq.items.len) {
-        const next = seq.items[idx + 1];
-        const line_start = lineStart(text, next.start);
+    const body = try taskText(a, taskIndent(text, task), var_name, eol);
+
+    const task_line_end = lineEnd(text, stripTrailingNewlines(text, task.end));
+    if (task_line_end >= text.len) {
+        // No trailing newline: terminate the task's line, then a blank line.
         return .{
-            .offset = line_start,
-            .indent = lineIndent(text, line_start),
-            .prepend_newline = false,
-            .with_tasks_header = false,
+            .start = text.len,
+            .end = text.len,
+            .text = try std.fmt.allocPrint(a, "{s}{s}{s}{s}", .{ eol, eol, body, eol }),
         };
     }
-    return afterLastLine(text, task.end, taskIndent(text, task));
+    const after = task_line_end + 1;
+    return .{
+        .start = after,
+        .end = blankRunEnd(text, after),
+        .text = try std.fmt.allocPrint(a, "{s}{s}{s}", .{ eol, body, eol }),
+    };
 }
 
 /// Insert at the start of the play's `tasks:` list, creating the section when
 /// the play has none.
-fn playInsertion(text: []const u8, play: *Node) ?Insertion {
+fn playInsertion(
+    a: Allocator,
+    text: []const u8,
+    play: *Node,
+    var_name: []const u8,
+    eol: []const u8,
+) !?Edit {
     if (dom.findPair(play, "tasks")) |tasks_pair| {
         if (tasks_pair.val) |tasks_val| {
             if (tasks_val.isSeq()) {
                 if (tasks_val.items.len > 0) {
                     const first = tasks_val.items[0];
                     const line_start = lineStart(text, first.start);
+                    const body = try taskText(a, lineIndent(text, line_start), var_name, eol);
+                    // First task in the list: no blank line before it, one after.
                     return .{
-                        .offset = line_start,
-                        .indent = lineIndent(text, line_start),
-                        .prepend_newline = false,
-                        .with_tasks_header = false,
+                        .start = line_start,
+                        .end = line_start,
+                        .text = try std.fmt.allocPrint(a, "{s}{s}", .{ body, eol }),
                     };
                 }
                 // `tasks:` with no items: insert after the key's line.
-                var ins = afterLastLine(text, tasks_pair.end, taskIndent(text, play) + 4) orelse return null;
-                ins.with_tasks_header = false;
-                return ins;
+                const body = try taskText(a, taskIndent(text, play) + 4, var_name, eol);
+                return try afterLine(a, text, tasks_pair.end, body, eol);
             }
         }
     }
     // No `tasks:` section: create one at the end of the play.
-    var ins = afterLastLine(text, play.end, taskIndent(text, play)) orelse return null;
-    ins.with_tasks_header = true;
-    return ins;
+    const body = try tasksHeaderText(a, taskIndent(text, play), var_name, eol);
+    return try afterLine(a, text, play.end, body, eol);
 }
 
-/// Insert at the start of the line after the line containing `end`. When the
-/// document has no trailing newline, insert at the end and prepend one.
-fn afterLastLine(text: []const u8, end: usize, indent: usize) ?Insertion {
+/// Replace the blank-line run after the line containing `end` with a blank
+/// line, `body`, and a blank line.
+fn afterLine(a: Allocator, text: []const u8, end: usize, body: []const u8, eol: []const u8) !Edit {
     const line_end = lineEnd(text, stripTrailingNewlines(text, end));
-    if (line_end < text.len) {
+    if (line_end >= text.len) {
         return .{
-            .offset = line_end + 1,
-            .indent = indent,
-            .prepend_newline = false,
-            .with_tasks_header = false,
+            .start = text.len,
+            .end = text.len,
+            .text = try std.fmt.allocPrint(a, "{s}{s}{s}", .{ eol, body, eol }),
         };
     }
+    const after = line_end + 1;
     return .{
-        .offset = text.len,
-        .indent = indent,
-        .prepend_newline = true,
-        .with_tasks_header = false,
+        .start = after,
+        .end = blankRunEnd(text, after),
+        .text = try std.fmt.allocPrint(a, "{s}{s}{s}", .{ eol, body, eol }),
     };
 }
 
-fn taskText(a: Allocator, ins: Insertion, var_name: []const u8, eol: []const u8) ![]const u8 {
-    const pad = try spaces(a, ins.indent);
-    const prefix = if (ins.prepend_newline) eol else "";
-    if (ins.with_tasks_header) {
-        return std.fmt.allocPrint(
-            a,
-            "{s}{s}  tasks:{s}{s}    - name: Debug variable {s}{s}{s}      ansible.builtin.debug:{s}{s}        var: {s}{s}",
-            .{ prefix, pad, eol, pad, var_name, eol, pad, eol, pad, var_name, eol },
-        );
-    }
+fn taskText(a: Allocator, indent: usize, var_name: []const u8, eol: []const u8) ![]const u8 {
+    const pad = try spaces(a, indent);
     return std.fmt.allocPrint(
         a,
-        "{s}{s}- name: Debug variable {s}{s}{s}  ansible.builtin.debug:{s}{s}    var: {s}{s}",
-        .{ prefix, pad, var_name, eol, pad, eol, pad, var_name, eol },
+        "{s}- name: Debug variable {s}{s}{s}  ansible.builtin.debug:{s}{s}    var: {s}{s}",
+        .{ pad, var_name, eol, pad, eol, pad, var_name, eol },
+    );
+}
+
+fn tasksHeaderText(a: Allocator, play_indent: usize, var_name: []const u8, eol: []const u8) ![]const u8 {
+    const pad = try spaces(a, play_indent);
+    return std.fmt.allocPrint(
+        a,
+        "{s}  tasks:{s}{s}    - name: Debug variable {s}{s}{s}      ansible.builtin.debug:{s}{s}        var: {s}{s}",
+        .{ pad, eol, pad, var_name, eol, pad, eol, pad, var_name, eol },
     );
 }
 
@@ -255,22 +271,58 @@ fn removeAction(a: Allocator, text: []const u8, task: *Node) !?Action {
     const seq = task.parent orelse return null;
     if (!seq.isSeq()) return null;
     const idx = indexOf(seq, task) orelse return null;
+    const eol = detectEol(text);
 
-    const start = lineStart(text, task.start);
-    const end = if (idx + 1 < seq.items.len)
-        lineStart(text, seq.items[idx + 1].start)
-    else blk: {
-        const line_end = lineEnd(text, stripTrailingNewlines(text, task.end));
-        break :blk if (line_end < text.len) line_end + 1 else text.len;
-    };
+    const debug_first = lineStart(text, task.start);
+    const debug_last_end = lineEnd(text, stripTrailingNewlines(text, task.end));
+    const has_prev = idx > 0;
+    const has_next = idx + 1 < seq.items.len;
+
+    var start = debug_first;
+    if (has_prev) {
+        start = lineEnd(text, stripTrailingNewlines(text, seq.items[idx - 1].end));
+    }
+
+    var end = if (debug_last_end < text.len) debug_last_end + 1 else text.len;
+    if (has_next) {
+        end = lineStart(text, seq.items[idx + 1].start);
+    } else {
+        end = blankRunEnd(text, end);
+    }
     if (end <= start) return null;
+
+    // A comment in the gap is preserved: fall back to deleting the debug's own
+    // lines rather than normalising the surrounding blank lines.
+    if (hasCommentLine(text, start, end)) {
+        start = debug_first;
+        end = if (debug_last_end < text.len) debug_last_end + 1 else text.len;
+        if (end <= start) return null;
+        return .{
+            .title = try a.dupe(u8, "Remove debug statement"),
+            .kind = kind,
+            .start = start,
+            .end = end,
+            .new_text = "",
+        };
+    }
+
+    // Leave exactly one blank line between the surrounding tasks.
+    var replacement: []const u8 = "";
+    if (has_prev and has_next) {
+        replacement = try std.fmt.allocPrint(a, "{s}{s}", .{ eol, eol });
+    } else if (has_prev) {
+        replacement = if (end < text.len)
+            try std.fmt.allocPrint(a, "{s}{s}", .{ eol, eol })
+        else
+            try a.dupe(u8, eol);
+    }
 
     return .{
         .title = try a.dupe(u8, "Remove debug statement"),
         .kind = kind,
         .start = start,
         .end = end,
-        .new_text = "",
+        .new_text = replacement,
     };
 }
 
@@ -448,6 +500,37 @@ fn stripTrailingNewlines(text: []const u8, end: usize) usize {
     return e;
 }
 
+/// The end of the run of blank lines starting at `start` (the start of a line).
+fn blankRunEnd(text: []const u8, start: usize) usize {
+    var i = start;
+    while (i < text.len) {
+        const le = lineEnd(text, i);
+        if (!isBlankLine(text[i..le])) break;
+        i = if (le < text.len) le + 1 else text.len;
+    }
+    return i;
+}
+
+fn isBlankLine(line: []const u8) bool {
+    for (line) |c| {
+        if (c != ' ' and c != '\t' and c != '\r') return false;
+    }
+    return true;
+}
+
+/// True when any line in `[start, end)` is a comment line.
+fn hasCommentLine(text: []const u8, start: usize, end: usize) bool {
+    var i = start;
+    while (i < end) {
+        const le = @min(lineEnd(text, i), end);
+        var j = i;
+        while (j < le and (text[j] == ' ' or text[j] == '\t')) : (j += 1) {}
+        if (j < le and text[j] == '#') return true;
+        i = if (le < end) le + 1 else end;
+    }
+    return false;
+}
+
 fn lineIndent(text: []const u8, line_start: usize) usize {
     var i = line_start;
     while (i < text.len and (text[i] == ' ' or text[i] == '\t')) : (i += 1) {}
@@ -567,12 +650,13 @@ test "add debug after a task" {
     try testing.expectEqualStrings("Add debug statement for 'foo'", acts[0].title);
     try testing.expectEqualStrings("refactor", acts[0].kind);
     try testing.expectEqualStrings(
-        "- name: Debug variable foo\n  ansible.builtin.debug:\n    var: foo\n",
+        "\n- name: Debug variable foo\n  ansible.builtin.debug:\n    var: foo\n\n",
         acts[0].new_text,
     );
-    // Inserted at the start of B's line (after the blank line).
-    try testing.expectEqual(std.mem.indexOf(u8, src, "- name: B").?, acts[0].start);
-    try testing.expectEqual(acts[0].start, acts[0].end);
+    // Replaces the blank-line gap before B.
+    const blank = std.mem.indexOf(u8, src, "\n\n- name: B").?;
+    try testing.expectEqual(blank + 1, acts[0].start);
+    try testing.expectEqual(blank + 2, acts[0].end);
 }
 
 test "add debug after the last task in a block" {
@@ -591,11 +675,10 @@ test "add debug after the last task in a block" {
     const acts = try run(a, src, "/p/tasks/main.yml", "foo");
     try testing.expectEqual(@as(usize, 1), acts.len);
     try testing.expectEqualStrings(
-        "    - name: Debug variable foo\n      ansible.builtin.debug:\n        var: foo\n",
+        "\n    - name: Debug variable foo\n      ansible.builtin.debug:\n        var: foo\n\n",
         acts[0].new_text,
     );
-    // Inserted at end of file (no trailing newline).
-    try testing.expectEqual(src.len, acts[0].start);
+    try testing.expectEqual(src.len, acts[0].end);
 }
 
 test "add debug at the start of the play tasks list" {
@@ -616,7 +699,7 @@ test "add debug at the start of the play tasks list" {
     const acts = try run(a, src, "/p/play.yml", "foo: 1");
     try testing.expectEqual(@as(usize, 1), acts.len);
     try testing.expectEqualStrings(
-        "    - name: Debug variable foo\n      ansible.builtin.debug:\n        var: foo\n",
+        "    - name: Debug variable foo\n      ansible.builtin.debug:\n        var: foo\n\n",
         acts[0].new_text,
     );
     try testing.expectEqual(std.mem.indexOf(u8, src, "    - name: A").?, acts[0].start);
@@ -636,7 +719,7 @@ test "add debug creates a tasks section when the play has none" {
     const acts = try run(a, src, "/p/play.yml", "foo: 1");
     try testing.expectEqual(@as(usize, 1), acts.len);
     try testing.expectEqualStrings(
-        "  tasks:\n    - name: Debug variable foo\n      ansible.builtin.debug:\n        var: foo\n",
+        "\n  tasks:\n    - name: Debug variable foo\n      ansible.builtin.debug:\n        var: foo\n\n",
         acts[0].new_text,
     );
 }
@@ -711,9 +794,9 @@ test "remove a debug task" {
     const acts = try run(a, src, "/p/tasks/main.yml", "var: foo");
     try testing.expectEqual(@as(usize, 1), acts.len);
     try testing.expectEqualStrings("Remove debug statement", acts[0].title);
-    try testing.expectEqualStrings("", acts[0].new_text);
-    try testing.expectEqual(std.mem.indexOf(u8, src, "- name: Debug variable foo").?, acts[0].start);
-    // Deletes through the start of B's line, swallowing the blank line.
+    try testing.expectEqualStrings("\n\n", acts[0].new_text);
+    // Replaces from the end of A's line through the start of B's line.
+    try testing.expectEqual(std.mem.indexOf(u8, src, "msg: hi\n").? + "msg: hi".len, acts[0].start);
     try testing.expectEqual(std.mem.indexOf(u8, src, "- name: B").?, acts[0].end);
 }
 
@@ -739,6 +822,76 @@ test "remove a debug task that is last in a block" {
     // Bounded by the block: stops before `rescue:`.
     try testing.expectEqual(std.mem.indexOf(u8, src, "    - name: Debug variable foo").?, acts[0].start);
     try testing.expectEqual(std.mem.indexOf(u8, src, "  rescue:").?, acts[0].end);
+}
+
+test "remove normalizes zero blank lines to one" {
+    const src =
+        \\- name: A
+        \\  ansible.builtin.debug:
+        \\    msg: hi
+        \\- name: Debug variable foo
+        \\  ansible.builtin.debug:
+        \\    var: foo
+        \\- name: B
+        \\  ansible.builtin.debug:
+        \\    msg: bye
+        \\
+    ;
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const acts = try run(a, src, "/p/tasks/main.yml", "var: foo");
+    try testing.expectEqual(@as(usize, 1), acts.len);
+    try testing.expectEqualStrings("\n\n", acts[0].new_text);
+}
+
+test "remove collapses two blank lines to one" {
+    const src =
+        \\- name: A
+        \\  ansible.builtin.debug:
+        \\    msg: hi
+        \\
+        \\
+        \\- name: Debug variable foo
+        \\  ansible.builtin.debug:
+        \\    var: foo
+        \\
+        \\
+        \\- name: B
+        \\  ansible.builtin.debug:
+        \\    msg: bye
+        \\
+    ;
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const acts = try run(a, src, "/p/tasks/main.yml", "var: foo");
+    try testing.expectEqual(@as(usize, 1), acts.len);
+    try testing.expectEqualStrings("\n\n", acts[0].new_text);
+}
+
+test "add inserts a blank line when the tasks are adjacent" {
+    const src =
+        \\- name: A
+        \\  ansible.builtin.package:
+        \\    name: "{{ foo }}"
+        \\- name: B
+        \\  ansible.builtin.debug:
+        \\    msg: hi
+        \\
+    ;
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const acts = try run(a, src, "/p/tasks/main.yml", "foo");
+    try testing.expectEqual(@as(usize, 1), acts.len);
+    try testing.expectEqualStrings(
+        "\n- name: Debug variable foo\n  ansible.builtin.debug:\n    var: foo\n\n",
+        acts[0].new_text,
+    );
 }
 
 test "both actions when the cursor is on a variable inside a debug task" {
@@ -809,7 +962,7 @@ test "add debug after a task with a with_items item map" {
     const acts = try run(a, src, "/p/tasks/main.yml", "foo");
     try testing.expectEqual(@as(usize, 1), acts.len);
     try testing.expectEqualStrings(
-        "- name: Debug variable foo\n  ansible.builtin.debug:\n    var: foo\n",
+        "\n- name: Debug variable foo\n  ansible.builtin.debug:\n    var: foo\n\n",
         acts[0].new_text,
     );
 }
@@ -839,7 +992,7 @@ test "crlf line endings are preserved" {
     const acts = try run(a, src, "/p/tasks/main.yml", "foo");
     try testing.expectEqual(@as(usize, 1), acts.len);
     try testing.expectEqualStrings(
-        "- name: Debug variable foo\r\n  ansible.builtin.debug:\r\n    var: foo\r\n",
+        "\r\n- name: Debug variable foo\r\n  ansible.builtin.debug:\r\n    var: foo\r\n\r\n",
         acts[0].new_text,
     );
 }

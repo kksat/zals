@@ -43,7 +43,9 @@ offset is `range.start`.
 The module is fully qualified and the task is named. The variable is the **root
 identifier** under the cursor (`foo.bar` → `foo`), matching what the variable
 model resolves. The line ending is detected from the document (CRLF when
-present) and the block ends with a newline.
+present). The debug is surrounded by exactly one blank line before and after:
+the blank-line run that already follows the task is replaced, so adjacent tasks
+gain a separator and over-spaced tasks are normalised.
 
 **Placement.** The enclosing task is the deepest map whose parent is a sequence
 and whose line range contains the cursor. When it is a task item, the debug goes
@@ -56,9 +58,10 @@ play's `tasks:` list; if the play has no `tasks:`, one is created at the end of
 the play. `import_playbook` entries and role `defaults/`/`vars/`/`meta/` files
 offer nothing.
 
-**Removal range.** From the start of the debug's first line through the start of
-the next sibling's line (swallowing the blank line after it); when it is last in
-its sequence, the debug's own lines only, bounded by the sequence.
+**Removal range.** The debug task and the blank-line run around it are removed,
+leaving exactly one blank line between the surrounding tasks (or none when the
+debug is the first or last task). A comment in the gap is preserved: the edit
+falls back to deleting the debug's own lines rather than normalising.
 
 **Idempotency.** Add is always offered, even when an identical debug already
 follows; duplicate detection would be fragile and a false suppression is worse
