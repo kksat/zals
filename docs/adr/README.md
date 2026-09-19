@@ -31,6 +31,7 @@ Each ADR captures one decision, its context, and its consequences. Statuses are
 | [0024](0024-variable-go-to-definition.md) | Variable go-to-definition | Accepted |
 | [0025](0025-variable-references.md) | Variable references | Accepted |
 | [0026](0026-release-process.md) | Release process | Accepted |
+| [0027](0027-document-symbols.md) | Document symbols | Accepted |
 
 ## Template
 

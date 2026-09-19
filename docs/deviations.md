@@ -41,6 +41,7 @@ on top of parity, not deviations from it.
 | # | Feature | Rationale |
 | --- | --- | --- |
 | 16 | Find-references and go-to-definition for variables. | Post-parity feature. See [ADR-0024](adr/0024-variable-go-to-definition.md) and [ADR-0025](adr/0025-variable-references.md). |
+| 17 | Document symbols (`textDocument/documentSymbol`) for playbooks, task and handler files, variable files, and role metadata. | Post-parity feature; upstream closed the request as not planned. See [ADR-0027](adr/0027-document-symbols.md). |
 
 ## Adding an entry
 

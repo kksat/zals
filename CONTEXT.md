@@ -1,8 +1,9 @@
 # zals
 
 A Zig reimplementation of the Ansible Language Server. This glossary covers the
-vocabulary of variable navigation: finding the definition of a variable and
-finding every reference to it.
+vocabulary of variable navigation (finding the definition of a variable and
+finding every reference to it) and of the document outline (the symbols a client
+shows for a single file).
 
 ## Language
 
@@ -15,6 +16,35 @@ _Avoid_: package, module
 **Playbook**:
 A single YAML file containing one or more plays.
 _Avoid_: play (a play is one entry within a playbook)
+
+**Play**:
+One entry within a playbook, targeting hosts and containing tasks, roles, and
+handlers.
+_Avoid_: playbook entry, play block
+
+**Task**:
+A single unit of work in a play, block, or task file, invoking one module.
+_Avoid_: step, action, job
+
+**Block**:
+A task that groups nested tasks under `block`, `rescue`, and `always`.
+_Avoid_: task group, section
+
+**Handler**:
+A task that runs only when notified by another task.
+_Avoid_: callback, hook
+
+**Role invocation**:
+An entry in a play's `roles:` list that applies a role.
+_Avoid_: role reference, role call
+
+**Module key**:
+The key of a task map that names the module the task invokes.
+_Avoid_: action key, module name
+
+**Document symbol**:
+An entity shown in a client's outline for a single document.
+_Avoid_: outline entry, breadcrumb
 
 **Variable**:
 A name that Ansible resolves at runtime from a definition.

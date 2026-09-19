@@ -26,6 +26,9 @@ The v1 target is **feature parity with upstream's Tier 1 surface**:
 Out of scope for v1 (Tier 2/3): the VS Code extension, inventory and metadata
 notifications, execution environments, and `--generate-docs`.
 
+Post-parity extensions: variable navigation (find-references and variable
+go-to-definition, §5) and document symbols ([ADR-0027](adr/0027-document-symbols.md)).
+
 Parity is behavioral, not byte-for-byte. Intentional differences are tracked in
 [`docs/deviations.md`](deviations.md).
 
@@ -63,7 +66,7 @@ it in this list.
 | Layer | Responsibility |
 | --- | --- |
 | `src/lsp/` | JSON-RPC framing, message types, capability negotiation, dispatch |
-| `src/providers/` | One module per LSP feature (semantic tokens, hover, completion, definition, references, validation) |
+| `src/providers/` | One module per LSP feature (semantic tokens, hover, completion, definition, references, document symbols, validation) |
 | `src/variables/` | Jinja scanning, definition-site detection, role/playbook scope, the variable index |
 | `src/services/` | Docs library, schema cache/service/validator, validation manager, config |
 | `src/yaml/` | YAML parser interface, tree-sitter backend, semantic DOM, path utilities |
@@ -93,7 +96,7 @@ retains source ranges. Path utilities mirror upstream's `yamlAst` helpers:
 `isModuleParam`, and friends.
 
 The DOM is the shared substrate for semantic tokens, hover, completion,
-definition, and variable references.
+definition, variable references, and document symbols.
 
 ## 5. Variables
 

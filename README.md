@@ -32,6 +32,10 @@ post-parity extension; upstream has no counterpart. See
 [ADR-0024](docs/adr/0024-variable-go-to-definition.md) and
 [ADR-0025](docs/adr/0025-variable-references.md).
 
+Document symbols (`textDocument/documentSymbol`) are a second post-parity
+extension: a semantic outline for playbooks, task and handler files, variable
+files, and role metadata. See [ADR-0027](docs/adr/0027-document-symbols.md).
+
 Out of scope for v1: the VS Code extension, inventory/metadata notifications,
 and execution environments.
 
