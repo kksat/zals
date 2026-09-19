@@ -32,6 +32,7 @@ Each ADR captures one decision, its context, and its consequences. Statuses are
 | [0025](0025-variable-references.md) | Variable references | Accepted |
 | [0026](0026-release-process.md) | Release process | Accepted |
 | [0027](0027-document-symbols.md) | Document symbols | Accepted |
+| [0028](0028-debug-code-actions.md) | Debug code actions | Accepted |
 
 ## Template
 

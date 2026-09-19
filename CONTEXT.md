@@ -2,8 +2,9 @@
 
 A Zig reimplementation of the Ansible Language Server. This glossary covers the
 vocabulary of variable navigation (finding the definition of a variable and
-finding every reference to it) and of the document outline (the symbols a client
-shows for a single file).
+finding every reference to it), of the document outline (the symbols a client
+shows for a single file), and of debug code actions (adding and removing a
+debug task for a variable).
 
 ## Language
 
@@ -74,6 +75,17 @@ A task or play key whose value is a Jinja expression without delimiters:
 `when`, `changed_when`, `failed_when`, `until`, `loop`, `with_*`, and
 `assert.that`.
 _Avoid_: implicit template, raw expression
+
+**Debug statement**:
+A task that invokes the `debug` module (`debug` or `*.debug`) to print a
+variable or message.
+_Avoid_: debug task, print statement
+
+**Code action**:
+An LSP `textDocument/codeAction` entry that edits the document. zals offers two,
+both of kind `refactor`: add a debug statement for the variable under the
+cursor, and remove the debug statement the cursor is inside.
+_Avoid_: quick fix, refactoring
 
 **Role scope**:
 The search space for a variable defined or used in a role: the conventional

@@ -61,6 +61,34 @@ pub const Index = struct {
         return null;
     }
 
+    /// The variable occurrence under `offset` in an already-parsed `forest`.
+    ///
+    /// The returned name points into `forest`'s arena, so it is valid only
+    /// while the forest is alive. Used by providers that parse the document
+    /// once and need both the variable and its YAML context.
+    pub fn occurrenceInForest(
+        a: Allocator,
+        forest: *const dom.Forest,
+        path: []const u8,
+        offset: usize,
+    ) !?Cursor {
+        var defs = std.array_list.Managed(Definition).init(a);
+        try definitions_mod.collect(a, forest, scope.fileKind(path), &defs);
+        for (defs.items) |d| {
+            if (d.start <= offset and offset <= d.end) {
+                return .{ .name = d.name, .kind = .definition };
+            }
+        }
+        var refs = std.array_list.Managed(jinja.Ident).init(a);
+        for (forest.roots) |root| try collectRefs(a, root, forest.text, &refs);
+        for (refs.items) |r| {
+            if (r.start <= offset and offset <= r.end) {
+                return .{ .name = r.name, .kind = .reference };
+            }
+        }
+        return null;
+    }
+
     /// Every occurrence of `name` in the file set that owns `uri`.
     pub fn occurrences(self: *Index, a: Allocator, uri: []const u8, name: []const u8) ![]Occurrence {
         const files = try self.fileSet(a, uri);
