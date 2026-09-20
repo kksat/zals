@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Smoke-test the debug code actions over stdio."""
+"""Smoke-test the debug and extract code actions over stdio."""
 import json
 import os
 import subprocess
@@ -58,7 +58,13 @@ def main():
     proc.stdin.write(frame({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
         "processId": None,
         "rootUri": uri(ROOT),
-        "capabilities": {},
+        "capabilities": {
+            "workspace": {
+                "workspaceEdit": {
+                    "resourceOperations": ["create"],
+                },
+            },
+        },
     }}))
     proc.stdin.flush()
     init = read_response(proc, 1)
@@ -82,13 +88,34 @@ def main():
     resp = code_actions(proc, 2, tasks, 8, col)
     print("\ncodeAction(register: app_result):")
     for act in resp["result"]:
+        if act["kind"] != "refactor":
+            continue
         print("  ", act["title"], "->", repr(act["edit"]["documentChanges"][0]["edits"][0]["newText"]))
 
     # Cursor inside the first debug task (line 2, the module key).
     resp = code_actions(proc, 3, tasks, 2, 2)
     print("\ncodeAction(debug task):")
     for act in resp["result"]:
+        if act["kind"] != "refactor":
+            continue
         print("  ", act["title"], "->", act["edit"]["documentChanges"][0]["edits"][0]["range"])
+
+    # Cursor on the first task (line 1): extract actions.
+    resp = code_actions(proc, 4, tasks, 1, 2)
+    print("\ncodeAction(extract first task):")
+    extract = [a for a in resp["result"] if a["kind"] == "refactor.extract"]
+    assert len(extract) == 2, extract
+    for act in extract:
+        changes = act["edit"]["documentChanges"]
+        assert len(changes) == 3, changes
+        create, fill, source = changes
+        assert create["kind"] == "create", create
+        assert create["options"] == {"overwrite": False}, create
+        assert fill["textDocument"]["version"] is None, fill
+        print("  ", act["title"])
+        print("     create:", create["uri"])
+        print("     file:", repr(fill["edits"][0]["newText"]))
+        print("     source:", repr(source["edits"][0]["newText"]))
 
     proc.stdin.write(frame({"jsonrpc": "2.0", "id": 99, "method": "shutdown"}))
     proc.stdin.write(frame({"jsonrpc": "2.0", "method": "exit"}))

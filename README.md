@@ -47,6 +47,11 @@ reference opens its argument specs, metadata, or main task file, and
 go-to-implementation (`textDocument/implementation`) opens its main task file.
 See [ADR-0029](docs/adr/0029-role-navigation.md).
 
+Extract-tasks code actions are a fifth post-parity extension: move the task(s)
+under the cursor or selection into a new sibling `taskN.yml` and replace them
+with `include_tasks` or `import_tasks`. See
+[ADR-0030](docs/adr/0030-extract-tasks-code-actions.md).
+
 Out of scope for v1: the VS Code extension, inventory/metadata notifications,
 and execution environments.
 

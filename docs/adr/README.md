@@ -34,6 +34,7 @@ Each ADR captures one decision, its context, and its consequences. Statuses are
 | [0027](0027-document-symbols.md) | Document symbols | Accepted |
 | [0028](0028-debug-code-actions.md) | Debug code actions | Accepted |
 | [0029](0029-role-navigation.md) | Role go-to-definition and go-to-implementation | Accepted |
+| [0030](0030-extract-tasks-code-actions.md) | Extract tasks code actions | Accepted |
 
 ## Template
 

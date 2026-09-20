@@ -37,6 +37,9 @@ pub const Server = struct {
     initialized: bool = false,
     shutdown_requested: bool = false,
     running: bool = true,
+    /// True when the client advertises `workspace.workspaceEdit.resourceOperations`
+    /// containing `create` (needed by the extract code actions).
+    supports_create_file: bool = false,
     root_uris: std.array_list.Managed([]const u8),
 
     pub fn init(allocator: Allocator, transport: Transport) !Server {

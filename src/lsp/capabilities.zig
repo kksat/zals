@@ -58,6 +58,7 @@ pub fn build(a: Allocator, encoding: []const u8, workspace_folders: bool) !Value
     var code_action = json_util.obj(a);
     var code_action_kinds = std.json.Array.init(a);
     try code_action_kinds.append(json_util.str("refactor"));
+    try code_action_kinds.append(json_util.str("refactor.extract"));
     try code_action.put("codeActionKinds", .{ .array = code_action_kinds });
     try caps.put("codeActionProvider", .{ .object = code_action });
 

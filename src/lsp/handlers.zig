@@ -82,6 +82,19 @@ fn onInitialize(self: *Server, a: Allocator, id: Value, params: Value) !void {
                 }
             }
         }
+        // Resource operations the client can apply in a `WorkspaceEdit`.
+        if (json_util.field(caps, "workspace")) |workspace| {
+            if (json_util.field(workspace, "workspaceEdit")) |we| {
+                if (json_util.array(we, "resourceOperations")) |ops| {
+                    for (ops.items) |op| {
+                        if (op == .string and std.mem.eql(u8, op.string, "create")) {
+                            self.supports_create_file = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
     }
     self.documents.encoding = self.encoding;
 
