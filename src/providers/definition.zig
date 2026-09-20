@@ -1,4 +1,4 @@
-//! Go to definition: module source files and variable definitions.
+//! Go to definition: module source files, variable definitions, and roles.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -8,10 +8,13 @@ const Server = @import("../lsp/server.zig").Server;
 const util = @import("util.zig");
 const yaml = @import("../yaml/root.zig");
 const variables = @import("../variables/root.zig");
+const roles = @import("../roles/root.zig");
+const paths = @import("../paths.zig");
 const vs = @import("variable_source.zig");
 
 pub fn definition(self: *Server, a: Allocator, params: Value) !Value {
     if (try variableDefinition(self, a, params)) |result| return result;
+    if (try roleDefinition(self, a, params)) |result| return result;
     return moduleDefinition(self, a, params);
 }
 
@@ -37,6 +40,21 @@ fn variableDefinition(self: *Server, a: Allocator, params: Value) !?Value {
     return .{ .array = arr };
 }
 
+/// Jump from a role reference to the role's argument specs, metadata, or main
+/// task file. Returns `Value.null` (stopping the chain) when the cursor is on a
+/// role-name position but the role cannot be resolved.
+fn roleDefinition(self: *Server, a: Allocator, params: Value) !?Value {
+    var cur = util.parseAt(self, a, params) orelse return null;
+    defer cur.forest.deinit();
+    const arena = cur.forest.allocator();
+    const ref = roles.reference.detect(cur.path, cur.forest.text) orelse return null;
+    const path = try paths.uriToPath(a, cur.doc.uri);
+    const collections = yaml.collections.getDeclaredCollections(arena, cur.path) catch &.{};
+    const dir = util.resolveRole(self, a, ref.name, path, collections) orelse return Value.null;
+    const target = roles.targets.definitionTarget(a, dir) orelse return Value.null;
+    return try util.fileLocation(a, target);
+}
+
 fn moduleDefinition(self: *Server, a: Allocator, params: Value) !Value {
     var cur = util.parseAt(self, a, params) orelse return Value.null;
     defer cur.forest.deinit();
@@ -45,21 +63,5 @@ fn moduleDefinition(self: *Server, a: Allocator, params: Value) !Value {
     const collections = yaml.collections.getDeclaredCollections(arena, cur.path) catch &.{};
     const mod = self.docs.findModuleInContext(arena, name, collections) orelse return Value.null;
     if (mod.filename.len == 0) return Value.null;
-
-    const uri = try pathToUri(a, mod.filename);
-    var range = json_util.obj(a);
-    var zero = json_util.obj(a);
-    try zero.put("line", json_util.num(0));
-    try zero.put("character", json_util.num(0));
-    try range.put("start", .{ .object = zero });
-    try range.put("end", .{ .object = zero });
-    var loc = json_util.obj(a);
-    try loc.put("uri", json_util.str(uri));
-    try loc.put("range", .{ .object = range });
-    return .{ .object = loc };
-}
-
-fn pathToUri(a: Allocator, path: []const u8) ![]const u8 {
-    if (std.mem.startsWith(u8, path, "file:")) return path;
-    return std.fmt.allocPrint(a, "file://{s}", .{path});
+    return try util.fileLocation(a, mod.filename);
 }

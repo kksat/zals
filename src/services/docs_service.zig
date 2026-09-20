@@ -11,6 +11,7 @@ const docs = @import("docs.zig");
 const DocsLibrary = docs.DocsLibrary;
 const docs_cache = @import("docs_cache.zig");
 const exec = @import("../exec/root.zig");
+const AnsibleConfig = @import("ansible_config.zig").AnsibleConfig;
 const concurrency = @import("../concurrency/root.zig");
 const ThreadPool = concurrency.ThreadPool;
 const Task = concurrency.Task;
@@ -35,8 +36,8 @@ pub const DocsService = struct {
     }
 
     /// Load the catalog (cache first, then `ansible-doc`) and kick off prefetch.
-    /// `lib` and `pool` must outlive the service.
-    pub fn start(self: *DocsService, lib: *DocsLibrary, pool: *ThreadPool) void {
+    /// `lib`, `pool`, and `config` must outlive the service.
+    pub fn start(self: *DocsService, lib: *DocsLibrary, pool: *ThreadPool, config: *AnsibleConfig) void {
         if (self.started) return;
         self.started = true;
         self.lib = lib;
@@ -53,7 +54,7 @@ pub const DocsService = struct {
         }
         // Discover module FQCNs on disk for completion (builtin + collections +
         // redirects). This is independent of the ansible-doc catalog.
-        self.lib.scanModuleIndex();
+        self.lib.scanModuleIndex(config);
 
         self.prefetch_task = .{ .func = prefetchEntry, .ctx = self };
         self.pool.submit(&self.prefetch_task) catch {};

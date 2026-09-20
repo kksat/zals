@@ -13,6 +13,7 @@ const handlers = @import("handlers.zig");
 const exec = @import("../exec/root.zig");
 const DocsLibrary = @import("../services/docs.zig").DocsLibrary;
 const SchemaCatalog = @import("../services/schema_service.zig").Catalog;
+const AnsibleConfig = @import("../services/ansible_config.zig").AnsibleConfig;
 const concurrency = @import("../concurrency/root.zig");
 const docs_service = @import("../services/docs_service.zig");
 const docs_cache = @import("../services/docs_cache.zig");
@@ -28,6 +29,7 @@ pub const Server = struct {
     runner: exec.Runner,
     docs: DocsLibrary,
     schemas: SchemaCatalog,
+    ansible_config: AnsibleConfig,
     pool: *concurrency.ThreadPool,
     docs_service: DocsService,
     cache_path: ?[]const u8 = null,
@@ -53,6 +55,7 @@ pub const Server = struct {
             .runner = runner,
             .docs = DocsLibrary.init(allocator, runner, "ansible-doc"),
             .schemas = SchemaCatalog.init(allocator),
+            .ansible_config = AnsibleConfig.init(allocator, runner),
             .pool = pool,
             .docs_service = DocsService.init(allocator, null),
             .root_uris = std.array_list.Managed([]const u8).init(allocator),
@@ -77,6 +80,7 @@ pub const Server = struct {
         self.settings.deinit();
         self.docs.deinit();
         self.schemas.deinit();
+        self.ansible_config.deinit();
         if (self.cache_path) |p| self.allocator.free(p);
         for (self.root_uris.items) |u| self.allocator.free(u);
         self.root_uris.deinit();

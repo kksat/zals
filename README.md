@@ -22,7 +22,8 @@ Tier 1 — the client-agnostic language server surface:
 - Semantic tokens (syntax highlighting)
 - Hover (keyword / module / option documentation)
 - Completion (+ resolve)
-- Go to definition (module source, and variable definitions)
+- Go to definition (module source, variable definitions, and roles)
+- Go to implementation (role main task files)
 - Find references (variables, within the enclosing role or playbook)
 - Validation: `ansible-lint`, `ansible-playbook --syntax-check` fallback, and
   JSON-schema validation of Ansible metadata files
@@ -40,6 +41,11 @@ Debug code actions (`textDocument/codeAction`) are a third post-parity
 extension: add a `debug` task for the variable under the cursor, or remove the
 debug task the cursor is inside. See
 [ADR-0028](docs/adr/0028-debug-code-actions.md).
+
+Role navigation is a fourth post-parity extension: go-to-definition on a role
+reference opens its argument specs, metadata, or main task file, and
+go-to-implementation (`textDocument/implementation`) opens its main task file.
+See [ADR-0029](docs/adr/0029-role-navigation.md).
 
 Out of scope for v1: the VS Code extension, inventory/metadata notifications,
 and execution environments.

@@ -8,6 +8,8 @@ pub const docs_cache = @import("docs_cache.zig");
 pub const docs_service = @import("docs_service.zig");
 pub const DocsService = docs_service.DocsService;
 pub const module_index = @import("module_index.zig");
+pub const ansible_config = @import("ansible_config.zig");
+pub const AnsibleConfig = ansible_config.AnsibleConfig;
 pub const markup = @import("markup.zig");
 
 test {

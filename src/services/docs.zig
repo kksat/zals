@@ -5,6 +5,7 @@ const Allocator = std.mem.Allocator;
 const Value = std.json.Value;
 const exec = @import("../exec/root.zig");
 const json_util = @import("../lsp/json_util.zig");
+const AnsibleConfig = @import("ansible_config.zig").AnsibleConfig;
 
 pub const Option = struct {
     name: []const u8,
@@ -76,10 +77,10 @@ pub const DocsLibrary = struct {
     }
 
     /// Scan installed collections and redirect routes for module FQCNs.
-    pub fn scanModuleIndex(self: *DocsLibrary) void {
+    pub fn scanModuleIndex(self: *DocsLibrary, config: *AnsibleConfig) void {
         var index = @import("module_index.zig").Index.init(self.allocator, self.runner);
         defer index.deinit();
-        index.scan();
+        index.scan(config);
         const a = self.arena.allocator();
         self.mutex.lock();
         defer self.mutex.unlock();

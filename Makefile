@@ -26,11 +26,12 @@ test:
 parity: build
 	python3 test/parity/compare.py $(ARGS)
 
-# Exercise the references, definition, and code-action providers over stdio
-# against the committed fixtures.
+# Exercise the references, definition, implementation, and code-action
+# providers over stdio against the committed fixtures.
 smoke: build
 	python3 test/smoke_references.py
 	python3 test/smoke_code_actions.py
+	python3 test/smoke_role_navigation.py
 
 run: build
 	./zig-out/bin/zals $(ARGS)

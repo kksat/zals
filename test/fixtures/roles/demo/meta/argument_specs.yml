@@ -1,0 +1,11 @@
+---
+argument_specs:
+  main:
+    short_description: Demo entry point (standalone argument specs)
+    options:
+      app_name:
+        type: str
+        description: Name of the application.
+      app_port:
+        type: int
+        description: Port the application listens on.

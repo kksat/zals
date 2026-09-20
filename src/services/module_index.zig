@@ -9,6 +9,8 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const exec = @import("../exec/root.zig");
 const yaml = @import("../yaml/root.zig");
+const AnsibleConfig = @import("ansible_config.zig").AnsibleConfig;
+const parsePythonArray = @import("ansible_config.zig").parsePythonArray;
 
 pub const Index = struct {
     allocator: Allocator,
@@ -31,17 +33,13 @@ pub const Index = struct {
         self.arena.deinit();
     }
 
-    pub fn scan(self: *Index) void {
+    pub fn scan(self: *Index, config: *AnsibleConfig) void {
         const a = self.arena.allocator();
 
         const ver = self.runner.run(self.allocator, &.{ "ansible", "--version" }) catch return;
         defer ver.deinit(self.allocator);
         const module_search = versionField(ver.stdout, "configured module search path");
         const ansible_location = versionField(ver.stdout, "ansible python module location");
-
-        const cfg = self.runner.run(self.allocator, &.{ "ansible-config", "dump" }) catch null;
-        defer if (cfg) |c| c.deinit(self.allocator);
-        const collections_paths = if (cfg) |c| configField(c.stdout, "COLLECTIONS_PATHS") else null;
 
         if (ansible_location) |loc| {
             const modules_dir = std.fs.path.join(a, &.{ loc, "modules" }) catch return;
@@ -53,10 +51,7 @@ pub const Index = struct {
             const paths = parsePythonArray(a, ms) catch &.{};
             for (paths) |p| self.scanBuiltin(a, p);
         }
-        if (collections_paths) |cp| {
-            const paths = parsePythonArray(a, cp) catch &.{};
-            for (paths) |p| self.scanCollections(a, p);
-        }
+        for (config.collectionsPaths()) |p| self.scanCollections(a, p);
     }
 
     fn add(self: *Index, a: Allocator, fqcn: []const u8) void {
@@ -167,47 +162,6 @@ fn versionField(stdout: []const u8, key: []const u8) ?[]const u8 {
         return std.mem.trim(u8, rest[eq + 1 ..], " \t");
     }
     return null;
-}
-
-/// Extract `KEY(source) = value` from `ansible-config dump` output.
-fn configField(stdout: []const u8, key: []const u8) ?[]const u8 {
-    var it = std.mem.splitScalar(u8, stdout, '\n');
-    while (it.next()) |line| {
-        const trimmed = std.mem.trim(u8, line, " \t\r");
-        if (!std.mem.startsWith(u8, trimmed, key)) continue;
-        const eq = std.mem.indexOfScalar(u8, trimmed, '=') orelse continue;
-        return std.mem.trim(u8, trimmed[eq + 1 ..], " \t");
-    }
-    return null;
-}
-
-/// Parse a Python list repr like `['a', 'b']` into strings.
-fn parsePythonArray(a: Allocator, s: []const u8) ![]const []const u8 {
-    var list = std.ArrayList([]const u8).empty;
-    var i: usize = 0;
-    while (i < s.len) {
-        if (s[i] == '\'' or s[i] == '"') {
-            const quote = s[i];
-            i += 1;
-            const start = i;
-            while (i < s.len and s[i] != quote) : (i += 1) {}
-            try list.append(a, try a.dupe(u8, s[start..i]));
-            if (i < s.len) i += 1;
-        } else {
-            i += 1;
-        }
-    }
-    return try list.toOwnedSlice(a);
-}
-
-test "parse python array" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const a = arena.allocator();
-    const paths = try parsePythonArray(a, "['/a', '/b/c']");
-    try std.testing.expectEqual(@as(usize, 2), paths.len);
-    try std.testing.expectEqualStrings("/a", paths[0]);
-    try std.testing.expectEqualStrings("/b/c", paths[1]);
 }
 
 test "version field" {

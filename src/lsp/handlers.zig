@@ -23,6 +23,8 @@ pub fn handleRequest(self: *Server, a: Allocator, id: Value, method: []const u8,
         return self.sendResult(a, id, try providers.hover.hover(self, a, params));
     if (std.mem.eql(u8, method, "textDocument/definition"))
         return self.sendResult(a, id, try providers.definition.definition(self, a, params));
+    if (std.mem.eql(u8, method, "textDocument/implementation"))
+        return self.sendResult(a, id, try providers.implementation.implementation(self, a, params));
     if (std.mem.eql(u8, method, "textDocument/references"))
         return self.sendResult(a, id, try providers.references.references(self, a, params));
     if (std.mem.eql(u8, method, "textDocument/semanticTokens/full"))
@@ -41,7 +43,7 @@ pub fn handleRequest(self: *Server, a: Allocator, id: Value, method: []const u8,
 pub fn handleNotification(self: *Server, a: Allocator, method: []const u8, params: Value) !void {
     if (std.mem.eql(u8, method, "initialized")) {
         self.initialized = true;
-        self.docs_service.start(&self.docs, self.pool);
+        self.docs_service.start(&self.docs, self.pool, &self.ansible_config);
         var ready = json_util.obj(a);
         try ready.put("modulesCount", json_util.num(self.docs.catalogCount()));
         try self.notify(a, "ansible/docsLibraryReady", .{ .object = ready });

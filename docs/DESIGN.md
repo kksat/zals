@@ -19,7 +19,8 @@ The v1 target is **feature parity with upstream's Tier 1 surface**:
 | Semantic tokens | full-document token stream |
 | Hover | keywords, modules, module options |
 | Completion (+ resolve) | modules, options, values, keywords |
-| Go to definition | module source files, and variable definitions |
+| Go to definition | module source files, variable definitions, and roles |
+| Go to implementation | role main task files |
 | Find references | variables, within the enclosing role or playbook |
 | Validation | `ansible-lint`, `ansible-playbook --syntax-check` fallback, JSON-schema validation |
 
@@ -28,7 +29,8 @@ notifications, execution environments, and `--generate-docs`.
 
 Post-parity extensions: variable navigation (find-references and variable
 go-to-definition, §5), document symbols ([ADR-0027](adr/0027-document-symbols.md)),
-and debug code actions ([ADR-0028](adr/0028-debug-code-actions.md)).
+debug code actions ([ADR-0028](adr/0028-debug-code-actions.md)), and role
+navigation ([ADR-0029](adr/0029-role-navigation.md)).
 
 Parity is behavioral, not byte-for-byte. Intentional differences are tracked in
 [`docs/deviations.md`](deviations.md).
@@ -69,6 +71,7 @@ it in this list.
 | `src/lsp/` | JSON-RPC framing, message types, capability negotiation, dispatch |
 | `src/providers/` | One module per LSP feature (semantic tokens, hover, completion, definition, references, document symbols, code actions, validation) |
 | `src/variables/` | Jinja scanning, definition-site detection, role/playbook scope, the variable index |
+| `src/roles/` | Role reference detection, name-to-directory resolution, navigation targets |
 | `src/services/` | Docs library, schema cache/service/validator, validation manager, config |
 | `src/yaml/` | YAML parser interface, tree-sitter backend, semantic DOM, path utilities |
 | `src/exec/` | Command-runner interface and POSIX backend |
@@ -111,6 +114,17 @@ plus one level of `vars_files`/`include_vars` targets. References is name-based;
 go-to-definition is scope-aware and ranks visible definitions by precedence.
 Files are read through a `FileSource` seam (open documents first, then disk) so
 the model is testable in isolation.
+
+## 5a. Roles
+
+Role navigation ([ADR-0029](adr/0029-role-navigation.md)) lives in
+`src/roles/`. It detects role references over the DOM (`roles:` entries,
+`include_role`/`import_role` names, and `meta/main.yml` dependencies), resolves
+the name against playbook-adjacent `roles/`, `DEFAULT_ROLES_PATH`, workspace
+roots, and declared collections, and selects a target file: argument specs,
+metadata, or the main task file for definition; the main task file for
+implementation. `DEFAULT_ROLES_PATH` and `COLLECTIONS_PATHS` come from a cached
+`ansible-config dump` shared with the module index.
 
 ## 6. Documentation data
 

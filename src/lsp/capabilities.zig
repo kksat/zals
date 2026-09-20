@@ -48,6 +48,7 @@ pub fn build(a: Allocator, encoding: []const u8, workspace_folders: bool) !Value
     try caps.put("completionProvider", .{ .object = completion });
 
     try caps.put("definitionProvider", json_util.booleanValue(true));
+    try caps.put("implementationProvider", json_util.booleanValue(true));
     try caps.put("referencesProvider", json_util.booleanValue(true));
 
     var doc_symbol = json_util.obj(a);

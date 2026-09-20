@@ -453,15 +453,16 @@ test "fixture role references span defaults, meta, tasks, and templates" {
     var index = Index.init(a, DiskSource.source());
     const uri = "file://test/fixtures/roles/demo/tasks/main.yml";
     const occ = try index.occurrences(a, uri, "app_name");
-    // defaults key + argument_specs option + task usage + template usage
-    try testing.expectEqual(@as(usize, 4), occ.len);
+    // defaults key + argument_specs option in meta/main.yml + argument_specs
+    // option in meta/argument_specs.yml + task usage + template usage
+    try testing.expectEqual(@as(usize, 5), occ.len);
 
     var defs: usize = 0;
     var refs: usize = 0;
     for (occ) |o| {
         if (o.kind == .definition) defs += 1 else refs += 1;
     }
-    try testing.expectEqual(@as(usize, 2), defs);
+    try testing.expectEqual(@as(usize, 3), defs);
     try testing.expectEqual(@as(usize, 2), refs);
 
     // register: definition + usage

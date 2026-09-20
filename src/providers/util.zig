@@ -7,6 +7,8 @@ const json_util = @import("../lsp/json_util.zig");
 const Server = @import("../lsp/server.zig").Server;
 const Document = @import("../workspace/document.zig").Document;
 const yaml = @import("../yaml/root.zig");
+const roles = @import("../roles/root.zig");
+const paths = @import("../paths.zig");
 
 pub const Cursor = struct {
     doc: *Document,
@@ -51,4 +53,41 @@ pub fn leafPair(path: []*yaml.Node) ?*yaml.Node {
         if (path[i].isPair()) return path[i];
     }
     return null;
+}
+
+/// Build a `Location` pointing at the start of `path` (ADR-0009).
+pub fn fileLocation(a: Allocator, path: []const u8) !Value {
+    const uri = try paths.pathToUri(a, path);
+    var range = json_util.obj(a);
+    var zero = json_util.obj(a);
+    try zero.put("line", json_util.num(0));
+    try zero.put("character", json_util.num(0));
+    try range.put("start", .{ .object = zero });
+    try range.put("end", .{ .object = zero });
+    var loc = json_util.obj(a);
+    try loc.put("uri", json_util.str(uri));
+    try loc.put("range", .{ .object = range });
+    return .{ .object = loc };
+}
+
+/// Resolve a role name against the workspace roots and cached Ansible config.
+pub fn resolveRole(
+    self: *Server,
+    a: Allocator,
+    name: []const u8,
+    referencing_path: []const u8,
+    declared_collections: []const []const u8,
+) ?[]const u8 {
+    var roots = std.array_list.Managed([]const u8).init(a);
+    for (self.root_uris.items) |u| {
+        const p = paths.uriToPath(a, u) catch continue;
+        roots.append(p) catch {};
+    }
+    const resolver = roles.Resolver{
+        .allocator = a,
+        .config = &self.ansible_config,
+        .workspace_roots = roots.items,
+        .declared_collections = declared_collections,
+    };
+    return resolver.resolve(name, referencing_path);
 }

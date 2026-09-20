@@ -18,6 +18,8 @@ pub const workspace = struct {
 pub const services = @import("services/root.zig");
 pub const providers = @import("providers/root.zig");
 pub const variables = @import("variables/root.zig");
+pub const roles = @import("roles/root.zig");
+pub const paths = @import("paths.zig");
 pub const concurrency = @import("concurrency/root.zig");
 
 test {
@@ -37,5 +39,7 @@ test {
     _ = @import("services/schema.zig");
     _ = @import("services/schema_service.zig");
     _ = @import("variables/root.zig");
+    _ = @import("roles/root.zig");
+    _ = @import("paths.zig");
     _ = @import("concurrency/pool.zig");
 }

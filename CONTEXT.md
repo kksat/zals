@@ -39,6 +39,14 @@ _Avoid_: callback, hook
 An entry in a play's `roles:` list that applies a role.
 _Avoid_: role reference, role call
 
+**Role reference**:
+A site that names a role to apply: an entry in a play's `roles:` list, the
+`name` of an `include_role`/`import_role` task, or an entry in a role's
+`meta/main.yml` `dependencies:`. Go-to-definition opens the role's argument
+specs, metadata, or main task file; go-to-implementation opens its main task
+file.
+_Avoid_: role usage, role mention
+
 **Module key**:
 The key of a task map that names the module the task invokes.
 _Avoid_: action key, module name
