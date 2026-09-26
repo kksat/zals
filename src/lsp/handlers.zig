@@ -4,10 +4,13 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Value = std.json.Value;
 const json_util = @import("json_util.zig");
+const encode = @import("encode.zig");
 const capabilities = @import("capabilities.zig");
 const sync = @import("sync.zig");
 const Server = @import("server.zig").Server;
+const Document = @import("../workspace/document.zig").Document;
 const providers = @import("../providers/root.zig");
+const cursor = @import("../cursor.zig");
 
 pub fn handleRequest(self: *Server, a: Allocator, id: Value, method: []const u8, params: Value) !void {
     if (std.mem.eql(u8, method, "initialize")) return onInitialize(self, a, id, params);
@@ -16,19 +19,19 @@ pub fn handleRequest(self: *Server, a: Allocator, id: Value, method: []const u8,
         return self.sendResult(a, id, Value.null);
     }
     if (std.mem.eql(u8, method, "textDocument/completion"))
-        return self.sendResult(a, id, try providers.completion.complete(self, a, params));
+        return self.sendResult(a, id, try completionResult(self, a, params));
     if (std.mem.eql(u8, method, "completionItem/resolve"))
-        return self.sendResult(a, id, try providers.completion.resolve(self, a, params));
+        return self.sendResult(a, id, try resolveResult(self, a, params));
     if (std.mem.eql(u8, method, "textDocument/hover"))
-        return self.sendResult(a, id, try providers.hover.hover(self, a, params));
+        return self.sendResult(a, id, try hoverResult(self, a, params));
     if (std.mem.eql(u8, method, "textDocument/definition"))
-        return self.sendResult(a, id, try providers.definition.definition(self, a, params));
+        return self.sendResult(a, id, try definitionResult(self, a, params));
     if (std.mem.eql(u8, method, "textDocument/implementation"))
-        return self.sendResult(a, id, try providers.implementation.implementation(self, a, params));
+        return self.sendResult(a, id, try encode.optionalLocation(a, try providers.implementation.implementation(self, a, params)));
     if (std.mem.eql(u8, method, "textDocument/references"))
-        return self.sendResult(a, id, try providers.references.references(self, a, params));
+        return self.sendResult(a, id, try referencesResult(self, a, params));
     if (std.mem.eql(u8, method, "textDocument/semanticTokens/full"))
-        return self.sendResult(a, id, try providers.semantic_tokens.full(self, a, params));
+        return self.sendResult(a, id, try semanticResult(self, a, params));
     if (std.mem.eql(u8, method, "textDocument/documentSymbol"))
         return self.sendResult(a, id, try providers.document_symbols.documentSymbol(self, a, params));
     if (std.mem.eql(u8, method, "textDocument/codeAction"))
@@ -65,6 +68,74 @@ pub fn handleNotification(self: *Server, a: Allocator, method: []const u8, param
         return sync.didChangeWorkspaceFolders(self, params);
     }
     // Unknown notifications are ignored, per the LSP spec.
+}
+
+fn documentOffset(self: *Server, params: Value) ?struct { doc: *Document, offset: usize } {
+    const td = json_util.field(params, "textDocument") orelse return null;
+    const uri = json_util.string(td, "uri") orelse return null;
+    const pos_v = json_util.field(params, "position") orelse return null;
+    const pos = json_util.position(pos_v) orelse return null;
+    const doc = self.documents.get(uri) orelse return null;
+    const offset = doc.offsetAt(pos) orelse return null;
+    return .{ .doc = doc, .offset = offset };
+}
+
+fn documentByUri(self: *Server, params: Value) ?*Document {
+    const td = json_util.field(params, "textDocument") orelse return null;
+    const uri = json_util.string(td, "uri") orelse return null;
+    return self.documents.get(uri);
+}
+
+fn emptyCompletion(a: Allocator) !Value {
+    return encode.completionList(a, .{ .items = &.{} });
+}
+
+fn completionResult(self: *Server, a: Allocator, params: Value) !Value {
+    const loc = documentOffset(self, params) orelse return emptyCompletion(a);
+    var opened = cursor.Doc.open(a, loc.doc.bytes()) catch return emptyCompletion(a);
+    defer opened.deinit();
+    const lookup = cursor.fromLibrary(&self.docs);
+    const cur = try opened.at(loc.doc.uri, loc.offset, lookup);
+    return encode.completionList(a, try providers.completion.list(a, cur, lookup));
+}
+
+fn resolveResult(self: *Server, a: Allocator, params: Value) !Value {
+    const label = json_util.string(params, "label") orelse return params;
+    const extra = providers.completion.resolve(a, label, cursor.fromLibrary(&self.docs));
+    var obj = switch (params) {
+        .object => |o| o,
+        else => return params,
+    };
+    if (extra.detail) |d| try obj.put("detail", json_util.str(d));
+    if (extra.documentation) |doc| try obj.put("documentation", try encode.markup(a, doc));
+    return .{ .object = obj };
+}
+
+fn hoverResult(self: *Server, a: Allocator, params: Value) !Value {
+    const loc = documentOffset(self, params) orelse return Value.null;
+    var opened = cursor.Doc.open(a, loc.doc.bytes()) catch return Value.null;
+    defer opened.deinit();
+    const cur = try opened.at(loc.doc.uri, loc.offset, cursor.fromLibrary(&self.docs));
+    return encode.hover(a, try providers.hover.format(a, loc.doc, cur));
+}
+
+fn definitionResult(self: *Server, a: Allocator, params: Value) !Value {
+    return switch (try providers.definition.definition(self, a, params)) {
+        .none => Value.null,
+        .location => |loc| try encode.location(a, loc),
+        .locations => |locs| try encode.locations(a, locs),
+    };
+}
+
+fn referencesResult(self: *Server, a: Allocator, params: Value) !Value {
+    const locs = (try providers.references.references(self, a, params)) orelse return Value.null;
+    return encode.locations(a, locs);
+}
+
+fn semanticResult(self: *Server, a: Allocator, params: Value) !Value {
+    const doc = documentByUri(self, params) orelse return encode.semanticTokens(a, &.{});
+    const tokens = try providers.semantic_tokens.collect(a, doc, cursor.fromLibrary(&self.docs));
+    return encode.semanticTokens(a, tokens);
 }
 
 fn onInitialize(self: *Server, a: Allocator, id: Value, params: Value) !void {

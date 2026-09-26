@@ -34,6 +34,10 @@ pub const Occurrence = struct {
 pub const Cursor = struct {
     name: []const u8,
     kind: OccurrenceKind,
+    /// Byte range of this occurrence. `end` is exclusive. Zero when a caller
+    /// only needed the name.
+    start: usize = 0,
+    end: usize = 0,
 };
 
 pub const Index = struct {
@@ -50,12 +54,12 @@ pub const Index = struct {
         const scan = try self.scanFile(a, uri, path);
         for (scan.definitions) |d| {
             if (d.start <= offset and offset <= d.end) {
-                return .{ .name = d.name, .kind = .definition };
+                return .{ .name = d.name, .kind = .definition, .start = d.start, .end = d.end };
             }
         }
         for (scan.references) |r| {
             if (r.start <= offset and offset <= r.end) {
-                return .{ .name = r.name, .kind = .reference };
+                return .{ .name = r.name, .kind = .reference, .start = r.start, .end = r.end };
             }
         }
         return null;
@@ -76,14 +80,14 @@ pub const Index = struct {
         try definitions_mod.collect(a, forest, scope.fileKind(path), &defs);
         for (defs.items) |d| {
             if (d.start <= offset and offset <= d.end) {
-                return .{ .name = d.name, .kind = .definition };
+                return .{ .name = d.name, .kind = .definition, .start = d.start, .end = d.end };
             }
         }
         var refs = std.array_list.Managed(jinja.Ident).init(a);
         for (forest.roots) |root| try collectRefs(a, root, forest.text, &refs);
         for (refs.items) |r| {
             if (r.start <= offset and offset <= r.end) {
-                return .{ .name = r.name, .kind = .reference };
+                return .{ .name = r.name, .kind = .reference, .start = r.start, .end = r.end };
             }
         }
         return null;

@@ -3,8 +3,6 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const Value = std.json.Value;
-const json_util = @import("../lsp/json_util.zig");
 const types = @import("../lsp/types.zig");
 const Server = @import("../lsp/server.zig").Server;
 const Document = @import("../workspace/document.zig").Document;
@@ -54,31 +52,14 @@ pub fn location(
     server: *Server,
     index: *variables.Index,
     o: variables.Occurrence,
-) !Value {
-    var range: types.Range = undefined;
+) !types.Location {
     if (server.documents.get(o.uri)) |doc| {
-        range = doc.rangeFromOffsets(o.start, o.end);
-    } else {
-        const text = (try index.fileText(a, o.uri)) orelse "";
-        var doc = try Document.init(a, o.uri, "ansible", 0, text, server.encoding);
-        defer doc.deinit();
-        range = doc.rangeFromOffsets(o.start, o.end);
+        return .{ .uri = o.uri, .range = doc.rangeFromOffsets(o.start, o.end) };
     }
-
-    var loc = json_util.obj(a);
-    try loc.put("uri", json_util.str(o.uri));
-    var r = json_util.obj(a);
-    try r.put("start", posValue(a, range.start));
-    try r.put("end", posValue(a, range.end));
-    try loc.put("range", .{ .object = r });
-    return .{ .object = loc };
-}
-
-fn posValue(a: Allocator, p: types.Position) Value {
-    var o = json_util.obj(a);
-    o.put("line", json_util.num(p.line)) catch {};
-    o.put("character", json_util.num(p.character)) catch {};
-    return .{ .object = o };
+    const text = (try index.fileText(a, o.uri)) orelse "";
+    var doc = try Document.init(a, o.uri, "ansible", 0, text, server.encoding);
+    defer doc.deinit();
+    return .{ .uri = o.uri, .range = doc.rangeFromOffsets(o.start, o.end) };
 }
 
 /// Deterministic ordering: by URI, then byte offset.

@@ -1,182 +1,190 @@
-//! Completion and completionItem/resolve.
+//! Completion candidates for a classified cursor.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const Value = std.json.Value;
-const json_util = @import("../lsp/json_util.zig");
-const Server = @import("../lsp/server.zig").Server;
+const types = @import("../lsp/types.zig");
 const yaml = @import("../yaml/root.zig");
-const util = @import("util.zig");
+const cursor = @import("../cursor.zig");
 
-pub fn complete(self: *Server, a: Allocator, params: Value) !Value {
-    var cur = util.parseAt(self, a, params) orelse return emptyList(a);
-    defer cur.forest.deinit();
+pub const Resolved = struct {
+    detail: ?[]const u8 = null,
+    documentation: ?types.MarkupContent = null,
+};
 
-    var items = std.json.Array.init(a);
-    const arena = cur.forest.allocator();
-    const path = cur.path;
-
-    if (path.len > 0 and (yaml.predicates.isPlayParam(arena, path, cur.doc.uri) orelse false)) {
-        try addKeywords(&items, a, &yaml.keywords.play_keywords, 14);
-    } else if (path.len > 0 and yaml.predicates.isBlockParam(arena, path)) {
-        try addKeywords(&items, a, &yaml.keywords.block_keywords, 14);
-    } else if (path.len > 0 and yaml.predicates.isRoleParam(arena, path)) {
-        try addKeywords(&items, a, &yaml.keywords.role_keywords, 14);
-    } else if (path.len > 0 and yaml.predicates.isTaskParam(arena, path)) {
-        try addKeywords(&items, a, &yaml.keywords.task_keywords, 14);
-        if (yaml.predicates.isPlayParam(arena, path, cur.doc.uri) == null) {
-            try addPlayWithoutTask(&items, a);
+pub fn list(a: Allocator, cur: ?cursor.Cursor, lookup: cursor.Docs) !types.CompletionList {
+    var items = std.array_list.Managed(types.CompletionItem).init(a);
+    if (cur) |c| {
+        switch (c) {
+            .play_keyword => try addKeywords(&items, &yaml.keywords.play_keywords),
+            .block_keyword => try addKeywords(&items, &yaml.keywords.block_keywords),
+            .role_keyword => try addKeywords(&items, &yaml.keywords.role_keywords),
+            .task_keyword => |t| try addTask(&items, a, lookup, t.has_module, t.offer_play_keywords),
+            .module => |m| try addTask(&items, a, lookup, m.has_module, m.offer_play_keywords),
+            .module_option => |o| {
+                if (o.list_options) try addOptions(&items, o) else try addFallback(&items, a, lookup);
+            },
+            // A value that is not a keyword context used to fall through to
+            // the same default list.
+            .role_reference, .variable => try addFallback(&items, a, lookup),
         }
-        const modules = yaml.options.providedModuleNames(arena, path) catch &.{};
-        // Only treat a provided key as a module when it actually resolves;
-        // an incomplete key like `ansible.builtin.` should still get module
-        // completions (matching upstream's `findProvidedModule`).
-        var has_module = false;
-        for (modules) |n| {
-            if (self.docs.hasModuleName(n)) {
-                has_module = true;
-                break;
-            }
-            const builtin = std.fmt.allocPrint(arena, "ansible.builtin.{s}", .{n}) catch continue;
-            if (self.docs.hasModuleName(builtin)) {
-                has_module = true;
-                break;
-            }
-        }
-        if (!has_module) {
-            try addKeywords(&items, a, &[_][]const u8{"block"}, 14);
-            try addModules(self, &items, a);
-        }
-    } else if (try addOptions(self, &items, a, arena, path)) {
-        // module options filled
     } else {
-        try addKeywords(&items, a, &yaml.keywords.task_keywords, 14);
-        try addModules(self, &items, a);
+        try addFallback(&items, a, lookup);
     }
-
-    var list = json_util.obj(a);
-    try list.put("isIncomplete", json_util.booleanValue(false));
-    try list.put("items", .{ .array = items });
-    return .{ .object = list };
+    return .{ .items = try items.toOwnedSlice() };
 }
 
-pub fn resolve(self: *Server, a: Allocator, params: Value) !Value {
-    const label = json_util.string(params, "label") orelse return params;
-    if (self.docs.findModule(label) orelse self.docs.findModuleInContext(a, label, &.{})) |mod| {
-        var doc = json_util.obj(a);
-        try doc.put("kind", json_util.str("markdown"));
-        try doc.put("value", json_util.str(mod.description));
-        var obj = switch (params) {
-            .object => |o| o,
-            else => json_util.obj(a),
+pub fn resolve(a: Allocator, label: []const u8, lookup: cursor.Docs) Resolved {
+    if (lookup.findInContext(a, label, &.{})) |mod| {
+        return .{
+            .detail = mod.name,
+            .documentation = .{ .kind = .markdown, .value = mod.description },
         };
-        try obj.put("detail", json_util.str(mod.name));
-        try obj.put("documentation", .{ .object = doc });
-        return .{ .object = obj };
     }
     if (yaml.keyword_docs.hover(label)) |text| {
-        var doc = json_util.obj(a);
-        try doc.put("kind", json_util.str("markdown"));
-        try doc.put("value", json_util.str(text));
-        var obj = switch (params) {
-            .object => |o| o,
-            else => json_util.obj(a),
-        };
-        try obj.put("documentation", .{ .object = doc });
-        return .{ .object = obj };
+        return .{ .documentation = .{ .kind = .markdown, .value = text } };
     }
-    return params;
+    return .{};
 }
 
-fn addOptions(self: *Server, items: *std.json.Array, a: Allocator, arena: Allocator, path: []*yaml.Node) !bool {
-    const traced = (try yaml.options.getTaskParamPathWithTrace(arena, path)) orelse return false;
-    if (traced.trace.len == 0) return false;
-    const last = traced.trace[traced.trace.len - 1];
-    if (last.kind != .dict) return false;
+fn addTask(
+    items: *std.array_list.Managed(types.CompletionItem),
+    a: Allocator,
+    lookup: cursor.Docs,
+    has_module: bool,
+    offer_play_keywords: bool,
+) !void {
+    try addKeywords(items, &yaml.keywords.task_keywords);
+    if (offer_play_keywords) try addPlayWithoutTask(items);
+    if (!has_module) {
+        const block = [_][]const u8{"block"};
+        try addKeywords(items, &block);
+        try addModules(items, a, lookup);
+    }
+}
 
-    const collections = yaml.collections.getDeclaredCollections(arena, traced.path) catch &.{};
-    const module_key = util.currentKey(traced.path) orelse return false;
+fn addFallback(
+    items: *std.array_list.Managed(types.CompletionItem),
+    a: Allocator,
+    lookup: cursor.Docs,
+) !void {
+    try addKeywords(items, &yaml.keywords.task_keywords);
+    try addModules(items, a, lookup);
+}
 
-    const mod = if (std.mem.eql(u8, module_key, "args")) blk: {
-        const names = yaml.options.providedModuleNames(arena, traced.path) catch break :blk null;
-        for (names) |n| {
-            if (self.docs.findModuleInContext(arena, n, collections)) |m| break :blk m;
-        }
-        break :blk null;
-    } else self.docs.findModuleInContext(arena, module_key, collections);
-
-    const module = mod orelse return false;
-    const provided = yaml.options.providedKeys(arena, path) catch &.{};
-
-    var it = module.options.iterator();
+fn addOptions(items: *std.array_list.Managed(types.CompletionItem), o: cursor.OptionAt) !void {
+    var it = o.module.options.iterator();
     while (it.next()) |e| {
         const opt = e.value_ptr.*;
         var skip = false;
-        for (provided) |p| {
+        for (o.provided) |p| {
             if (std.mem.eql(u8, p, opt.name)) {
                 skip = true;
                 break;
             }
         }
         if (skip) continue;
-        var item = json_util.obj(a);
-        try item.put("label", json_util.str(opt.name));
-        try item.put("kind", json_util.num(10)); // property
-        try item.put("detail", json_util.str(opt.type));
-        try item.put("insertText", json_util.str(opt.name));
-        if (opt.description.len > 0) {
-            var doc = json_util.obj(a);
-            try doc.put("kind", json_util.str("markdown"));
-            try doc.put("value", json_util.str(opt.description));
-            try item.put("documentation", .{ .object = doc });
-        }
-        try items.append(.{ .object = item });
+        try items.append(.{
+            .label = opt.name,
+            .kind = .property,
+            .detail = opt.type,
+            .documentation = if (opt.description.len > 0)
+                .{ .kind = .markdown, .value = opt.description }
+            else
+                null,
+            .insertText = opt.name,
+        });
     }
-    return true;
 }
 
-fn emptyList(a: Allocator) !Value {
-    var list = json_util.obj(a);
-    try list.put("isIncomplete", json_util.booleanValue(false));
-    try list.put("items", .{ .array = std.json.Array.init(a) });
-    return .{ .object = list };
-}
-
-fn addKeywords(items: *std.json.Array, a: Allocator, names: []const []const u8, kind: i64) !void {
+fn addKeywords(items: *std.array_list.Managed(types.CompletionItem), names: []const []const u8) !void {
     for (names) |name| {
-        var item = json_util.obj(a);
-        try item.put("label", json_util.str(name));
-        try item.put("kind", json_util.num(kind));
-        try item.put("insertText", json_util.str(name));
-        try items.append(.{ .object = item });
+        try items.append(.{
+            .label = name,
+            .kind = .keyword,
+            .insertText = name,
+        });
     }
 }
 
-fn addPlayWithoutTask(items: *std.json.Array, a: Allocator) !void {
+fn addPlayWithoutTask(items: *std.array_list.Managed(types.CompletionItem)) !void {
     for (yaml.keywords.play_keywords) |name| {
         if (!yaml.keywords.isTaskKeyword(name)) {
-            var item = json_util.obj(a);
-            try item.put("label", json_util.str(name));
-            try item.put("kind", json_util.num(14));
-            try item.put("insertText", json_util.str(name));
-            try items.append(.{ .object = item });
+            try items.append(.{
+                .label = name,
+                .kind = .keyword,
+                .insertText = name,
+            });
         }
     }
 }
 
-fn addModules(self: *Server, items: *std.json.Array, a: Allocator) !void {
-    var it = self.docs.module_fqcns.iterator();
-    while (it.next()) |e| {
-        const fqcn = e.key_ptr.*;
-        var item = json_util.obj(a);
-        try item.put("label", json_util.str(fqcn));
-        try item.put("kind", json_util.num(7)); // class
-        // detail is the namespace.collection prefix
+fn addModules(
+    items: *std.array_list.Managed(types.CompletionItem),
+    a: Allocator,
+    lookup: cursor.Docs,
+) !void {
+    var names = std.array_list.Managed([]const u8).init(a);
+    try lookup.writeFqcns(&names);
+    for (names.items) |fqcn| {
+        var detail: ?[]const u8 = null;
         if (std.mem.lastIndexOfScalar(u8, fqcn, '.')) |dot| {
             if (std.mem.lastIndexOfScalar(u8, fqcn[0..dot], '.')) |dot2| {
-                try item.put("detail", json_util.str(fqcn[0..dot2]));
+                detail = fqcn[0..dot2];
             }
         }
-        try items.append(.{ .object = item });
+        try items.append(.{
+            .label = fqcn,
+            .kind = .class,
+            .detail = detail,
+        });
     }
+}
+
+const testing = std.testing;
+
+test "completion lists play keywords from a cursor" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const cur = cursor.Cursor{ .play_keyword = .{
+        .name = "ho",
+        .known = false,
+        .start = 0,
+        .end = 0,
+    } };
+    const result = try list(arena.allocator(), cur, cursor.emptyDocs());
+    try testing.expect(hasLabel(result.items, "hosts"));
+    try testing.expect(!hasLabel(result.items, "ansible.builtin.ping"));
+}
+
+test "completion lists remaining module options" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var options = std.StringHashMap(@import("../services/docs.zig").Option).init(a);
+    try options.put("data", .{ .name = "data", .description = "payload", .type = "str" });
+    try options.put("other", .{ .name = "other", .description = "", .type = "int" });
+    const mod = @import("../services/docs.zig").Module{
+        .name = "ping",
+        .description = "probe",
+        .filename = "",
+        .options = options,
+    };
+    const cur = cursor.Cursor{ .module_option = .{
+        .name = "data",
+        .module = mod,
+        .option = options.get("data"),
+        .list_options = true,
+        .provided = &.{"data"},
+        .start = 0,
+        .end = 4,
+    } };
+    const result = try list(a, cur, cursor.emptyDocs());
+    try testing.expect(hasLabel(result.items, "other"));
+    try testing.expect(!hasLabel(result.items, "data"));
+    try testing.expectEqual(types.CompletionItemKind.property, result.items[0].kind.?);
+}
+
+fn hasLabel(items: []const types.CompletionItem, label: []const u8) bool {
+    for (items) |item| if (std.mem.eql(u8, item.label, label)) return true;
+    return false;
 }

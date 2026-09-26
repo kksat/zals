@@ -4,6 +4,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Value = std.json.Value;
 const json_util = @import("../lsp/json_util.zig");
+const types = @import("../lsp/types.zig");
 const Server = @import("../lsp/server.zig").Server;
 const Document = @import("../workspace/document.zig").Document;
 const yaml = @import("../yaml/root.zig");
@@ -56,18 +57,14 @@ pub fn leafPair(path: []*yaml.Node) ?*yaml.Node {
 }
 
 /// Build a `Location` pointing at the start of `path` (ADR-0009).
-pub fn fileLocation(a: Allocator, path: []const u8) !Value {
-    const uri = try paths.pathToUri(a, path);
-    var range = json_util.obj(a);
-    var zero = json_util.obj(a);
-    try zero.put("line", json_util.num(0));
-    try zero.put("character", json_util.num(0));
-    try range.put("start", .{ .object = zero });
-    try range.put("end", .{ .object = zero });
-    var loc = json_util.obj(a);
-    try loc.put("uri", json_util.str(uri));
-    try loc.put("range", .{ .object = range });
-    return .{ .object = loc };
+pub fn fileLocation(a: Allocator, path: []const u8) !types.Location {
+    return .{
+        .uri = try paths.pathToUri(a, path),
+        .range = .{
+            .start = .{ .line = 0, .character = 0 },
+            .end = .{ .line = 0, .character = 0 },
+        },
+    };
 }
 
 /// Resolve a role name against the workspace roots and cached Ansible config.

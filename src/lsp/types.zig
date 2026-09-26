@@ -150,6 +150,15 @@ pub const SemanticTokens = struct {
     data: []const u32,
 };
 
+/// One semantic token before delta encoding. `kind` and `mods` are legend indices.
+pub const AbsoluteToken = struct {
+    line: u32,
+    start: u32,
+    length: u32,
+    kind: u32,
+    mods: u32 = 0,
+};
+
 pub const TextEdit = struct {
     range: Range,
     newText: []const u8,
