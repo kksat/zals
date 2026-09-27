@@ -173,3 +173,105 @@ test "incremental change" {
     });
     try std.testing.expectEqualStrings("hi", doc.bytes());
 }
+
+test "unicode positions round trip in both negotiated encodings" {
+    // ASCII, two-byte, three-byte, and astral-plane characters.
+    const text = "aé中😀z\nΩ";
+    const offsets = [_]usize{ 0, 1, 3, 6, 10, 11, 12, 14 };
+    const utf16_columns = [_]u32{ 0, 1, 2, 3, 5, 6, 0, 1 };
+    const utf8_columns = [_]u32{ 0, 1, 3, 6, 10, 11, 0, 2 };
+    for ([_]PositionEncoding{ .utf8, .utf16 }) |encoding| {
+        var doc = try Document.init(std.testing.allocator, "file:///unicode.yml", "ansible", 1, text, encoding);
+        defer doc.deinit();
+        for (offsets, 0..) |offset, i| {
+            const expected = lsp.Position{
+                .line = if (i < 6) 0 else 1,
+                .character = if (encoding == .utf8) utf8_columns[i] else utf16_columns[i],
+            };
+            try std.testing.expectEqual(expected, doc.positionAt(offset));
+            try std.testing.expectEqual(offset, doc.offsetAt(expected).?);
+        }
+        try std.testing.expectEqual(lsp.Range{
+            .start = .{ .line = 0, .character = if (encoding == .utf8) 6 else 3 },
+            .end = .{ .line = 0, .character = if (encoding == .utf8) 10 else 5 },
+        }, doc.rangeFromOffsets(6, 10));
+    }
+}
+
+test "crlf line ranges exclude terminators and retain the final empty line" {
+    var doc = try Document.init(std.testing.allocator, "file:///t.yml", "ansible", 1, "a\r\n\r\n中\r\n", .utf16);
+    defer doc.deinit();
+    try std.testing.expectEqual(@as(usize, 4), doc.lineCount());
+    const starts = [_]usize{ 0, 3, 5, 10 };
+    const ends = [_]usize{ 1, 3, 8, 10 };
+    for (starts, ends, 0..) |start, end, line| {
+        const range = doc.lineRange(line).?;
+        try std.testing.expectEqual(start, range.start);
+        try std.testing.expectEqual(end, range.end);
+        // LSP columns beyond the line are clamped before CRLF.
+        try std.testing.expectEqual(end, doc.offsetAt(.{ .line = @intCast(line), .character = 100 }).?);
+    }
+    try std.testing.expect(doc.lineRange(4) == null);
+    try std.testing.expect(doc.offsetAt(.{ .line = 4, .character = 0 }) == null);
+    try std.testing.expectEqual(lsp.Position{ .line = 3, .character = 0 }, doc.positionAt(100));
+}
+
+test "utf-16 edit replaces an astral character without splitting utf-8 bytes" {
+    var doc = try Document.init(std.testing.allocator, "file:///t.yml", "ansible", 1, "a😀z", .utf16);
+    defer doc.deinit();
+    try doc.applyChange(.{
+        .range = .{ .start = .{ .line = 0, .character = 1 }, .end = .{ .line = 0, .character = 3 } },
+        .text = "中\nnext",
+    });
+    try std.testing.expectEqualStrings("a中\nnextz", doc.bytes());
+    try std.testing.expectEqual(@as(usize, 2), doc.lineCount());
+    try std.testing.expectEqual(@as(usize, 5), doc.offsetAt(.{ .line = 1, .character = 0 }).?);
+    try std.testing.expectEqual(lsp.Position{ .line = 1, .character = 5 }, doc.positionAt(doc.bytes().len));
+}
+
+test "multiline deletion and insertion rebuild the line index" {
+    var doc = try Document.init(std.testing.allocator, "file:///t.yml", "ansible", 1, "first\r\nsecond\r\nthird", .utf8);
+    defer doc.deinit();
+    try doc.applyChange(.{
+        .range = .{ .start = .{ .line = 0, .character = 2 }, .end = .{ .line = 2, .character = 2 } },
+        .text = "",
+    });
+    try std.testing.expectEqualStrings("fiird", doc.bytes());
+    try std.testing.expectEqual(@as(usize, 1), doc.lineCount());
+    try doc.applyChange(.{
+        .range = .{ .start = .{ .line = 0, .character = 2 }, .end = .{ .line = 0, .character = 2 } },
+        .text = "\nnew\n",
+    });
+    try std.testing.expectEqualStrings("fi\nnew\nird", doc.bytes());
+    try std.testing.expectEqual(@as(usize, 3), doc.lineCount());
+    try std.testing.expectEqual(@as(usize, 7), doc.offsetAt(.{ .line = 2, .character = 0 }).?);
+}
+
+test "full replacement handles an empty document and discards stale lines" {
+    var doc = try Document.init(std.testing.allocator, "file:///t.yml", "ansible", 1, "one\ntwo\n", .utf16);
+    defer doc.deinit();
+    try doc.applyChange(.{ .text = "" });
+    try std.testing.expectEqualStrings("", doc.bytes());
+    try std.testing.expectEqual(@as(usize, 1), doc.lineCount());
+    try std.testing.expectEqual(lsp.Position{ .line = 0, .character = 0 }, doc.positionAt(100));
+    try doc.applyChange(.{ .text = "new\ntext" });
+    try std.testing.expectEqualStrings("new\ntext", doc.bytes());
+    try std.testing.expectEqual(@as(usize, 2), doc.lineCount());
+    try std.testing.expectEqual(@as(usize, 4), doc.offsetAt(.{ .line = 1, .character = 0 }).?);
+}
+
+test "invalid edit ranges leave the text and line index unchanged" {
+    var doc = try Document.init(std.testing.allocator, "file:///t.yml", "ansible", 1, "one\ntwo", .utf16);
+    defer doc.deinit();
+    const ranges = [_]lsp.Range{
+        .{ .start = .{ .line = 2, .character = 0 }, .end = .{ .line = 2, .character = 1 } },
+        .{ .start = .{ .line = 0, .character = 0 }, .end = .{ .line = 2, .character = 0 } },
+        .{ .start = .{ .line = 1, .character = 1 }, .end = .{ .line = 0, .character = 1 } },
+    };
+    for (ranges) |range| {
+        try std.testing.expectError(error.InvalidRange, doc.applyChange(.{ .range = range, .text = "bad" }));
+        try std.testing.expectEqualStrings("one\ntwo", doc.bytes());
+        try std.testing.expectEqual(@as(usize, 2), doc.lineCount());
+        try std.testing.expectEqual(@as(usize, 4), doc.offsetAt(.{ .line = 1, .character = 0 }).?);
+    }
+}

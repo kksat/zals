@@ -13,13 +13,17 @@ endif
 
 ARGS ?=
 
-.PHONY: build test run fmt clean parity smoke
+.PHONY: build test run fmt clean parity smoke protocol
 
 build:
 	zig build
 
 test:
 	zig build test
+
+# Assert client/server behavior over stdio; no Ansible tools are required.
+protocol: build
+	python3 -m unittest discover -s test -p 'test_*.py' -v
 
 # Compare zals against the upstream Ansible Language Server. Requires the
 # upstream package (see test/parity/compare.py) and a built zals binary.

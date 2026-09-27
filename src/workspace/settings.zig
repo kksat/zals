@@ -75,3 +75,108 @@ fn optBool(v: ?Value, key: []const u8, default: bool) bool {
 fn dupeOpt(a: Allocator, value: ?[]const u8, default: []const u8) ![]const u8 {
     return a.dupe(u8, value orelse default);
 }
+
+fn expectDefaults(settings: *const Settings, validation_enabled: bool) !void {
+    try std.testing.expectEqualStrings("ansible", settings.ansible_path);
+    try std.testing.expect(settings.use_fqcn);
+    try std.testing.expect(settings.provide_redirect_modules);
+    try std.testing.expect(settings.provide_module_option_aliases);
+    try std.testing.expectEqual(validation_enabled, settings.validation_enabled);
+    try std.testing.expect(settings.lint_enabled);
+    try std.testing.expectEqualStrings("ansible-lint", settings.lint_path);
+    try std.testing.expectEqualStrings("", settings.lint_arguments);
+    try std.testing.expect(!settings.auto_fix_on_save);
+    try std.testing.expectEqualStrings("", settings.python_interpreter_path);
+    try std.testing.expectEqualStrings("", settings.python_activation_script);
+}
+
+const custom_settings_json =
+    \\{"ansible":{"ansible":{"path":"/custom/ansible","useFullyQualifiedCollectionNames":false},
+    \\ "completion":{"provideRedirectModules":false,"provideModuleOptionAliases":false},
+    \\ "validation":{"enabled":false,"lint":{"enabled":false,"path":"/custom/lint",
+    \\ "arguments":"--exclude vendor","autoFixOnSave":true}},
+    \\ "python":{"interpreterPath":"/custom/python","activationScript":"/custom/activate"}}}
+;
+
+fn expectCustomSettings(settings: *const Settings) !void {
+    try std.testing.expectEqualStrings("/custom/ansible", settings.ansible_path);
+    try std.testing.expect(!settings.use_fqcn);
+    try std.testing.expect(!settings.provide_redirect_modules);
+    try std.testing.expect(!settings.provide_module_option_aliases);
+    try std.testing.expect(!settings.validation_enabled);
+    try std.testing.expect(!settings.lint_enabled);
+    try std.testing.expectEqualStrings("/custom/lint", settings.lint_path);
+    try std.testing.expectEqualStrings("--exclude vendor", settings.lint_arguments);
+    try std.testing.expect(settings.auto_fix_on_save);
+    try std.testing.expectEqualStrings("/custom/python", settings.python_interpreter_path);
+    try std.testing.expectEqualStrings("/custom/activate", settings.python_activation_script);
+}
+
+test "settings defaults match the documented upstream names" {
+    var settings = Settings.init(std.testing.allocator);
+    defer settings.deinit();
+    try expectDefaults(&settings, true);
+}
+
+test "settings accept notification and initialization option wrappers and own strings" {
+    const wrappers = [_]struct { prefix: []const u8, suffix: []const u8 }{
+        .{ .prefix = "{\"settings\":", .suffix = "}" },
+        .{ .prefix = "", .suffix = "" },
+    };
+    var settings = Settings.init(std.testing.allocator);
+    defer settings.deinit();
+    for (wrappers) |wrapper| {
+        {
+            const bytes = try std.mem.concat(std.testing.allocator, u8, &.{ wrapper.prefix, custom_settings_json, wrapper.suffix });
+            defer std.testing.allocator.free(bytes);
+            const parsed = try std.json.parseFromSlice(Value, std.testing.allocator, bytes, .{ .allocate = .alloc_always });
+            defer parsed.deinit();
+            try settings.update(parsed.value);
+        }
+        // The input JSON and parsed strings have been freed.
+        try expectCustomSettings(&settings);
+    }
+}
+
+test "a partial settings update resets omitted fields to defaults" {
+    var settings = Settings.init(std.testing.allocator);
+    defer settings.deinit();
+    const custom = try std.json.parseFromSlice(Value, std.testing.allocator, custom_settings_json, .{});
+    defer custom.deinit();
+    try settings.update(custom.value);
+    const partial = try std.json.parseFromSlice(Value, std.testing.allocator,
+        \\{"settings":{"ansible":{"validation":{"enabled":false}}}}
+    , .{});
+    defer partial.deinit();
+    try settings.update(partial.value);
+    try expectDefaults(&settings, false);
+}
+
+test "settings ignore unsupported names and fall back for wrong value types" {
+    var settings = Settings.init(std.testing.allocator);
+    defer settings.deinit();
+    const parsed = try std.json.parseFromSlice(Value, std.testing.allocator,
+        \\{"ansible":{"ansible":{"path":17,"useFullyQualifiedCollectionNames":"false"},
+        \\ "completion":{"provideRedirectModules":null,"provideModuleOptionAliases":0},
+        \\ "validation":{"enabled":[],"lint":{"enabled":"false","path":false,
+        \\ "arguments":{},"autoFixOnSave":"true"}},
+        \\ "python":{"interpreterPath":3,"activationScript":null},"unsupported":true}}
+    , .{});
+    defer parsed.deinit();
+    try settings.update(parsed.value);
+    try expectDefaults(&settings, true);
+}
+
+test "reload resets custom settings and allows another update" {
+    var settings = Settings.init(std.testing.allocator);
+    defer settings.deinit();
+    const custom = try std.json.parseFromSlice(Value, std.testing.allocator, custom_settings_json, .{});
+    defer custom.deinit();
+    try settings.update(custom.value);
+    settings.reload();
+    try expectDefaults(&settings, true);
+    try settings.update(custom.value);
+    try expectCustomSettings(&settings);
+    try settings.update(.null);
+    try expectDefaults(&settings, true);
+}

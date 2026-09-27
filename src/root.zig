@@ -30,6 +30,8 @@ test {
     _ = @import("lsp/server.zig");
     _ = @import("lsp/handlers.zig");
     _ = @import("workspace/document.zig");
+    _ = @import("workspace/store.zig");
+    _ = @import("workspace/settings.zig");
     _ = @import("providers/validation.zig");
     _ = @import("yaml/parser.zig");
     _ = @import("yaml/keywords.zig");

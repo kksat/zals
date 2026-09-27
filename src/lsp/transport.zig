@@ -123,3 +123,92 @@ test "frame round trip" {
     defer allocator.free(msg);
     try std.testing.expectEqualStrings("{\"jsonrpc\":\"2.0\"}", msg);
 }
+
+test "reader accepts case-insensitive length, whitespace, and content type headers" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const file = try tmp.dir.createFile("headers", .{ .read = true });
+    defer file.close();
+    try file.writeAll("Content-Type: application/vscode-jsonrpc; charset=utf-8\r\ncOnTeNt-LeNgTh:\t 2 \t\r\n\r\n{}");
+    try file.seekTo(0);
+    var reader = Transport.init(file, file);
+    const msg = (try reader.readMessage(std.testing.allocator)).?;
+    defer std.testing.allocator.free(msg);
+    try std.testing.expectEqualStrings("{}", msg);
+    try std.testing.expect((try reader.readMessage(std.testing.allocator)) == null);
+}
+
+test "reader separates consecutive frames including an empty body" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const file = try tmp.dir.createFile("frames", .{ .read = true });
+    defer file.close();
+    var writer = Transport.init(file, file);
+    const bodies = [_][]const u8{ "{\"text\":\"é😀\"}", "", "{\"id\":2}" };
+    for (bodies) |body| try writer.writeMessage(body);
+    try file.seekTo(0);
+    var reader = Transport.init(file, file);
+    for (bodies) |body| {
+        const msg = (try reader.readMessage(std.testing.allocator)).?;
+        defer std.testing.allocator.free(msg);
+        try std.testing.expectEqualStrings(body, msg);
+    }
+    try std.testing.expect((try reader.readMessage(std.testing.allocator)) == null);
+}
+
+test "writer counts utf-8 bytes in Content-Length" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const file = try tmp.dir.createFile("unicode", .{ .read = true });
+    defer file.close();
+    var writer = Transport.init(file, file);
+    try writer.writeMessage("é😀");
+    try file.seekTo(0);
+    const bytes = try file.readToEndAlloc(std.testing.allocator, 100);
+    defer std.testing.allocator.free(bytes);
+    try std.testing.expectEqualStrings("Content-Length: 6\r\n\r\né😀", bytes);
+}
+
+test "reader refills its buffer for large bodies without consuming the next frame" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const file = try tmp.dir.createFile("large", .{ .read = true });
+    defer file.close();
+    const body = try std.testing.allocator.alloc(u8, 2 * 16 * 1024 + 37);
+    defer std.testing.allocator.free(body);
+    for (body, 0..) |*byte, i| byte.* = @intCast('a' + i % 26);
+    var writer = Transport.init(file, file);
+    try writer.writeMessage(body);
+    try writer.writeMessage("next");
+    try file.seekTo(0);
+    var reader = Transport.init(file, file);
+    const first = (try reader.readMessage(std.testing.allocator)).?;
+    defer std.testing.allocator.free(first);
+    try std.testing.expectEqualSlices(u8, body, first);
+    const second = (try reader.readMessage(std.testing.allocator)).?;
+    defer std.testing.allocator.free(second);
+    try std.testing.expectEqualStrings("next", second);
+    try std.testing.expect((try reader.readMessage(std.testing.allocator)) == null);
+}
+
+test "reader rejects missing or malformed lengths and truncated frames" {
+    const cases = [_]struct { frame: []const u8, expected: anyerror }{
+        .{ .frame = "Content-Type: application/json\r\n\r\n{}", .expected = error.MissingContentLength },
+        .{ .frame = "Content-Length: nope\r\n\r\n{}", .expected = error.InvalidContentLength },
+        .{ .frame = "Content-Length: -1\r\n\r\n", .expected = error.InvalidContentLength },
+        .{ .frame = "Content-Length: 999999999999999999999999999999\r\n\r\n", .expected = error.InvalidContentLength },
+        .{ .frame = "Content-Length: 2\r\n", .expected = error.UnexpectedEndOfStream },
+        .{ .frame = "Content-Len", .expected = error.UnexpectedEndOfStream },
+        .{ .frame = "Content-Length: 3\r\n\r\n{}", .expected = error.EndOfStream },
+    };
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    for (cases) |case| {
+        const file = try tmp.dir.createFile("invalid", .{ .read = true });
+        defer file.close();
+        try file.writeAll(case.frame);
+        try file.seekTo(0);
+        var reader = Transport.init(file, file);
+        try std.testing.expectError(case.expected, reader.readMessage(std.testing.allocator));
+    }
+}

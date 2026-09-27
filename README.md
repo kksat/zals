@@ -93,6 +93,7 @@ release page and put `zals` on your `PATH`.
 ```sh
 make build           # build the server into zig-out/bin/zals
 make test            # run unit tests
+make protocol        # run LSP protocol tests (no Ansible installation needed)
 make run ARGS=--version
 ```
 
