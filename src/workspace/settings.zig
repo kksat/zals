@@ -26,6 +26,9 @@ pub const Settings = struct {
     /// `ansible.workspace.missingGitWarning`. One session warning when an
     /// opened folder has no Workspace.
     missing_git_warning: bool = true,
+    /// `ansible.workspace.rootMarker`. File or directory name that marks a
+    /// Workspace. Default `.git`. A blank value or a path falls back to `.git`.
+    root_marker: []const u8 = ".git",
 
     pub fn init(allocator: Allocator) Settings {
         return .{ .allocator = allocator, .arena = std.heap.ArenaAllocator.init(allocator) };
@@ -63,6 +66,7 @@ pub const Settings = struct {
         self.python_interpreter_path = try dupeOpt(a, if (python) |p| json_util.string(p, "interpreterPath") else null, "");
         self.python_activation_script = try dupeOpt(a, if (python) |p| json_util.string(p, "activationScript") else null, "");
         self.missing_git_warning = optBool(workspace, "missingGitWarning", true);
+        self.root_marker = try dupeOpt(a, if (workspace) |w| json_util.string(w, "rootMarker") else null, ".git");
     }
 
     /// Reset to defaults.
@@ -98,4 +102,17 @@ test "missing git warning defaults on and can be disabled" {
     defer parsed.deinit();
     try settings.update(parsed.value);
     try testing.expect(!settings.missing_git_warning);
+    try testing.expectEqualStrings(".git", settings.root_marker);
+
+    const marker = try std.json.parseFromSlice(
+        Value,
+        testing.allocator,
+        \\{"ansible":{"workspace":{"rootMarker":"ansible.cfg"}}}
+    ,
+        .{},
+    );
+    defer marker.deinit();
+    try settings.update(marker.value);
+    try testing.expectEqualStrings("ansible.cfg", settings.root_marker);
+    try testing.expect(settings.missing_git_warning);
 }

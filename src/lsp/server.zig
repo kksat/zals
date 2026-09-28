@@ -177,14 +177,14 @@ pub const Server = struct {
         try self.rebuildWorkspaces();
     }
 
-    fn rebuildWorkspaces(self: *Server) !void {
+    pub fn rebuildWorkspaces(self: *Server) !void {
         for (self.root_uris.items) |u| self.allocator.free(u);
         self.root_uris.clearRetainingCapacity();
         self.missing_workspace = false;
         for (self.opened_uris.items) |uri| {
             const path = try paths.uriToPath(self.allocator, uri);
             defer self.allocator.free(path);
-            const found = try roots.find(self.allocator, path);
+            const found = try roots.find(self.allocator, path, self.settings.root_marker);
             if (found) |root| {
                 defer self.allocator.free(root);
                 const root_uri = try paths.pathToUri(self.allocator, root);
@@ -208,8 +208,9 @@ pub const Server = struct {
             self.warned_missing_workspace,
             self.initialized,
         )) return;
-        try out.showMessage(self.writer, a, 2, roots.missing_message);
-        try out.logMessage(self.writer, a, 2, roots.missing_message);
+        const message = try roots.missingMessage(a, self.settings.root_marker);
+        try out.showMessage(self.writer, a, 2, message);
+        try out.logMessage(self.writer, a, 2, message);
         self.warned_missing_workspace = true;
     }
 };

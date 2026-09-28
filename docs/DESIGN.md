@@ -163,7 +163,7 @@ is reported best-effort via `$/progress`.
   cache-writer thread + writer thread; self-pipe wakeup.
 - **Memory:** arenas for request-scoped work; explicit ownership for long-lived
   state; the debug allocator in tests.
-- **Workspace:** one context per `.git` (file or directory), with a shared docs cache.
+- **Workspace:** one context per root marker (default `.git`, file or directory), with a shared docs cache.
 
 ## 9. Configuration
 

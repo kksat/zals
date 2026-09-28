@@ -38,6 +38,8 @@ pub fn handleRequest(self: *Server, a: Allocator, id: Value, method: []const u8,
         return self.sendResult(a, id, try providers.code_actions.codeActions(self, a, params));
     if (std.mem.eql(u8, method, "ansible/refreshConfiguration")) {
         self.settings.reload();
+        try self.rebuildWorkspaces();
+        try self.warnMissingWorkspace(a);
         return self.sendResult(a, id, Value.null);
     }
     return self.sendError(a, id, -32601, "method not found");
@@ -62,7 +64,12 @@ pub fn handleNotification(self: *Server, a: Allocator, method: []const u8, param
     if (std.mem.eql(u8, method, "textDocument/didClose")) return sync.didClose(self, params);
     if (std.mem.eql(u8, method, "textDocument/didSave")) return sync.didSave(self, a, params);
     if (std.mem.eql(u8, method, "workspace/didChangeConfiguration")) {
+        const previous = try self.allocator.dupe(u8, self.settings.root_marker);
+        defer self.allocator.free(previous);
         try self.settings.update(params);
+        if (!std.mem.eql(u8, previous, self.settings.root_marker))
+            self.warned_missing_workspace = false;
+        try self.rebuildWorkspaces();
         try self.warnMissingWorkspace(a);
         return;
     }

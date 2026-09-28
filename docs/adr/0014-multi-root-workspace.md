@@ -35,6 +35,11 @@ is true (the default), the server shows one session warning via
 `window/showMessage`. Turning the setting off suppresses the warning. The
 folder still has no Workspace.
 
+`ansible.workspace.rootMarker` defaults to `.git`. A user may set another
+file or directory name, and the same walk uses that name instead. That
+redefines the Workspace and is supported at the user's risk. A blank value,
+`.` or `..`, or a name that contains a path separator is treated as `.git`.
+
 ## Consequences
 
 - Workspace-scoped search uses the git root, including paths the client did not
@@ -47,4 +52,6 @@ folder still has no Workspace.
   Workspaces for the largest data structure.
 - The cache key must capture everything that affects docs resolution; getting
   the fingerprint wrong would serve stale docs across Workspaces.
-- A tree with no `.git` gets no workspace-wide features.
+- A tree with no marker gets no workspace-wide features.
+- Changing `rootMarker` applies on the next configuration update and can split
+  or merge Workspaces differently from `.git`.

@@ -81,7 +81,7 @@ pub fn resolveRole(
         const p = paths.uriToPath(a, u) catch continue;
         session.append(p) catch {};
     }
-    const owned = roots.owning(a, referencing_path, session.items) catch null;
+    const owned = roots.owning(a, referencing_path, session.items, self.settings.root_marker) catch null;
     const resolver = roles.Resolver{
         .allocator = a,
         .config = &self.ansible_config,

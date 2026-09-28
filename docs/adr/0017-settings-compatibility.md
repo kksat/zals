@@ -29,13 +29,16 @@ Use **upstream's exact setting names and defaults** for the Tier 1 subset:
 | `ansible.python.interpreterPath` | `""` |
 | `ansible.python.activationScript` | `""` |
 | `ansible.workspace.missingGitWarning` | `true` |
+| `ansible.workspace.rootMarker` | `.git` |
 
 ## Consequences
 
 - Existing configurations work unchanged.
 - Upstream documentation applies directly.
-- `ansible.workspace.missingGitWarning` is a zals setting (see
-  [ADR-0014](0014-multi-root-workspace.md)); upstream has no equivalent.
+- `ansible.workspace.missingGitWarning` and `ansible.workspace.rootMarker` are
+  zals settings (see [ADR-0014](0014-multi-root-workspace.md)); upstream has no
+  equivalent. `rootMarker` defaults to `.git`; changing it redefines the
+  Workspace.
 - We inherit upstream's naming, including any inconsistencies; we do not
   "improve" names, because that would break compatibility.
 - Settings outside the Tier 1 subset are ignored rather than rejected.

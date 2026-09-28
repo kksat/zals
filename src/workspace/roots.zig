@@ -1,13 +1,13 @@
 //! Resolve a Workspace from the filesystem.
 //!
-//! A Workspace is the nearest directory containing `.git` (a file or a
-//! directory) at or above a start path. A nested `.git` is its own Workspace.
-//! See CONTEXT.md.
+//! A Workspace is the nearest directory containing the root marker (a file or
+//! a directory) at or above a start path. The default marker is `.git`. A
+//! nested marker is its own Workspace. See CONTEXT.md.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-pub const missing_message = "No Workspace: no .git file or directory was found at or above an opened folder.";
+pub const default_marker = ".git";
 
 pub const Set = struct {
     roots: std.array_list.Managed([]const u8),
@@ -20,14 +20,32 @@ pub const Set = struct {
     }
 };
 
-/// Directory containing the nearest `.git` at or above `start`, or null when
+/// A single path-segment name. Blank values, `.`, `..`, and names that
+/// contain a separator fall back to `.git`.
+pub fn effectiveMarker(configured: []const u8) []const u8 {
+    if (configured.len == 0) return default_marker;
+    if (std.mem.eql(u8, configured, ".") or std.mem.eql(u8, configured, "..")) return default_marker;
+    if (std.mem.indexOfAny(u8, configured, "/\\") != null) return default_marker;
+    return configured;
+}
+
+pub fn missingMessage(allocator: Allocator, marker: []const u8) ![]u8 {
+    return std.fmt.allocPrint(
+        allocator,
+        "No Workspace: no {s} file or directory was found at or above an opened folder.",
+        .{effectiveMarker(marker)},
+    );
+}
+
+/// Directory containing the nearest `marker` at or above `start`, or null when
 /// none exists. `start` may be a file or a directory. The caller frees the
 /// result.
-pub fn find(allocator: Allocator, start: []const u8) !?[]u8 {
+pub fn find(allocator: Allocator, start: []const u8, marker: []const u8) !?[]u8 {
+    const name = effectiveMarker(marker);
     const first = (try locateStart(allocator, start)) orelse return null;
     var current = first;
     while (true) {
-        if (hasGitMarker(current)) return current;
+        if (hasMarker(current, name)) return current;
         const parent = std.fs.path.dirname(current);
         if (parent == null or parent.?.len == 0 or std.mem.eql(u8, parent.?, current)) {
             allocator.free(current);
@@ -39,10 +57,10 @@ pub fn find(allocator: Allocator, start: []const u8) !?[]u8 {
     }
 }
 
-/// One Workspace per distinct `.git` reached from `opened`. Paths that find
+/// One Workspace per distinct marker reached from `opened`. Paths that find
 /// the same directory collapse to one root. `missing` is set when any path
-/// has no `.git` at or above it.
-pub fn resolve(allocator: Allocator, opened: []const []const u8) !Set {
+/// has no marker at or above it.
+pub fn resolve(allocator: Allocator, opened: []const []const u8, marker: []const u8) !Set {
     var roots = std.array_list.Managed([]const u8).init(allocator);
     errdefer {
         for (roots.items) |root| allocator.free(root);
@@ -50,7 +68,7 @@ pub fn resolve(allocator: Allocator, opened: []const []const u8) !Set {
     }
     var missing = false;
     for (opened) |path| {
-        const root = (try find(allocator, path)) orelse {
+        const root = (try find(allocator, path, marker)) orelse {
             missing = true;
             continue;
         };
@@ -70,16 +88,17 @@ pub fn resolve(allocator: Allocator, opened: []const []const u8) !Set {
     return .{ .roots = roots, .missing = missing };
 }
 
-/// The session Workspace that owns `path`: the nearest `.git`, when that
-/// directory is one of `session_roots`. Null when the path has no `.git`, or
-/// when the nearest `.git` is a nested root the session did not open.
+/// The session Workspace that owns `path`: the nearest marker, when that
+/// directory is one of `session_roots`. Null when the path has no marker, or
+/// when the nearest marker is a nested root the session did not open.
 /// The returned slice points at `session_roots` and is allocated by `allocator`.
 pub fn owning(
     allocator: Allocator,
     path: []const u8,
     session_roots: []const []const u8,
+    marker: []const u8,
 ) !?[]const []const u8 {
-    const nearest = (try find(allocator, path)) orelse return null;
+    const nearest = (try find(allocator, path, marker)) orelse return null;
     defer allocator.free(nearest);
     for (session_roots) |root| {
         if (std.mem.eql(u8, root, nearest)) {
@@ -111,10 +130,10 @@ fn locateStart(allocator: Allocator, start: []const u8) !?[]u8 {
     return locateStart(allocator, parent);
 }
 
-fn hasGitMarker(dir_path: []const u8) bool {
+fn hasMarker(dir_path: []const u8, marker: []const u8) bool {
     var dir = std.fs.cwd().openDir(dir_path, .{}) catch return false;
     defer dir.close();
-    dir.access(".git", .{}) catch return false;
+    dir.access(marker, .{}) catch return false;
     return true;
 }
 
@@ -189,7 +208,7 @@ const Fix = struct {
 };
 
 fn expectWorkspace(a: Allocator, start: []const u8, expected: []const u8) !void {
-    const found = (try find(a, start)).?;
+    const found = (try find(a, start, default_marker)).?;
     try testing.expectEqualStrings(expected, found);
 }
 
@@ -208,12 +227,12 @@ test "git directory above an opened subfolder" {
     try expectWorkspace(a, try fix.join(a, "playbooks"), workspace);
     try expectWorkspace(a, try fix.join(a, "playbooks/site.yml"), workspace);
 
-    var set = try resolve(a, &.{try fix.join(a, "playbooks")});
+    var set = try resolve(a, &.{try fix.join(a, "playbooks")}, default_marker);
     defer set.deinit();
     try testing.expect(!set.missing);
     try testing.expectEqual(@as(usize, 1), set.roots.items.len);
     try testing.expectEqualStrings(workspace, set.roots.items[0]);
-    const role = try owning(a, try fix.join(a, "roles/web/tasks/main.yml"), set.roots.items);
+    const role = try owning(a, try fix.join(a, "roles/web/tasks/main.yml"), set.roots.items, default_marker);
     try testing.expectEqualStrings(workspace, role.?[0]);
 }
 
@@ -249,15 +268,15 @@ test "nested git directory lies outside the parent" {
     try expectWorkspace(a, try fix.join(a, "playbooks/site.yml"), parent);
     try expectWorkspace(a, try fix.join(a, "vendor/lib/tasks/main.yml"), nested);
 
-    var parent_only = try resolve(a, &.{parent});
+    var parent_only = try resolve(a, &.{parent}, default_marker);
     defer parent_only.deinit();
-    try testing.expect(try owning(a, try fix.join(a, "vendor/lib/tasks/main.yml"), parent_only.roots.items) == null);
-    try testing.expectEqualStrings(parent, (try owning(a, try fix.join(a, "playbooks/site.yml"), parent_only.roots.items)).?[0]);
+    try testing.expect(try owning(a, try fix.join(a, "vendor/lib/tasks/main.yml"), parent_only.roots.items, default_marker) == null);
+    try testing.expectEqualStrings(parent, (try owning(a, try fix.join(a, "playbooks/site.yml"), parent_only.roots.items, default_marker)).?[0]);
 
-    var both = try resolve(a, &.{ parent, nested });
+    var both = try resolve(a, &.{ parent, nested }, default_marker);
     defer both.deinit();
     try testing.expectEqual(@as(usize, 2), both.roots.items.len);
-    try testing.expectEqualStrings(nested, (try owning(a, try fix.join(a, "vendor/lib/tasks/main.yml"), both.roots.items)).?[0]);
+    try testing.expectEqualStrings(nested, (try owning(a, try fix.join(a, "vendor/lib/tasks/main.yml"), both.roots.items, default_marker)).?[0]);
 }
 
 test "nested git file lies outside the parent" {
@@ -275,11 +294,11 @@ test "nested git file lies outside the parent" {
     const nested = try fix.real(a, "vendor/lib");
 
     try expectWorkspace(a, try fix.join(a, "vendor/lib"), nested);
-    var parent_only = try resolve(a, &.{parent});
+    var parent_only = try resolve(a, &.{parent}, default_marker);
     defer parent_only.deinit();
-    try testing.expect(try owning(a, try fix.join(a, "vendor/lib/tasks/main.yml"), parent_only.roots.items) == null);
+    try testing.expect(try owning(a, try fix.join(a, "vendor/lib/tasks/main.yml"), parent_only.roots.items, default_marker) == null);
 
-    var opened = try resolve(a, &.{try fix.join(a, "vendor/lib")});
+    var opened = try resolve(a, &.{try fix.join(a, "vendor/lib")}, default_marker);
     defer opened.deinit();
     try testing.expectEqualStrings(nested, opened.roots.items[0]);
 }
@@ -298,7 +317,7 @@ test "two folders under one git are one workspace" {
     var set = try resolve(a, &.{
         try fix.join(a, "playbooks"),
         try fix.join(a, "roles"),
-    });
+    }, default_marker);
     defer set.deinit();
     try testing.expect(!set.missing);
     try testing.expectEqual(@as(usize, 1), set.roots.items.len);
@@ -318,7 +337,7 @@ test "two git directories are two workspaces" {
     var set = try resolve(a, &.{
         try fix.join(a, "acme"),
         try fix.join(a, "other"),
-    });
+    }, default_marker);
     defer set.deinit();
     try testing.expect(!set.missing);
     try testing.expectEqual(@as(usize, 2), set.roots.items.len);
@@ -335,8 +354,8 @@ test "no git has no workspace" {
     const a = arena.allocator();
 
     try fix.touch("site.yml");
-    try testing.expect(try find(a, try fix.join(a, "site.yml")) == null);
-    var set = try resolve(a, &.{try fix.join(a, "")});
+    try testing.expect(try find(a, try fix.join(a, "site.yml"), default_marker) == null);
+    var set = try resolve(a, &.{try fix.join(a, "")}, default_marker);
     defer set.deinit();
     try testing.expect(set.missing);
     try testing.expectEqual(@as(usize, 0), set.roots.items.len);
@@ -359,7 +378,7 @@ test "worktree git file is its own workspace beside the main checkout" {
     var set = try resolve(a, &.{
         try fix.join(a, "acme"),
         try fix.join(a, "acme-wt"),
-    });
+    }, default_marker);
     defer set.deinit();
     try testing.expectEqual(@as(usize, 2), set.roots.items.len);
     try testing.expectEqualStrings(try fix.real(a, "acme"), set.roots.items[0]);
@@ -376,6 +395,38 @@ test "opening the git directory itself resolves to its parent" {
 
     try fix.gitDir("");
     try expectWorkspace(a, try fix.join(a, ".git"), try fix.real(a, ""));
+}
+
+test "custom marker replaces .git" {
+    const gpa = testing.allocator;
+    var fix = try Fix.init(gpa);
+    defer fix.deinit();
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    try fix.gitDir("");
+    try fix.touch("playbooks/ansible.cfg");
+    try fix.touch("playbooks/site.yml");
+    try fix.touch("roles/web/tasks/main.yml");
+    const repo = try fix.real(a, "");
+    const playbooks = try fix.real(a, "playbooks");
+    const site = try fix.join(a, "playbooks/site.yml");
+    const role = try fix.join(a, "roles/web/tasks/main.yml");
+
+    try testing.expectEqualStrings(repo, (try find(a, site, default_marker)).?);
+    try testing.expectEqualStrings(playbooks, (try find(a, site, "ansible.cfg")).?);
+    try testing.expectEqualStrings(repo, (try find(a, role, default_marker)).?);
+    try testing.expect(try find(a, role, "ansible.cfg") == null);
+}
+
+test "blank or path marker falls back to .git" {
+    try testing.expectEqualStrings(default_marker, effectiveMarker(""));
+    try testing.expectEqualStrings(default_marker, effectiveMarker("."));
+    try testing.expectEqualStrings(default_marker, effectiveMarker(".."));
+    try testing.expectEqualStrings(default_marker, effectiveMarker("foo/bar"));
+    try testing.expectEqualStrings("ansible.cfg", effectiveMarker("ansible.cfg"));
+    try testing.expectEqualStrings(".ansible-lint", effectiveMarker(".ansible-lint"));
 }
 
 test "missing workspace warning is one session notice" {
