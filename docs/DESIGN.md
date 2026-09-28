@@ -76,7 +76,7 @@ it in this list.
 | `src/services/` | Docs library, schema cache/service/validator, validation manager, config |
 | `src/yaml/` | YAML parser interface, tree-sitter backend, semantic DOM, path utilities |
 | `src/exec/` | Command-runner interface and POSIX backend |
-| `src/workspace/` | Document store, multi-root contexts, settings |
+| `src/workspace/` | Document store, git Workspaces, settings |
 | `vendor/` | Vendored C (tree-sitter) and the schema snapshot |
 | `test/` | Ported upstream fixtures and unit tests |
 | `tools/differential/` | Dev-only parity harness against upstream |
@@ -137,7 +137,7 @@ Module documentation comes from `ansible-doc --json`, behind `DocsSource`.
   them through the cache-writer thread.
 
 The cache is keyed by `ansible_version + config_fingerprint` and shared across
-workspace folders.
+Workspaces.
 
 ## 7. Validation
 
@@ -163,7 +163,7 @@ is reported best-effort via `$/progress`.
   cache-writer thread + writer thread; self-pipe wakeup.
 - **Memory:** arenas for request-scoped work; explicit ownership for long-lived
   state; the debug allocator in tests.
-- **Workspace:** multi-root with per-folder contexts and a shared docs cache.
+- **Workspace:** one context per `.git` (file or directory), with a shared docs cache.
 
 ## 9. Configuration
 

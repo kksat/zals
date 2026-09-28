@@ -3,10 +3,18 @@
 A Zig reimplementation of the Ansible Language Server. This glossary covers the
 vocabulary of variable navigation (finding the definition of a variable and
 finding every reference to it), of the document outline (the symbols a client
-shows for a single file), and of code actions (adding and removing a debug task
-for a variable, and extracting tasks into a task file).
+shows for a single file), of code actions (adding and removing a debug task
+for a variable, and extracting tasks into a task file), and of the project
+tree.
 
 ## Language
+
+**Workspace**:
+The nearest directory containing `.git` at or above a folder or file, whether
+`.git` is a directory or a file. A nested `.git` is its own Workspace and stays
+out of the session until an opened folder walks up to it, one per distinct
+`.git`, and a folder with no `.git` at or above it has none.
+_Avoid_: workspace folder, root URI, multi-root workspace
 
 **Role**:
 An Ansible reusable unit rooted at a directory containing conventional

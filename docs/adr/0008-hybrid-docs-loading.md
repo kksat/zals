@@ -24,7 +24,7 @@ Use a **hybrid strategy**:
    and persist them through the cache-writer thread.
 
 The cache is keyed by `ansible_version + config_fingerprint` and shared across
-workspace folders ([ADR-0014](0014-multi-root-workspace.md)).
+Workspaces ([ADR-0014](0014-multi-root-workspace.md)).
 
 This is implemented in `services/docs_service.zig` (orchestration),
 `services/docs_cache.zig` (JSON persistence), and `concurrency/pool.zig` (the

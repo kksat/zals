@@ -46,24 +46,20 @@ pub fn didSave(self: *Server, a: Allocator, params: Value) !void {
     providers.validation.publish(self, a, uri) catch {};
 }
 
-pub fn didChangeWorkspaceFolders(self: *Server, params: Value) !void {
+pub fn didChangeWorkspaceFolders(self: *Server, a: Allocator, params: Value) !void {
     const event = json_util.field(params, "event") orelse return;
-    if (json_util.array(event, "removed")) |removed| {
-        for (removed.items) |f| {
-            const uri = json_util.string(f, "uri") orelse continue;
-            for (self.root_uris.items, 0..) |existing, i| {
-                if (std.mem.eql(u8, existing, uri)) {
-                    self.allocator.free(existing);
-                    _ = self.root_uris.orderedRemove(i);
-                    break;
-                }
-            }
+    var removed = std.array_list.Managed([]const u8).init(a);
+    var added = std.array_list.Managed([]const u8).init(a);
+    if (json_util.array(event, "removed")) |items| {
+        for (items.items) |f| {
+            if (json_util.string(f, "uri")) |uri| try removed.append(uri);
         }
     }
-    if (json_util.array(event, "added")) |added| {
-        for (added.items) |f| {
-            const uri = json_util.string(f, "uri") orelse continue;
-            try self.root_uris.append(try self.allocator.dupe(u8, uri));
+    if (json_util.array(event, "added")) |items| {
+        for (items.items) |f| {
+            if (json_util.string(f, "uri")) |uri| try added.append(uri);
         }
     }
+    try self.applyOpenedChange(removed.items, added.items);
+    try self.warnMissingWorkspace(a);
 }

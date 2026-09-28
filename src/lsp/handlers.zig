@@ -50,6 +50,7 @@ pub fn handleNotification(self: *Server, a: Allocator, method: []const u8, param
         var ready = json_util.obj(a);
         try ready.put("modulesCount", json_util.num(self.docs.catalogCount()));
         try self.notify(a, "ansible/docsLibraryReady", .{ .object = ready });
+        try self.warnMissingWorkspace(a);
         return;
     }
     if (std.mem.eql(u8, method, "exit")) {
@@ -62,10 +63,11 @@ pub fn handleNotification(self: *Server, a: Allocator, method: []const u8, param
     if (std.mem.eql(u8, method, "textDocument/didSave")) return sync.didSave(self, a, params);
     if (std.mem.eql(u8, method, "workspace/didChangeConfiguration")) {
         try self.settings.update(params);
+        try self.warnMissingWorkspace(a);
         return;
     }
     if (std.mem.eql(u8, method, "workspace/didChangeWorkspaceFolders")) {
-        return sync.didChangeWorkspaceFolders(self, params);
+        return sync.didChangeWorkspaceFolders(self, a, params);
     }
     // Unknown notifications are ignored, per the LSP spec.
 }
@@ -169,24 +171,22 @@ fn onInitialize(self: *Server, a: Allocator, id: Value, params: Value) !void {
     }
     self.documents.encoding = self.encoding;
 
-    // Workspace folders.
-    var has_folders = false;
-    if (json_util.array(params, "workspaceFolders")) |folders| {
-        for (folders.items) |f| {
-            if (json_util.string(f, "uri")) |uri| {
-                try self.root_uris.append(try self.allocator.dupe(u8, uri));
-                has_folders = true;
-            }
-        }
-    } else if (json_util.string(params, "rootUri")) |uri| {
-        try self.root_uris.append(try self.allocator.dupe(u8, uri));
-        has_folders = true;
-    }
-
-    // Initialization options may carry settings.
+    // Initialization options may carry settings. Apply them before resolving
+    // Workspaces so a disabled missing-git warning is already in effect.
     if (json_util.field(params, "initializationOptions")) |opts| {
         self.settings.update(opts) catch {};
     }
+
+    var opened = std.array_list.Managed([]const u8).init(a);
+    if (json_util.array(params, "workspaceFolders")) |folders| {
+        for (folders.items) |f| {
+            if (json_util.string(f, "uri")) |uri| try opened.append(uri);
+        }
+    } else if (json_util.string(params, "rootUri")) |uri| {
+        try opened.append(uri);
+    }
+    const has_folders = opened.items.len > 0;
+    try self.setOpenedFolders(opened.items);
 
     var result = json_util.obj(a);
     try result.put("capabilities", try capabilities.build(a, encoding_name, has_folders));

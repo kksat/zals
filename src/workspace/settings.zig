@@ -23,6 +23,9 @@ pub const Settings = struct {
     auto_fix_on_save: bool = false,
     python_interpreter_path: []const u8 = "",
     python_activation_script: []const u8 = "",
+    /// `ansible.workspace.missingGitWarning`. One session warning when an
+    /// opened folder has no Workspace.
+    missing_git_warning: bool = true,
 
     pub fn init(allocator: Allocator) Settings {
         return .{ .allocator = allocator, .arena = std.heap.ArenaAllocator.init(allocator) };
@@ -46,6 +49,7 @@ pub const Settings = struct {
         const validation = json_util.field(ansible, "validation");
         const lint = if (validation) |v| json_util.field(v, "lint") else null;
         const python = json_util.field(ansible, "python");
+        const workspace = json_util.field(ansible, "workspace");
 
         self.ansible_path = try dupeOpt(a, if (core) |c| json_util.string(c, "path") else null, "ansible");
         self.use_fqcn = optBool(core, "useFullyQualifiedCollectionNames", true);
@@ -58,6 +62,7 @@ pub const Settings = struct {
         self.auto_fix_on_save = optBool(lint, "autoFixOnSave", false);
         self.python_interpreter_path = try dupeOpt(a, if (python) |p| json_util.string(p, "interpreterPath") else null, "");
         self.python_activation_script = try dupeOpt(a, if (python) |p| json_util.string(p, "activationScript") else null, "");
+        self.missing_git_warning = optBool(workspace, "missingGitWarning", true);
     }
 
     /// Reset to defaults.
@@ -74,4 +79,23 @@ fn optBool(v: ?Value, key: []const u8, default: bool) bool {
 
 fn dupeOpt(a: Allocator, value: ?[]const u8, default: []const u8) ![]const u8 {
     return a.dupe(u8, value orelse default);
+}
+
+const testing = std.testing;
+
+test "missing git warning defaults on and can be disabled" {
+    var settings = Settings.init(testing.allocator);
+    defer settings.deinit();
+    try testing.expect(settings.missing_git_warning);
+
+    const parsed = try std.json.parseFromSlice(
+        Value,
+        testing.allocator,
+        \\{"ansible":{"workspace":{"missingGitWarning":false}}}
+    ,
+        .{},
+    );
+    defer parsed.deinit();
+    try settings.update(parsed.value);
+    try testing.expect(!settings.missing_git_warning);
 }

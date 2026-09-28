@@ -18,7 +18,7 @@ Each ADR captures one decision, its context, and its consequences. Statuses are
 | [0011](0011-threading-topology.md) | Threading topology | Accepted |
 | [0012](0012-incremental-sync-and-position-encoding.md) | Incremental sync and position encoding | Accepted |
 | [0013](0013-memory-management.md) | Memory management | Accepted |
-| [0014](0014-multi-root-workspace.md) | Multi-root workspace and shared docs cache | Accepted |
+| [0014](0014-multi-root-workspace.md) | Git workspaces and shared docs cache | Accepted |
 | [0015](0015-validation-behavior.md) | Validation behavior | Accepted |
 | [0016](0016-custom-ansible-messages.md) | Custom `ansible/*` messages | Accepted |
 | [0017](0017-settings-compatibility.md) | Settings compatibility | Accepted |

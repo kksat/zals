@@ -43,3 +43,10 @@ pub fn logMessage(transport: anytype, a: Allocator, level: i64, message: []const
     try p.put("message", json_util.str(message));
     try sendNotification(transport, a, "window/logMessage", .{ .object = p });
 }
+
+pub fn showMessage(transport: anytype, a: Allocator, level: i64, message: []const u8) !void {
+    var p = json_util.obj(a);
+    try p.put("type", json_util.num(level));
+    try p.put("message", json_util.str(message));
+    try sendNotification(transport, a, "window/showMessage", .{ .object = p });
+}

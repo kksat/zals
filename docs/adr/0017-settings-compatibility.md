@@ -28,11 +28,14 @@ Use **upstream's exact setting names and defaults** for the Tier 1 subset:
 | `ansible.validation.lint.autoFixOnSave` | `false` |
 | `ansible.python.interpreterPath` | `""` |
 | `ansible.python.activationScript` | `""` |
+| `ansible.workspace.missingGitWarning` | `true` |
 
 ## Consequences
 
 - Existing configurations work unchanged.
 - Upstream documentation applies directly.
+- `ansible.workspace.missingGitWarning` is a zals setting (see
+  [ADR-0014](0014-multi-root-workspace.md)); upstream has no equivalent.
 - We inherit upstream's naming, including any inconsistencies; we do not
   "improve" names, because that would break compatibility.
 - Settings outside the Tier 1 subset are ignored rather than rejected.

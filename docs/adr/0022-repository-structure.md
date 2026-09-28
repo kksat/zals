@@ -23,7 +23,7 @@ src/
   services/     docs library, schema cache/service/validator, validation manager, config
   yaml/         parser interface, tree-sitter backend, DOM, path utilities
   exec/         command-runner interface and POSIX backend
-  workspace/    document store, multi-root contexts, settings
+  workspace/    document store, git Workspaces, settings
   cli.zig       argument parsing
   root.zig      library root
   main.zig      CLI entry point

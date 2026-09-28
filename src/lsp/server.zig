@@ -9,6 +9,8 @@ const Transport = @import("transport.zig").Transport;
 const DocumentStore = @import("../workspace/store.zig").DocumentStore;
 const PositionEncoding = @import("../workspace/document.zig").PositionEncoding;
 const Settings = @import("../workspace/settings.zig").Settings;
+const roots = @import("../workspace/roots.zig");
+const paths = @import("../paths.zig");
 const handlers = @import("handlers.zig");
 const exec = @import("../exec/root.zig");
 const DocsLibrary = @import("../services/docs.zig").DocsLibrary;
@@ -40,7 +42,13 @@ pub const Server = struct {
     /// True when the client advertises `workspace.workspaceEdit.resourceOperations`
     /// containing `create` (needed by the extract code actions).
     supports_create_file: bool = false,
+    /// Folders the client opened, before Workspace resolution.
+    opened_uris: std.array_list.Managed([]const u8),
+    /// Resolved Workspace URIs, one per distinct `.git`.
     root_uris: std.array_list.Managed([]const u8),
+    /// True when at least one opened folder has no Workspace.
+    missing_workspace: bool = false,
+    warned_missing_workspace: bool = false,
 
     pub fn init(allocator: Allocator, transport: Transport) !Server {
         const runner = exec.Posix.posixRunner();
@@ -61,6 +69,7 @@ pub const Server = struct {
             .ansible_config = AnsibleConfig.init(allocator, runner),
             .pool = pool,
             .docs_service = DocsService.init(allocator, null),
+            .opened_uris = std.array_list.Managed([]const u8).init(allocator),
             .root_uris = std.array_list.Managed([]const u8).init(allocator),
         };
 
@@ -85,6 +94,8 @@ pub const Server = struct {
         self.schemas.deinit();
         self.ansible_config.deinit();
         if (self.cache_path) |p| self.allocator.free(p);
+        for (self.opened_uris.items) |u| self.allocator.free(u);
+        self.opened_uris.deinit();
         for (self.root_uris.items) |u| self.allocator.free(u);
         self.root_uris.deinit();
         // Flush any queued outgoing messages before tearing down the writer.
@@ -132,4 +143,80 @@ pub const Server = struct {
     pub fn notify(self: *Server, a: Allocator, method: []const u8, params: Value) !void {
         try out.sendNotification(self.writer, a, method, params);
     }
+
+    /// Replace the opened folders and recompute Workspace roots from `.git`.
+    pub fn setOpenedFolders(self: *Server, uris: []const []const u8) !void {
+        for (self.opened_uris.items) |u| self.allocator.free(u);
+        self.opened_uris.clearRetainingCapacity();
+        for (uris) |uri| try self.opened_uris.append(try self.allocator.dupe(u8, uri));
+        try self.rebuildWorkspaces();
+    }
+
+    /// Apply a `workspace/didChangeWorkspaceFolders` event to the opened set.
+    pub fn applyOpenedChange(self: *Server, removed: []const []const u8, added: []const []const u8) !void {
+        for (removed) |uri| {
+            var i: usize = 0;
+            while (i < self.opened_uris.items.len) : (i += 1) {
+                if (std.mem.eql(u8, self.opened_uris.items[i], uri)) {
+                    self.allocator.free(self.opened_uris.items[i]);
+                    _ = self.opened_uris.orderedRemove(i);
+                    break;
+                }
+            }
+        }
+        for (added) |uri| {
+            var exists = false;
+            for (self.opened_uris.items) |existing| {
+                if (std.mem.eql(u8, existing, uri)) {
+                    exists = true;
+                    break;
+                }
+            }
+            if (!exists) try self.opened_uris.append(try self.allocator.dupe(u8, uri));
+        }
+        try self.rebuildWorkspaces();
+    }
+
+    fn rebuildWorkspaces(self: *Server) !void {
+        for (self.root_uris.items) |u| self.allocator.free(u);
+        self.root_uris.clearRetainingCapacity();
+        self.missing_workspace = false;
+        for (self.opened_uris.items) |uri| {
+            const path = try paths.uriToPath(self.allocator, uri);
+            defer self.allocator.free(path);
+            const found = try roots.find(self.allocator, path);
+            if (found) |root| {
+                defer self.allocator.free(root);
+                const root_uri = try paths.pathToUri(self.allocator, root);
+                errdefer self.allocator.free(root_uri);
+                if (containsUri(self.root_uris.items, root_uri)) {
+                    self.allocator.free(root_uri);
+                } else {
+                    try self.root_uris.append(root_uri);
+                }
+            } else {
+                self.missing_workspace = true;
+            }
+        }
+    }
+
+    /// One session warning when an opened folder has no Workspace.
+    pub fn warnMissingWorkspace(self: *Server, a: Allocator) !void {
+        if (!roots.warnDue(
+            self.settings.missing_git_warning,
+            self.missing_workspace,
+            self.warned_missing_workspace,
+            self.initialized,
+        )) return;
+        try out.showMessage(self.writer, a, 2, roots.missing_message);
+        try out.logMessage(self.writer, a, 2, roots.missing_message);
+        self.warned_missing_workspace = true;
+    }
 };
+
+fn containsUri(uris: []const []const u8, uri: []const u8) bool {
+    for (uris) |existing| {
+        if (std.mem.eql(u8, existing, uri)) return true;
+    }
+    return false;
+}
