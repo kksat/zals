@@ -28,9 +28,8 @@ workspace folders ([ADR-0014](0014-multi-root-workspace.md)).
 
 This is implemented in `services/docs_service.zig` (orchestration),
 `services/docs_cache.zig` (JSON persistence), and `concurrency/pool.zig` (the
-worker pool). The catalog is loaded synchronously on `initialized` so
-`ansible/docsLibraryReady` fires promptly; prefetch and cache writes run on the
-pool and are cancelled on shutdown.
+worker pool). The catalog is loaded synchronously on `initialized`. Prefetch
+and cache writes run on the pool and are cancelled on shutdown.
 
 ## Consequences
 

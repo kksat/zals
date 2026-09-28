@@ -163,12 +163,6 @@ pub const DocsLibrary = struct {
         self.fetchOne(name) catch {};
     }
 
-    pub fn catalogCount(self: *DocsLibrary) usize {
-        self.mutex.lock();
-        defer self.mutex.unlock();
-        return self.catalog.count();
-    }
-
     /// Fast, non-fetching check for a known module FQCN.
     pub fn hasModuleName(self: *DocsLibrary, name: []const u8) bool {
         self.mutex.lock();

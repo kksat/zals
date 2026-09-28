@@ -1,9 +1,9 @@
 //! Background docs loading: catalog bootstrap, prefetch, and cache writes
 //! (ADR-0008, ADR-0011).
 //!
-//! The catalog is loaded eagerly (from the on-disk cache when possible) so
-//! `ansible/docsLibraryReady` can fire immediately. Full module docs are then
-//! prefetched on the thread pool in batches, with periodic cache writes.
+//! The catalog is loaded eagerly (from the on-disk cache when possible). Full
+//! module docs are then prefetched on the thread pool in batches, with periodic
+//! cache writes.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;

@@ -173,9 +173,8 @@ existing `ansible.*` configuration works unchanged. See
 
 ## 10. Custom messages
 
-Three upstream custom messages are retained: `ansible/errorMessage`,
-`ansible/docsLibraryReady`, and `ansible/refreshConfiguration`. The Tier 2
-messages (`resync/ansible-inventory`, `update/ansible-metadata`) are dropped.
+`zals` implements standard LSP only. See
+[ADR-0037](adr/0037-no-custom-lsp-messages.md).
 
 ## 11. Build and platforms
 

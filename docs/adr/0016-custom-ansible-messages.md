@@ -1,9 +1,9 @@
 # ADR-0016: Custom `ansible/*` messages
 
-- **Status:** Accepted
+- **Status:** Superseded by ADR-0037
 - **Date:** 2025-09-18
 - **Supersedes:** —
-- **Superseded by:** —
+- **Superseded by:** ADR-0037
 
 ## Context
 

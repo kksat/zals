@@ -89,9 +89,9 @@ class LspTests(unittest.TestCase):
             self.assertCountEqual([obj["id"] for obj in responses], expected_ids)
             by_id = {obj["id"]: obj for obj in responses}
             self.assertEqual(by_id["shutdown"], {"jsonrpc": "2.0", "id": "shutdown", "result": None})
-            ready = [obj for obj in received if obj.get("method") == "ansible/docsLibraryReady"]
-            self.assertEqual(len(ready), 1)
-            self.assertEqual(ready[0]["params"]["modulesCount"], 0)
+            self.assertFalse(any(
+                str(obj.get("method", "")).startswith("ansible/") for obj in received
+            ))
             return by_id, received
 
     @staticmethod
@@ -150,8 +150,7 @@ class LspTests(unittest.TestCase):
         for req_id in (0, "string-id"):
             self.assertNotIn("result", responses[req_id])
             self.assertEqual(responses[req_id]["error"]["code"], -32601)
-        self.assertEqual([obj["method"] for obj in received if "method" in obj],
-                         ["ansible/docsLibraryReady"])
+        self.assertEqual([obj["method"] for obj in received if "method" in obj], [])
 
     def test_document_changes_reopen_and_close_are_visible_to_providers(self):
         def messages(uri):

@@ -31,7 +31,7 @@ Build in this order:
    `ansible-lint` + codeclimate parser, syntax-check fallback, validation manager
    with cache reconciliation.
 7. **M7 — Workspace:** multi-root contexts, `didChangeConfiguration`, watched
-   files, `refreshConfiguration`.
+   files.
 8. **M8 — Parity harness & packaging:** differential harness, deviations list,
    logging, release artifacts.
 

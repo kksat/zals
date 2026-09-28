@@ -29,8 +29,8 @@ and metadata notifications, execution environments, and `--generate-docs`.
 ## Consequences
 
 - A usable, focused server ships sooner.
-- The Tier 2 custom messages (`resync/ansible-inventory`,
-  `update/ansible-metadata`) are dropped (see
+- Upstream custom LSP methods are not implemented (see
+  [ADR-0037](0037-no-custom-lsp-messages.md), which supersedes
   [ADR-0016](0016-custom-ansible-messages.md)).
 - Tier 2/3 can be added later without reworking the Tier 1 architecture, because
   external dependencies sit behind interfaces

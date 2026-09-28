@@ -33,10 +33,6 @@ pub fn handleRequest(self: *Server, a: Allocator, id: Value, method: []const u8,
         return self.sendResult(a, id, try providers.document_symbols.documentSymbol(self, a, params));
     if (std.mem.eql(u8, method, "textDocument/codeAction"))
         return self.sendResult(a, id, try providers.code_actions.codeActions(self, a, params));
-    if (std.mem.eql(u8, method, "ansible/refreshConfiguration")) {
-        self.settings.reload();
-        return self.sendResult(a, id, Value.null);
-    }
     return self.sendError(a, id, -32601, "method not found");
 }
 
@@ -44,9 +40,6 @@ pub fn handleNotification(self: *Server, a: Allocator, method: []const u8, param
     if (std.mem.eql(u8, method, "initialized")) {
         self.initialized = true;
         self.docs_service.start(&self.docs, self.pool, &self.ansible_config);
-        var ready = json_util.obj(a);
-        try ready.put("modulesCount", json_util.num(self.docs.catalogCount()));
-        try self.notify(a, "ansible/docsLibraryReady", .{ .object = ready });
         return;
     }
     if (std.mem.eql(u8, method, "exit")) {

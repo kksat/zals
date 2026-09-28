@@ -20,7 +20,7 @@ Each ADR captures one decision, its context, and its consequences. Statuses are
 | [0013](0013-memory-management.md) | Memory management | Accepted |
 | [0014](0014-multi-root-workspace.md) | Multi-root workspace and shared docs cache | Accepted |
 | [0015](0015-validation-behavior.md) | Validation behavior | Accepted |
-| [0016](0016-custom-ansible-messages.md) | Custom `ansible/*` messages | Accepted |
+| [0016](0016-custom-ansible-messages.md) | Custom `ansible/*` messages | Superseded by ADR-0037 |
 | [0017](0017-settings-compatibility.md) | Settings compatibility | Accepted |
 | [0018](0018-cli-and-logging.md) | CLI and logging | Accepted |
 | [0019](0019-toolchain-build-and-platforms.md) | Toolchain, build, and platforms | Accepted |
@@ -35,6 +35,7 @@ Each ADR captures one decision, its context, and its consequences. Statuses are
 | [0028](0028-debug-code-actions.md) | Debug code actions | Accepted |
 | [0029](0029-role-navigation.md) | Role go-to-definition and go-to-implementation | Accepted |
 | [0030](0030-extract-tasks-code-actions.md) | Extract tasks code actions | Accepted |
+| [0037](0037-no-custom-lsp-messages.md) | No custom LSP messages | Accepted |
 
 ## Template
 

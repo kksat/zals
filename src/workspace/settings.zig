@@ -59,12 +59,6 @@ pub const Settings = struct {
         self.python_interpreter_path = try dupeOpt(a, if (python) |p| json_util.string(p, "interpreterPath") else null, "");
         self.python_activation_script = try dupeOpt(a, if (python) |p| json_util.string(p, "activationScript") else null, "");
     }
-
-    /// Reset to defaults.
-    pub fn reload(self: *Settings) void {
-        _ = self.arena.reset(.retain_capacity);
-        self.* = .{ .allocator = self.allocator, .arena = self.arena };
-    }
 };
 
 fn optBool(v: ?Value, key: []const u8, default: bool) bool {
@@ -167,16 +161,3 @@ test "settings ignore unsupported names and fall back for wrong value types" {
     try expectDefaults(&settings, true);
 }
 
-test "reload resets custom settings and allows another update" {
-    var settings = Settings.init(std.testing.allocator);
-    defer settings.deinit();
-    const custom = try std.json.parseFromSlice(Value, std.testing.allocator, custom_settings_json, .{});
-    defer custom.deinit();
-    try settings.update(custom.value);
-    settings.reload();
-    try expectDefaults(&settings, true);
-    try settings.update(custom.value);
-    try expectCustomSettings(&settings);
-    try settings.update(.null);
-    try expectDefaults(&settings, true);
-}

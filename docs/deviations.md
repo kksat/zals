@@ -16,7 +16,7 @@ what differs, why, and whether it is expected to be permanent.
 
 | # | Deviation | Rationale | Permanent? |
 | --- | --- | --- | --- |
-| 4 | `resync/ansible-inventory` and `update/ansible-metadata` are not implemented. | Tier 2. See [ADR-0016](adr/0016-custom-ansible-messages.md). | Until Tier 2 |
+| 4 | Upstream custom LSP methods are not implemented. | See [ADR-0037](adr/0037-no-custom-lsp-messages.md). | Yes |
 | 5 | Go-to-definition targets the start of the module file. | Simpler and always correct. See [ADR-0009](adr/0009-go-to-definition-target.md). | Maybe |
 
 ## Implementation

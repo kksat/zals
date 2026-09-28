@@ -2,7 +2,7 @@
 
 `zals` is a reimplementation of the Ansible Language Server. It is not derived
 from upstream source code, but it follows upstream's behavior and reuses its
-public interfaces (LSP capabilities, settings names, custom messages) and test
+public interfaces (LSP capabilities and settings names) and test
 fixtures.
 
 ## Upstream projects
