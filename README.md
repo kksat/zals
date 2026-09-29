@@ -120,6 +120,11 @@ zals --stdio
 
 Point any LSP client at the binary with `ansible` as the document language.
 
+### Editor Integrations
+
+* **Zed**: See [`docs/editors/zed.md`](docs/editors/zed.md) or [`editors/zed`](editors/zed/) for the Zed extension.
+
+
 ## Releasing
 
 Releases are driven by [release-please](https://github.com/googleapis/release-please)
