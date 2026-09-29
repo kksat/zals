@@ -1,0 +1,35 @@
+<idea-plugin>
+    <id>com.kksat.zals</id>
+    <name>Ansible Language Server (zals)</name>
+    <vendor email="22549266+kksat@users.noreply.github.com" url="https://github.com/kksat/zals">kksat</vendor>
+
+    <description><![CDATA[
+        <p>Integrates <b>zals</b> (Zig Ansible Language Server) into PyCharm, IntelliJ IDEA, and other JetBrains IDEs.</p>
+        <p>Features:</p>
+        <ul>
+            <li>Autocompletion for Ansible modules, directives, and variables</li>
+            <li>Documentation on hover</li>
+            <li>Go to definition (modules, roles, variables)</li>
+            <li>Go to implementation (role main task files)</li>
+            <li>Find variable references across the role or playbook</li>
+            <li>Real-time diagnostics via <code>ansible-lint</code> and syntax validation</li>
+        </ul>
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <!-- LSP Server Support Provider -->
+        <platform.lsp.serverSupportProvider
+            implementation="com.kksat.zals.ZalsLspServerSupportProvider"/>
+
+        <!-- Settings Configuration -->
+        <applicationService
+            serviceImplementation="com.kksat.zals.settings.ZalsSettings"/>
+        <applicationConfigurable
+            parentId="language"
+            instance="com.kksat.zals.settings.ZalsConfigurable"
+            id="com.kksat.zals.settings.ZalsConfigurable"
+            displayName="Ansible (zals)"/>
+    </extensions>
+</idea-plugin>
