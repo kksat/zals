@@ -222,6 +222,14 @@ pub const Server = struct {
         return self.venv_override orelse self.settings.venv_path;
     }
 
+    /// Every `roles/` directory in the Workspace rooted at `root`. Empty until
+    /// the Workspace index exists.
+    pub fn workspaceRolesDirs(self: *Server, root: ?[]const u8) []const []const u8 {
+        _ = self;
+        _ = root;
+        return &.{};
+    }
+
     /// Search-path inputs for `file_path` (ADR-0032).
     pub fn projectContext(self: *Server, a: Allocator, file_path: []const u8) project_config.Context {
         return .{

@@ -21,7 +21,7 @@ pub const Result = union(enum) {
 const RoleResult = union(enum) {
     skip,
     none,
-    location: types.Location,
+    locations: []const types.Location,
 };
 
 pub fn definition(self: *Server, a: Allocator, params: std.json.Value) !Result {
@@ -29,7 +29,7 @@ pub fn definition(self: *Server, a: Allocator, params: std.json.Value) !Result {
     switch (try roleDefinition(self, a, params)) {
         .skip => {},
         .none => return .none,
-        .location => |loc| return .{ .location = loc },
+        .locations => |locs| return if (locs.len == 1) .{ .location = locs[0] } else .{ .locations = locs },
     }
     return moduleDefinition(self, a, params);
 }
@@ -66,9 +66,13 @@ fn roleDefinition(self: *Server, a: Allocator, params: std.json.Value) !RoleResu
     const ref = roles.reference.detect(cur.path, cur.forest.text) orelse return .skip;
     const path = try paths.uriToPath(a, cur.doc.uri);
     const collections = yaml.collections.getDeclaredCollections(arena, cur.path) catch &.{};
-    const dir = util.resolveRole(self, a, ref.name, path, collections) orelse return .none;
-    const target = roles.targets.definitionTarget(a, dir) orelse return .none;
-    return .{ .location = try util.fileLocation(a, target) };
+    var locs = std.array_list.Managed(types.Location).init(a);
+    for (util.resolveRoleAll(self, a, ref.name, path, collections)) |dir| {
+        const target = roles.targets.definitionTarget(a, dir) orelse continue;
+        try locs.append(try util.fileLocation(a, target));
+    }
+    if (locs.items.len == 0) return .none;
+    return .{ .locations = try locs.toOwnedSlice() };
 }
 
 fn moduleDefinition(self: *Server, a: Allocator, params: std.json.Value) !Result {

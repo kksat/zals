@@ -77,13 +77,35 @@ pub fn resolveRole(
     referencing_path: []const u8,
     declared_collections: []const []const u8,
 ) ?[]const u8 {
+    const all = resolveRoleAll(self, a, name, referencing_path, declared_collections);
+    return if (all.len > 0) all[0] else null;
+}
+
+/// Every candidate directory for a role name: the one Ansible would use, or
+/// all Workspace fallback matches when Ansible would find none.
+pub fn resolveRoleAll(
+    self: *Server,
+    a: Allocator,
+    name: []const u8,
+    referencing_path: []const u8,
+    declared_collections: []const []const u8,
+) []const []const u8 {
+    return roleResolver(self, a, referencing_path, declared_collections).resolveAll(name, referencing_path);
+}
+
+pub fn roleResolver(
+    self: *Server,
+    a: Allocator,
+    referencing_path: []const u8,
+    declared_collections: []const []const u8,
+) roles.Resolver {
     const ctx = self.projectContext(a, referencing_path);
-    const resolver = roles.Resolver{
+    return .{
         .allocator = a,
         .roles_paths = project_config.rolesPaths(a, ctx, referencing_path) catch &.{},
         .collections_paths = project_config.collectionsPaths(a, ctx, referencing_path) catch &.{},
-        .workspace_roots = if (ctx.workspace_root) |r| a.dupe([]const u8, &.{r}) catch &.{} else &.{},
+        .workspace_root = ctx.workspace_root,
+        .workspace_roles_dirs = self.workspaceRolesDirs(ctx.workspace_root),
         .declared_collections = declared_collections,
     };
-    return resolver.resolve(name, referencing_path);
 }

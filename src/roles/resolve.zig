@@ -1,15 +1,23 @@
-//! Resolve a role name to its directory on disk.
+//! Resolve a role name to its directory on disk (ADR-0032).
 //!
-//! Resolution is on-demand (no startup pre-scan). The search order mirrors how
-//! Ansible finds roles, minus inventory/execution-environment specifics:
+//! Resolution is on-demand. The order copies `ansible-playbook`:
 //!
-//! 1. FQCN (`ns.coll.role`) → each collections path.
-//! 2. Short name → playbook-adjacent `roles/` (walking up), then
-//!    `DEFAULT_ROLES_PATH`, then workspace-root `roles/`, then each declared
-//!    collection.
+//! 1. FQCN (`ns.coll.role`, two or more dots) → each collections path.
+//! 2. Declared `collections:` → each collection's `roles/<name>`.
+//! 3. Sibling role: `<role dir>/../<name>` when the reference is in a role.
+//! 4. `<dir>/roles/<name>`, walking up from the referencing file to the
+//!    Workspace root.
+//! 5. Each `roles_path` entry (Ansible's defaults are appended there).
+//! 6. Editor fallback: any other `roles/<name>` in the Workspace.
+//!
+//! A name with one dot (`namespace.role`) is a Galaxy role and resolves as a
+//! short name.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+
+/// Conventional role subdirectories.
+pub const role_subdirs = [_][]const u8{ "tasks", "handlers", "defaults", "vars", "meta", "templates", "files", "library" };
 
 pub const Resolver = struct {
     allocator: Allocator,
@@ -19,25 +27,43 @@ pub const Resolver = struct {
     /// Collection search paths for the referencing file
     /// (`project_config.collectionsPaths`).
     collections_paths: []const []const u8 = &.{},
-    /// Workspace root directories (filesystem paths, not URIs).
-    workspace_roots: []const []const u8 = &.{},
+    /// Root of the Workspace that owns the referencing file. The adjacent
+    /// `roles/` walk stops there.
+    workspace_root: ?[]const u8 = null,
+    /// Every `roles/` directory in the Workspace, for the editor fallback.
+    workspace_roles_dirs: []const []const u8 = &.{},
     /// Collections declared in the referencing play/task (`collections:`).
     declared_collections: []const []const u8 = &.{},
 
-    /// The role directory for `name`, or null when it cannot be found.
+    /// The role directory Ansible would use for `name`, else the first
+    /// Workspace fallback match, else null.
     pub fn resolve(self: Resolver, name: []const u8, referencing_path: []const u8) ?[]const u8 {
-        if (name.len == 0) return null;
-        if (std.mem.indexOfScalar(u8, name, '.') != null) return self.resolveFqcn(name);
+        const all = self.resolveAll(name, referencing_path);
+        return if (all.len > 0) all[0] else null;
+    }
 
+    /// The first match of steps 1–5 as a one-element slice. When none
+    /// matches, every step-6 match, nearest to the referencing file first.
+    pub fn resolveAll(self: Resolver, name: []const u8, referencing_path: []const u8) []const []const u8 {
+        if (name.len == 0) return &.{};
+        if (self.resolveAnsible(name, referencing_path)) |dir| return self.one(dir);
+        if (dotCount(name) >= 2) return &.{};
+        return self.fallback(name, referencing_path);
+    }
+
+    fn resolveAnsible(self: Resolver, name: []const u8, referencing_path: []const u8) ?[]const u8 {
+        if (dotCount(name) >= 2) return self.resolveFqcn(name);
+        for (self.declared_collections) |coll| {
+            if (self.resolveCollection(coll, name)) |dir| return dir;
+        }
+        if (enclosingRole(referencing_path)) |role_dir| {
+            if (std.fs.path.dirname(role_dir)) |parent| {
+                if (self.tryDir(&.{ parent, name })) |dir| return dir;
+            }
+        }
         if (self.resolveAdjacent(name, referencing_path)) |dir| return dir;
         for (self.roles_paths) |rp| {
             if (self.tryDir(&.{ rp, name })) |dir| return dir;
-        }
-        for (self.workspace_roots) |root| {
-            if (self.tryDir(&.{ root, "roles", name })) |dir| return dir;
-        }
-        for (self.declared_collections) |coll| {
-            if (self.resolveCollection(coll, name)) |dir| return dir;
         }
         return null;
     }
@@ -46,6 +72,9 @@ pub const Resolver = struct {
         var dir = std.fs.path.dirname(referencing_path) orelse return null;
         while (true) {
             if (self.tryDir(&.{ dir, "roles", name })) |found| return found;
+            if (self.workspace_root) |root| {
+                if (std.mem.eql(u8, dir, root)) return null;
+            }
             const parent = std.fs.path.dirname(dir) orelse return null;
             if (parent.len == 0 or std.mem.eql(u8, parent, dir)) return null;
             dir = parent;
@@ -78,6 +107,31 @@ pub const Resolver = struct {
         return null;
     }
 
+    fn fallback(self: Resolver, name: []const u8, referencing_path: []const u8) []const []const u8 {
+        var out = std.array_list.Managed([]const u8).init(self.allocator);
+        for (self.workspace_roles_dirs) |rd| {
+            const dir = self.tryDir(&.{ rd, name }) orelse continue;
+            out.append(dir) catch continue;
+        }
+        const Ctx = struct {
+            ref: []const u8,
+            fn less(ctx: @This(), x: []const u8, y: []const u8) bool {
+                const px = commonPrefix(ctx.ref, x);
+                const py = commonPrefix(ctx.ref, y);
+                if (px != py) return px > py;
+                return std.mem.order(u8, x, y) == .lt;
+            }
+        };
+        std.mem.sort([]const u8, out.items, Ctx{ .ref = referencing_path }, Ctx.less);
+        return out.toOwnedSlice() catch &.{};
+    }
+
+    fn one(self: Resolver, dir: []const u8) []const []const u8 {
+        const out = self.allocator.alloc([]const u8, 1) catch return &.{};
+        out[0] = dir;
+        return out;
+    }
+
     fn tryDir(self: Resolver, parts: []const []const u8) ?[]const u8 {
         const path = std.fs.path.join(self.allocator, parts) catch return null;
         if (!isDir(path)) {
@@ -87,6 +141,46 @@ pub const Resolver = struct {
         return path;
     }
 };
+
+/// The role directory that contains `path`: the parent of the nearest
+/// ancestor named like a conventional role subdirectory, when that parent sits
+/// in a `roles/` directory or has `meta/main.yml`. Null outside a role.
+pub fn enclosingRole(path: []const u8) ?[]const u8 {
+    var dir = std.fs.path.dirname(path) orelse return null;
+    while (true) {
+        const base = std.fs.path.basename(dir);
+        for (role_subdirs) |sub| {
+            if (!std.mem.eql(u8, base, sub)) continue;
+            const role_dir = std.fs.path.dirname(dir) orelse return null;
+            if (isRoleDir(role_dir)) return role_dir;
+        }
+        const parent = std.fs.path.dirname(dir) orelse return null;
+        if (parent.len == 0 or std.mem.eql(u8, parent, dir)) return null;
+        dir = parent;
+    }
+}
+
+fn isRoleDir(dir: []const u8) bool {
+    if (std.fs.path.dirname(dir)) |parent| {
+        if (std.mem.eql(u8, std.fs.path.basename(parent), "roles")) return true;
+    }
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    const meta = std.fmt.bufPrint(&buf, "{s}/meta/main.yml", .{dir}) catch return false;
+    const f = std.fs.cwd().openFile(meta, .{}) catch return false;
+    f.close();
+    return true;
+}
+
+fn dotCount(name: []const u8) usize {
+    return std.mem.count(u8, name, ".");
+}
+
+fn commonPrefix(x: []const u8, y: []const u8) usize {
+    const n = @min(x.len, y.len);
+    var i: usize = 0;
+    while (i < n and x[i] == y[i]) : (i += 1) {}
+    return i;
+}
 
 fn isDir(path: []const u8) bool {
     var dir = std.fs.cwd().openDir(path, .{}) catch return false;
@@ -204,4 +298,125 @@ test "unresolved role returns null" {
 
     const resolver = Resolver{ .allocator = aa };
     try testing.expect(resolver.resolve("nope", "/tmp/playbook.yml") == null);
+}
+
+test "galaxy role name resolves as a short name" {
+    const a = testing.allocator;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.makePath("galaxy/geerlingguy.nginx/tasks");
+    const root = try tmp.dir.realpathAlloc(a, ".");
+    defer a.free(root);
+
+    var arena = std.heap.ArenaAllocator.init(a);
+    defer arena.deinit();
+    const aa = arena.allocator();
+
+    const galaxy = try std.fs.path.join(aa, &.{ root, "galaxy" });
+    const playbook = try std.fs.path.join(aa, &.{ root, "site.yml" });
+    const resolver = Resolver{ .allocator = aa, .roles_paths = &.{galaxy}, .workspace_root = root };
+    const dir = resolver.resolve("geerlingguy.nginx", playbook).?;
+    try testing.expectEqualStrings(try std.fs.path.join(aa, &.{ galaxy, "geerlingguy.nginx" }), dir);
+}
+
+test "declared collection wins over adjacent roles" {
+    const a = testing.allocator;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.makePath("roles/demo/tasks");
+    try tmp.dir.makePath("collections/ansible_collections/ns/coll/roles/demo/tasks");
+    const root = try tmp.dir.realpathAlloc(a, ".");
+    defer a.free(root);
+
+    var arena = std.heap.ArenaAllocator.init(a);
+    defer arena.deinit();
+    const aa = arena.allocator();
+
+    const collections = try std.fs.path.join(aa, &.{ root, "collections" });
+    const playbook = try std.fs.path.join(aa, &.{ root, "site.yml" });
+    const resolver = Resolver{
+        .allocator = aa,
+        .collections_paths = &.{collections},
+        .declared_collections = &.{"ns.coll"},
+        .workspace_root = root,
+    };
+    const dir = resolver.resolve("demo", playbook).?;
+    try testing.expect(std.mem.indexOf(u8, dir, "ansible_collections") != null);
+}
+
+test "sibling role wins over roles_path" {
+    const a = testing.allocator;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.makePath("roles/web/meta");
+    try tmp.dir.makePath("roles/common/tasks");
+    try tmp.dir.makePath("elsewhere/common/tasks");
+    const root = try tmp.dir.realpathAlloc(a, ".");
+    defer a.free(root);
+
+    var arena = std.heap.ArenaAllocator.init(a);
+    defer arena.deinit();
+    const aa = arena.allocator();
+
+    const meta = try std.fs.path.join(aa, &.{ root, "roles", "web", "meta", "main.yml" });
+    const elsewhere = try std.fs.path.join(aa, &.{ root, "elsewhere" });
+    const resolver = Resolver{ .allocator = aa, .roles_paths = &.{elsewhere}, .workspace_root = root };
+    const dir = resolver.resolve("common", meta).?;
+    try testing.expectEqualStrings(try std.fs.path.join(aa, &.{ root, "roles", "common" }), dir);
+}
+
+test "adjacent walk stops at the Workspace root" {
+    const a = testing.allocator;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.makePath("roles/demo/tasks");
+    try tmp.dir.makePath("ws/playbooks");
+    const root = try tmp.dir.realpathAlloc(a, ".");
+    defer a.free(root);
+
+    var arena = std.heap.ArenaAllocator.init(a);
+    defer arena.deinit();
+    const aa = arena.allocator();
+
+    const ws = try std.fs.path.join(aa, &.{ root, "ws" });
+    const playbook = try std.fs.path.join(aa, &.{ ws, "playbooks", "site.yml" });
+    const resolver = Resolver{ .allocator = aa, .workspace_root = ws };
+    try testing.expect(resolver.resolve("demo", playbook) == null);
+}
+
+test "workspace fallback returns every match, nearest first" {
+    const a = testing.allocator;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.makePath("infra/roles/db/tasks");
+    try tmp.dir.makePath("apps/roles/db/tasks");
+    try tmp.dir.makePath("apps/playbooks");
+    const root = try tmp.dir.realpathAlloc(a, ".");
+    defer a.free(root);
+
+    var arena = std.heap.ArenaAllocator.init(a);
+    defer arena.deinit();
+    const aa = arena.allocator();
+
+    const infra = try std.fs.path.join(aa, &.{ root, "infra", "roles" });
+    const apps = try std.fs.path.join(aa, &.{ root, "apps", "roles" });
+    const other = try std.fs.path.join(aa, &.{ root, "other", "site.yml" });
+    const resolver = Resolver{
+        .allocator = aa,
+        .workspace_root = root,
+        .workspace_roles_dirs = &.{ infra, apps },
+    };
+    const all = resolver.resolveAll("db", other);
+    try testing.expectEqual(@as(usize, 2), all.len);
+
+    // From apps/playbooks, the adjacent walk finds apps/roles/db first.
+    const from_apps = try std.fs.path.join(aa, &.{ root, "apps", "playbooks", "site.yml" });
+    const first = resolver.resolveAll("db", from_apps);
+    try testing.expectEqual(@as(usize, 1), first.len);
+    try testing.expectEqualStrings(try std.fs.path.join(aa, &.{ apps, "db" }), first[0]);
+}
+
+test "enclosing role" {
+    try testing.expectEqualStrings("/w/roles/web", enclosingRole("/w/roles/web/tasks/sub/x.yml").?);
+    try testing.expect(enclosingRole("/nowhere-zals/tasks/x.yml") == null);
 }
