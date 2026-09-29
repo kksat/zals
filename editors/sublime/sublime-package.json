@@ -1,0 +1,73 @@
+{
+  "$schema": "sublime://packagecontrol.io/schemas/sublime-package.json",
+  "name": "LSP-zals",
+  "description": "Ansible Language Server (zals) support for Sublime Text LSP",
+  "homepage": "https://github.com/kksat/zals",
+  "author": "Kirill Satarin <22549266+kksat@users.noreply.github.com>",
+  "license": "GPL-3.0-only",
+  "contributions": {
+    "settings": [
+      {
+        "file_patterns": [
+          "LSP-zals.sublime-settings"
+        ],
+        "schema": {
+          "$id": "sublime://settings/LSP-zals",
+          "properties": {
+            "settings": {
+              "type": "object",
+              "properties": {
+                "command": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "default": ["zals", "--stdio"],
+                  "description": "The command and arguments to launch the zals server."
+                },
+                "settings": {
+                  "type": "object",
+                  "properties": {
+                    "ansible.validation.enabled": {
+                      "type": "boolean",
+                      "default": true,
+                      "description": "Enable validation and diagnostics."
+                    },
+                    "ansible.validation.lint.enabled": {
+                      "type": "boolean",
+                      "default": true,
+                      "description": "Enable ansible-lint diagnostics."
+                    },
+                    "ansible.validation.lint.path": {
+                      "type": "string",
+                      "default": "ansible-lint",
+                      "description": "Path to the ansible-lint executable."
+                    },
+                    "ansible.ansible.path": {
+                      "type": "string",
+                      "default": "ansible",
+                      "description": "Path to the ansible executable."
+                    },
+                    "ansible.ansible.useFullyQualifiedCollectionNames": {
+                      "type": "boolean",
+                      "default": true,
+                      "description": "Suggest FQCN module names in completions."
+                    },
+                    "ansible.completion.provideRedirectModules": {
+                      "type": "boolean",
+                      "default": true,
+                      "description": "Include redirected modules in completions."
+                    },
+                    "ansible.completion.provideDisabledModules": {
+                      "type": "boolean",
+                      "default": true,
+                      "description": "Include deprecated/disabled modules in completions."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    ]
+  }
+}

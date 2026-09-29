@@ -120,6 +120,11 @@ zals --stdio
 
 Point any LSP client at the binary with `ansible` as the document language.
 
+### Editor Integrations
+
+* **Sublime Text**: See [`docs/editors/sublime.md`](docs/editors/sublime.md) or [`editors/sublime`](editors/sublime/) for the `LSP-zals` package.
+
+
 ## Releasing
 
 Releases are driven by [release-please](https://github.com/googleapis/release-please)
