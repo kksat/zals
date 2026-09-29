@@ -1,0 +1,191 @@
+{
+  "name": "zals",
+  "displayName": "Ansible Language Server (zals)",
+  "description": "Zig Ansible Language Server client for VS Code",
+  "version": "1.0.0",
+  "publisher": "kksat",
+  "license": "GPL-3.0-only",
+  "homepage": "https://github.com/kksat/zals",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kksat/zals"
+  },
+  "bugs": {
+    "url": "https://github.com/kksat/zals/issues"
+  },
+  "engines": {
+    "vscode": "^1.82.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "keywords": [
+    "ansible",
+    "lsp",
+    "language-server",
+    "zig"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onLanguage:ansible"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false
+    }
+  },
+  "contributes": {
+    "languages": [
+      {
+        "id": "ansible",
+        "aliases": [
+          "Ansible",
+          "ansible"
+        ],
+        "extensions": [
+          ".ansible.yml",
+          ".ansible.yaml"
+        ],
+        "filenames": [
+          "site.yml",
+          "site.yaml",
+          "galaxy.yml",
+          "galaxy.yaml",
+          "execution-environment.yml",
+          "execution-environment.yaml",
+          "requirements.yml",
+          "requirements.yaml"
+        ],
+        "filenamePatterns": [
+          "**/playbooks/*.yml",
+          "**/playbooks/*.yaml",
+          "**/*playbook*.yml",
+          "**/*playbook*.yaml",
+          "**/roles/**/main.yml",
+          "**/roles/**/main.yaml",
+          "**/tasks/**/*.yml",
+          "**/tasks/**/*.yaml",
+          "**/handlers/**/*.yml",
+          "**/handlers/**/*.yaml",
+          "**/defaults/**/*.yml",
+          "**/defaults/**/*.yaml",
+          "**/vars/**/*.yml",
+          "**/vars/**/*.yaml",
+          "**/meta/*.yml",
+          "**/meta/*.yaml",
+          "**/host_vars/**/*.yml",
+          "**/host_vars/**/*.yaml",
+          "**/group_vars/**/*.yml",
+          "**/group_vars/**/*.yaml",
+          "**/molecule/*/molecule.yml",
+          "**/molecule/*/molecule.yaml"
+        ],
+        "firstLine": "# code: language=ansible",
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "ansible",
+        "scopeName": "source.ansible",
+        "path": "./syntaxes/ansible.tmLanguage"
+      }
+    ],
+    "configurationDefaults": {
+      "[ansible]": {
+        "editor.tabSize": 2,
+        "editor.insertSpaces": true,
+        "editor.autoIndent": "advanced",
+        "editor.quickSuggestions": {
+          "comments": true,
+          "other": true,
+          "strings": true
+        }
+      }
+    },
+    "configuration": {
+      "title": "Ansible",
+      "properties": {
+        "ansible.ansible.path": {
+          "type": "string",
+          "default": "ansible",
+          "markdownDescription": "Path to the ansible executable. All subcommands are expected to have adjacent locations.",
+          "order": 0,
+          "scope": "machine-overridable"
+        },
+        "ansible.ansible.useFullyQualifiedCollectionNames": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Always use fully qualified collection names (FQCN) when inserting a module name. Disabling it will only use FQCNs when necessary.",
+          "order": 1,
+          "scope": "resource"
+        },
+        "ansible.completion.provideRedirectModules": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Toggle redirected module provider when completing modules.",
+          "order": 0,
+          "scope": "resource"
+        },
+        "ansible.completion.provideModuleOptionAliases": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Toggle alias provider when completing module options.",
+          "order": 1,
+          "scope": "resource"
+        },
+        "ansible.validation.enabled": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "If disabled no validation will be performed.",
+          "order": 0
+        },
+        "ansible.validation.lint.enabled": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Enables `ansible-lint`. If disabled only `ansible-playbook --syntax-check` will run. Requires `#ansible.validation.enabled#` to be enabled.",
+          "order": 1,
+          "scope": "resource"
+        },
+        "ansible.validation.lint.path": {
+          "type": "string",
+          "default": "ansible-lint",
+          "markdownDescription": "Path to the ansible-lint executable.",
+          "order": 2,
+          "scope": "machine-overridable"
+        },
+        "ansible.validation.lint.arguments": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Command line arguments to be passed to ansible-lint.",
+          "order": 3,
+          "scope": "resource"
+        },
+        "ansible.validation.lint.autoFixOnSave": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Specifies whether `ansible-lint --fix` should run automatically when you save a file.",
+          "order": 4,
+          "scope": "resource"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "esbuild ./src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node",
+    "watch": "esbuild ./src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --watch",
+    "package": "npm run compile -- --minify",
+    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.19",
+    "@types/vscode": "^1.82.0",
+    "esbuild": "^0.24.2",
+    "typescript": "^5.7.3"
+  }
+}

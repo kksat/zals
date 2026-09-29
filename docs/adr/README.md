@@ -35,7 +35,19 @@ Each ADR captures one decision, its context, and its consequences. Statuses are
 | [0028](0028-debug-code-actions.md) | Debug code actions | Accepted |
 | [0029](0029-role-navigation.md) | Role go-to-definition and go-to-implementation | Accepted |
 | [0030](0030-extract-tasks-code-actions.md) | Extract tasks code actions | Accepted |
+| [0031](0031-vscode-extension-bundles-zals.md) | VS Code extension bundles the zals binary | Accepted |
+| [0032](0032-no-coordination-with-other-language-servers.md) | No coordination with other language servers | Accepted |
+| [0033](0033-ansible-language-document-selector.md) | Ansible language document selector | Accepted |
+| [0034](0034-yaml-grammar-only.md) | YAML grammar only | Accepted |
+| [0035](0035-extension-ignores-python-configuration.md) | Extension ignores Python configuration | Accepted |
+| [0036](0036-extension-settings-contribution.md) | Extension settings contribution | Accepted |
 | [0037](0037-no-custom-lsp-messages.md) | No custom LSP messages | Accepted |
+| [0038](0038-vscode-extension-in-this-repository.md) | VS Code extension lives in this repository | Accepted |
+| [0039](0039-vscode-extension-is-a-language-client-only.md) | VS Code extension is a language client only | Accepted |
+| [0040](0040-distribution-marketplaces-and-releases.md) | Distribution to marketplaces and GitHub releases | Accepted |
+| [0041](0041-extension-identifier-and-display-name.md) | Extension identifier and display name | Accepted |
+| [0042](0042-workspace-trust-disabled.md) | Workspace trust disabled | Accepted |
+| [0043](0043-strictly-bundled-binary-at-runtime.md) | Strictly bundled binary at runtime | Accepted |
 
 ## Template
 

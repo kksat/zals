@@ -17,6 +17,11 @@
         {
           "type": "generic",
           "path": "python/pyproject.toml"
+        },
+        {
+          "type": "json",
+          "path": "editors/vscode/package.json",
+          "jsonpath": "$.version"
         }
       ]
     }

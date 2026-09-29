@@ -3,8 +3,9 @@
 A Zig reimplementation of the Ansible Language Server. This glossary covers the
 vocabulary of variable navigation (finding the definition of a variable and
 finding every reference to it), of the document outline (the symbols a client
-shows for a single file), and of code actions (adding and removing a debug task
-for a variable, and extracting tasks into a task file).
+shows for a single file), of code actions (adding and removing a debug task
+for a variable, and extracting tasks into a task file), and of the VS Code
+client that packages the server.
 
 ## Language
 
@@ -119,3 +120,9 @@ _Avoid_: role directory, role folder
 The search space for a variable defined or used in a playbook: the playbook file
 plus one level of `vars_files`/`include_vars` targets.
 _Avoid_: play scope, file scope
+
+## Client
+
+**VS Code extension**:
+The VS Code language client for `zals`.
+_Avoid_: plugin, playbook runner, vault. Not a file extension (the suffix in a name such as `taskN.yml`).

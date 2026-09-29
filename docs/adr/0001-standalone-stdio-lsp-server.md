@@ -23,7 +23,7 @@ that can launch a stdio server can use it.
 - The server is usable from Neovim, Emacs, Helix, Zed, and any other LSP client
   without a Node runtime.
 - We do not need to implement Node's IPC framing.
-- The VS Code extension cannot use `zals` without a small adapter; that is out of
-  scope for v1.
+- The VS Code extension cannot use `zals` without a small adapter. That adapter
+  is in scope ([ADR-0038](0038-vscode-extension-in-this-repository.md)).
 - stdio means stdout is reserved for the protocol; all logging goes to stderr or
   a log file (see [ADR-0018](0018-cli-and-logging.md)).

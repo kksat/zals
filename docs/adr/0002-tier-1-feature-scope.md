@@ -23,8 +23,10 @@ v1 targets **Tier 1 only** — the client-agnostic LSP surface:
 - Validation (`ansible-lint`, `ansible-playbook --syntax-check` fallback, and
   JSON-schema validation)
 
-Tier 2/3 features are explicitly out of scope: the VS Code extension, inventory
-and metadata notifications, execution environments, and `--generate-docs`.
+Tier 2/3 features are explicitly out of scope: inventory and metadata
+notifications, execution environments, and `--generate-docs`. The VS Code
+extension clause is superseded by
+[ADR-0038](0038-vscode-extension-in-this-repository.md).
 
 ## Consequences
 

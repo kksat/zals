@@ -44,3 +44,5 @@ not depend on higher ones.
 - Layer-first means a feature's code is spread across directories; this is
   acceptable because the layers are small and the dependency direction is clear.
 - `tools/differential/` is isolated so it never becomes a runtime dependency.
+- The VS Code extension lives at `editors/vscode`, outside this tree
+  ([ADR-0038](0038-vscode-extension-in-this-repository.md)).

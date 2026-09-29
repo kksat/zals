@@ -206,3 +206,93 @@ jobs:
           fi
           git commit -m "zals ${version}"
           git push
+
+  vscode:
+    name: package and publish vs code extension
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+
+      - name: Install extension dependencies
+        run: |
+          cd editors/vscode
+          npm ci
+
+      - name: Test and typecheck extension
+        run: |
+          cd editors/vscode
+          npm run typecheck
+          npm test
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Build platform VSIX packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          mkdir -p vsix-packages
+
+          package_vsix() {
+            local target="$1" vsce_plat="$2" archive="$3"
+            rm -rf editors/vscode/bin
+            mkdir -p editors/vscode/bin
+            if [ "$archive" = "zip" ]; then
+              unzip -q "dist/zals-${version}-${target}.zip" -d editors/vscode/bin
+              chmod +x editors/vscode/bin/zals.exe
+            else
+              tar -xzf "dist/zals-${version}-${target}.tar.gz" -C editors/vscode/bin
+              chmod +x editors/vscode/bin/zals
+            fi
+            (
+              cd editors/vscode
+              npx @vscode/vsce package --target "$vsce_plat" --out "../vsix-packages/zals-${version}-${vsce_plat}.vsix" --no-dependencies
+            )
+          }
+
+          package_vsix x86_64-linux  linux-x64  tar.gz
+          package_vsix aarch64-linux linux-arm64 tar.gz
+          package_vsix x86_64-macos  darwin-x64 tar.gz
+          package_vsix aarch64-macos darwin-arm64 tar.gz
+          package_vsix x86_64-windows win32-x64 zip
+
+          ls -la vsix-packages
+
+      - name: Attach VSIX packages to GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          files: vsix-packages/*.vsix
+          fail_on_unmatched_files: true
+
+      - name: Publish to Visual Studio Marketplace
+        if: ${{ secrets.VSCE_PAT != '' }}
+        shell: bash
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          for f in vsix-packages/*.vsix; do
+            npx @vscode/vsce publish --packagePath "$f" -p "$VSCE_PAT"
+          done
+
+      - name: Publish to Open VSX Registry
+        if: ${{ secrets.OVSX_PAT != '' }}
+        shell: bash
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          for f in vsix-packages/*.vsix; do
+            npx ovsx publish "$f" -p "$OVSX_PAT"
+          done
