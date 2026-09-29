@@ -23,6 +23,10 @@ pub const Settings = struct {
     auto_fix_on_save: bool = false,
     python_interpreter_path: []const u8 = "",
     python_activation_script: []const u8 = "",
+    /// `ansible.python.venvPath`. The one virtual environment whose
+    /// collections are searched, relative to the Workspace root. Default
+    /// `.venv`.
+    venv_path: []const u8 = ".venv",
     /// `ansible.workspace.missingGitWarning`. One session warning when an
     /// opened folder has no Workspace.
     missing_git_warning: bool = true,
@@ -65,6 +69,7 @@ pub const Settings = struct {
         self.auto_fix_on_save = optBool(lint, "autoFixOnSave", false);
         self.python_interpreter_path = try dupeOpt(a, if (python) |p| json_util.string(p, "interpreterPath") else null, "");
         self.python_activation_script = try dupeOpt(a, if (python) |p| json_util.string(p, "activationScript") else null, "");
+        self.venv_path = try dupeOpt(a, if (python) |p| json_util.string(p, "venvPath") else null, ".venv");
         self.missing_git_warning = optBool(workspace, "missingGitWarning", true);
         self.root_marker = try dupeOpt(a, if (workspace) |w| json_util.string(w, "rootMarker") else null, ".git");
     }
@@ -115,4 +120,21 @@ test "missing git warning defaults on and can be disabled" {
     try settings.update(marker.value);
     try testing.expectEqualStrings("ansible.cfg", settings.root_marker);
     try testing.expect(settings.missing_git_warning);
+}
+
+test "venv path defaults to .venv and can be changed" {
+    var settings = Settings.init(testing.allocator);
+    defer settings.deinit();
+    try testing.expectEqualStrings(".venv", settings.venv_path);
+
+    const parsed = try std.json.parseFromSlice(
+        Value,
+        testing.allocator,
+        \\{"ansible":{"python":{"venvPath":".venv-ansible-2.16"}}}
+    ,
+        .{},
+    );
+    defer parsed.deinit();
+    try settings.update(parsed.value);
+    try testing.expectEqualStrings(".venv-ansible-2.16", settings.venv_path);
 }

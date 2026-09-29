@@ -11,6 +11,7 @@ const PositionEncoding = @import("../workspace/document.zig").PositionEncoding;
 const Settings = @import("../workspace/settings.zig").Settings;
 const roots = @import("../workspace/roots.zig");
 const paths = @import("../paths.zig");
+const project_config = @import("../services/project_config.zig");
 const handlers = @import("handlers.zig");
 const exec = @import("../exec/root.zig");
 const DocsLibrary = @import("../services/docs.zig").DocsLibrary;
@@ -49,6 +50,8 @@ pub const Server = struct {
     /// True when at least one opened folder has no Workspace.
     missing_workspace: bool = false,
     warned_missing_workspace: bool = false,
+    /// `--venv <path>`; wins over `ansible.python.venvPath`. Borrowed from argv.
+    venv_override: ?[]const u8 = null,
 
     pub fn init(allocator: Allocator, transport: Transport) !Server {
         const runner = exec.Posix.posixRunner();
@@ -198,6 +201,35 @@ pub const Server = struct {
                 self.missing_workspace = true;
             }
         }
+    }
+
+    /// Session Workspace roots as filesystem paths.
+    pub fn workspacePaths(self: *Server, a: Allocator) ![]const []const u8 {
+        var list = std.array_list.Managed([]const u8).init(a);
+        for (self.root_uris.items) |u| try list.append(try paths.uriToPath(a, u));
+        return list.toOwnedSlice();
+    }
+
+    /// The session Workspace root that owns `file_path`, or null.
+    pub fn workspaceRootFor(self: *Server, a: Allocator, file_path: []const u8) ?[]const u8 {
+        const session = self.workspacePaths(a) catch return null;
+        const owned = roots.owning(a, file_path, session, self.settings.root_marker) catch return null;
+        return if (owned) |o| o[0] else null;
+    }
+
+    /// The virtual environment whose collections are searched.
+    pub fn venvPath(self: *Server) []const u8 {
+        return self.venv_override orelse self.settings.venv_path;
+    }
+
+    /// Search-path inputs for `file_path` (ADR-0032).
+    pub fn projectContext(self: *Server, a: Allocator, file_path: []const u8) project_config.Context {
+        return .{
+            .workspace_root = self.workspaceRootFor(a, file_path),
+            .venv = self.venvPath(),
+            .dump_roles = self.ansible_config.rolesPath(),
+            .dump_collections = self.ansible_config.collectionsPaths(),
+        };
     }
 
     /// One session warning when an opened folder has no Workspace.

@@ -28,6 +28,7 @@ Use **upstream's exact setting names and defaults** for the Tier 1 subset:
 | `ansible.validation.lint.autoFixOnSave` | `false` |
 | `ansible.python.interpreterPath` | `""` |
 | `ansible.python.activationScript` | `""` |
+| `ansible.python.venvPath` | `.venv` |
 | `ansible.workspace.missingGitWarning` | `true` |
 | `ansible.workspace.rootMarker` | `.git` |
 
@@ -35,7 +36,8 @@ Use **upstream's exact setting names and defaults** for the Tier 1 subset:
 
 - Existing configurations work unchanged.
 - Upstream documentation applies directly.
-- `ansible.workspace.missingGitWarning` and `ansible.workspace.rootMarker` are
+- `ansible.workspace.missingGitWarning`, `ansible.workspace.rootMarker`, and
+  `ansible.python.venvPath` ([ADR-0032](0032-workspace-wide-navigation.md)) are
   zals settings (see [ADR-0014](0014-multi-root-workspace.md)); upstream has no
   equivalent. `rootMarker` defaults to `.git`; changing it redefines the
   Workspace.

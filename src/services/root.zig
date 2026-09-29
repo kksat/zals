@@ -11,6 +11,7 @@ pub const module_index = @import("module_index.zig");
 pub const ansible_config = @import("ansible_config.zig");
 pub const AnsibleConfig = ansible_config.AnsibleConfig;
 pub const markup = @import("markup.zig");
+pub const project_config = @import("project_config.zig");
 
 test {
     @import("std").testing.refAllDecls(@This());

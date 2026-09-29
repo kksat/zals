@@ -9,6 +9,9 @@ pub const Options = struct {
     log_level: LogLevel = .info,
     show_version: bool = false,
     show_help: bool = false,
+    /// `--venv <path>`: the virtual environment whose collections are
+    /// searched. Overrides `ansible.python.venvPath`.
+    venv: ?[]const u8 = null,
 };
 
 pub const ParseError = error{
@@ -32,6 +35,10 @@ pub fn parse(args: []const []const u8, options: *Options) ParseError!void {
             i += 1;
             if (i >= args.len) return error.MissingValue;
             options.log_file = args[i];
+        } else if (std.mem.eql(u8, arg, "--venv")) {
+            i += 1;
+            if (i >= args.len) return error.MissingValue;
+            options.venv = args[i];
         } else if (std.mem.eql(u8, arg, "--log-level")) {
             i += 1;
             if (i >= args.len) return error.MissingValue;
@@ -64,6 +71,13 @@ test "parse log options" {
     try parse(&.{ "--log-file", "/tmp/zals.log", "--log-level", "debug" }, &options);
     try std.testing.expectEqualStrings("/tmp/zals.log", options.log_file.?);
     try std.testing.expectEqual(LogLevel.debug, options.log_level);
+}
+
+test "parse venv" {
+    var options = Options{};
+    try parse(&.{ "--venv", ".venv-2.16" }, &options);
+    try std.testing.expectEqualStrings(".venv-2.16", options.venv.?);
+    try std.testing.expectError(error.MissingValue, parse(&.{"--venv"}, &options));
 }
 
 test "parse rejects unknown argument" {

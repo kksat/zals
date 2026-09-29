@@ -10,7 +10,7 @@ const Document = @import("../workspace/document.zig").Document;
 const yaml = @import("../yaml/root.zig");
 const roles = @import("../roles/root.zig");
 const paths = @import("../paths.zig");
-const roots = @import("../workspace/roots.zig");
+const project_config = @import("../services/project_config.zig");
 
 pub const Cursor = struct {
     doc: *Document,
@@ -68,7 +68,8 @@ pub fn fileLocation(a: Allocator, path: []const u8) !types.Location {
     };
 }
 
-/// Resolve a role name against the Workspace that owns the referencing file.
+/// Resolve a role name for the referencing file, using its Workspace and the
+/// search paths that apply to it (ADR-0032).
 pub fn resolveRole(
     self: *Server,
     a: Allocator,
@@ -76,16 +77,12 @@ pub fn resolveRole(
     referencing_path: []const u8,
     declared_collections: []const []const u8,
 ) ?[]const u8 {
-    var session = std.array_list.Managed([]const u8).init(a);
-    for (self.root_uris.items) |u| {
-        const p = paths.uriToPath(a, u) catch continue;
-        session.append(p) catch {};
-    }
-    const owned = roots.owning(a, referencing_path, session.items, self.settings.root_marker) catch null;
+    const ctx = self.projectContext(a, referencing_path);
     const resolver = roles.Resolver{
         .allocator = a,
-        .config = &self.ansible_config,
-        .workspace_roots = if (owned) |o| o else &.{},
+        .roles_paths = project_config.rolesPaths(a, ctx, referencing_path) catch &.{},
+        .collections_paths = project_config.collectionsPaths(a, ctx, referencing_path) catch &.{},
+        .workspace_roots = if (ctx.workspace_root) |r| a.dupe([]const u8, &.{r}) catch &.{} else &.{},
         .declared_collections = declared_collections,
     };
     return resolver.resolve(name, referencing_path);

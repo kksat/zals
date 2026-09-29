@@ -21,6 +21,7 @@ Support these flags:
 | `--stdio` | Communicate over stdio (default) |
 | `--log-file <path>` | Write server logs to a file |
 | `--log-level <level>` | `error` \| `warn` \| `info` \| `debug` |
+| `--venv <path>` | Virtual environment whose collections are searched; overrides `ansible.python.venvPath` ([ADR-0032](0032-workspace-wide-navigation.md)) |
 | `--version` | Print version and exit |
 | `-h`, `--help` | Print help and exit |
 

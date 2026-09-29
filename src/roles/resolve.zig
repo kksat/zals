@@ -10,11 +10,15 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const AnsibleConfig = @import("../services/ansible_config.zig").AnsibleConfig;
 
 pub const Resolver = struct {
     allocator: Allocator,
-    config: *AnsibleConfig,
+    /// Role search paths for the referencing file, already expanded
+    /// (`project_config.rolesPaths`).
+    roles_paths: []const []const u8 = &.{},
+    /// Collection search paths for the referencing file
+    /// (`project_config.collectionsPaths`).
+    collections_paths: []const []const u8 = &.{},
     /// Workspace root directories (filesystem paths, not URIs).
     workspace_roots: []const []const u8 = &.{},
     /// Collections declared in the referencing play/task (`collections:`).
@@ -26,11 +30,8 @@ pub const Resolver = struct {
         if (std.mem.indexOfScalar(u8, name, '.') != null) return self.resolveFqcn(name);
 
         if (self.resolveAdjacent(name, referencing_path)) |dir| return dir;
-        for (self.config.rolesPath()) |rp| {
-            const expanded = self.expandHome(rp) orelse continue;
-            const found = self.tryDir(&.{ expanded, name });
-            if (std.mem.startsWith(u8, rp, "~/")) self.allocator.free(expanded);
-            if (found) |dir| return dir;
+        for (self.roles_paths) |rp| {
+            if (self.tryDir(&.{ rp, name })) |dir| return dir;
         }
         for (self.workspace_roots) |root| {
             if (self.tryDir(&.{ root, "roles", name })) |dir| return dir;
@@ -60,7 +61,7 @@ pub const Resolver = struct {
         const role = rest[second + 1 ..];
         if (ns.len == 0 or coll.len == 0 or role.len == 0) return null;
         if (std.mem.indexOfScalar(u8, role, '.') != null) return null;
-        for (self.config.collectionsPaths()) |cp| {
+        for (self.collections_paths) |cp| {
             if (self.tryDir(&.{ cp, "ansible_collections", ns, coll, "roles", role })) |dir| return dir;
         }
         return null;
@@ -71,7 +72,7 @@ pub const Resolver = struct {
         const ns = collection[0..dot];
         const coll = collection[dot + 1 ..];
         if (ns.len == 0 or coll.len == 0) return null;
-        for (self.config.collectionsPaths()) |cp| {
+        for (self.collections_paths) |cp| {
             if (self.tryDir(&.{ cp, "ansible_collections", ns, coll, "roles", name })) |dir| return dir;
         }
         return null;
@@ -85,14 +86,6 @@ pub const Resolver = struct {
         }
         return path;
     }
-
-    /// Expand a leading `~/` against `$HOME` (or `%USERPROFILE%` on Windows).
-    fn expandHome(self: Resolver, path: []const u8) ?[]const u8 {
-        if (!std.mem.startsWith(u8, path, "~/")) return path;
-        const home = std.process.getEnvVarOwned(self.allocator, "HOME") catch
-            std.process.getEnvVarOwned(self.allocator, "USERPROFILE") catch return null;
-        return std.fs.path.join(self.allocator, &.{ home, path[2..] }) catch null;
-    }
 };
 
 fn isDir(path: []const u8) bool {
@@ -102,15 +95,6 @@ fn isDir(path: []const u8) bool {
 }
 
 const testing = std.testing;
-
-fn testConfig(a: Allocator) AnsibleConfig {
-    return .{
-        .allocator = a,
-        .runner = undefined,
-        .arena = std.heap.ArenaAllocator.init(a),
-        .loaded = true,
-    };
-}
 
 test "resolve playbook-adjacent role" {
     const a = testing.allocator;
@@ -125,11 +109,8 @@ test "resolve playbook-adjacent role" {
     defer arena.deinit();
     const aa = arena.allocator();
 
-    var cfg = testConfig(aa);
-    defer cfg.arena.deinit();
-
     const playbook = try std.fs.path.join(aa, &.{ root, "playbook.yml" });
-    const resolver = Resolver{ .allocator = aa, .config = &cfg };
+    const resolver = Resolver{ .allocator = aa };
     const dir = resolver.resolve("demo", playbook).?;
     const expected = try std.fs.path.join(aa, &.{ root, "roles", "demo" });
     try testing.expectEqualStrings(expected, dir);
@@ -149,12 +130,9 @@ test "resolve from roles_path" {
     const aa = arena.allocator();
 
     const external = try std.fs.path.join(aa, &.{ root, "external" });
-    var cfg = testConfig(aa);
-    defer cfg.arena.deinit();
-    cfg.roles_path = &.{external};
 
     const playbook = try std.fs.path.join(aa, &.{ root, "playbook.yml" });
-    const resolver = Resolver{ .allocator = aa, .config = &cfg };
+    const resolver = Resolver{ .allocator = aa, .roles_paths = &.{external} };
     const dir = resolver.resolve("demo", playbook).?;
     const expected = try std.fs.path.join(aa, &.{ external, "demo" });
     try testing.expectEqualStrings(expected, dir);
@@ -177,12 +155,9 @@ test "resolve FQCN from collections path" {
     const aa = arena.allocator();
 
     const collections = try std.fs.path.join(aa, &.{ root, "collections" });
-    var cfg = testConfig(aa);
-    defer cfg.arena.deinit();
-    cfg.collections_paths = &.{collections};
 
     const playbook = try std.fs.path.join(aa, &.{ root, "playbook.yml" });
-    const resolver = Resolver{ .allocator = aa, .config = &cfg };
+    const resolver = Resolver{ .allocator = aa, .collections_paths = &.{collections} };
     const dir = resolver.resolve("ns.coll.demo", playbook).?;
     const expected = try std.fs.path.join(aa, &.{
         collections, "ansible_collections", "ns", "coll", "roles", "demo",
@@ -207,14 +182,11 @@ test "resolve short name via declared collection" {
     const aa = arena.allocator();
 
     const collections = try std.fs.path.join(aa, &.{ root, "collections" });
-    var cfg = testConfig(aa);
-    defer cfg.arena.deinit();
-    cfg.collections_paths = &.{collections};
 
     const playbook = try std.fs.path.join(aa, &.{ root, "playbook.yml" });
     const resolver = Resolver{
         .allocator = aa,
-        .config = &cfg,
+        .collections_paths = &.{collections},
         .declared_collections = &.{"ns.coll"},
     };
     const dir = resolver.resolve("demo", playbook).?;
@@ -230,9 +202,6 @@ test "unresolved role returns null" {
     defer arena.deinit();
     const aa = arena.allocator();
 
-    var cfg = testConfig(aa);
-    defer cfg.arena.deinit();
-
-    const resolver = Resolver{ .allocator = aa, .config = &cfg };
+    const resolver = Resolver{ .allocator = aa };
     try testing.expect(resolver.resolve("nope", "/tmp/playbook.yml") == null);
 }

@@ -10,6 +10,8 @@ const usage =
     \\  --stdio              Communicate over stdio (default)
     \\  --log-file <path>    Write server logs to a file
     \\  --log-level <level>  error | warn | info | debug
+    \\  --venv <path>        Virtual environment whose collections are searched
+    \\                       (default: .venv, or ansible.python.venvPath)
     \\  --version            Print version and exit
     \\  -h, --help           Print this help and exit
     \\
@@ -84,5 +86,6 @@ pub fn main() !void {
     );
     var server = try zals.lsp.Server.init(allocator, transport);
     defer server.deinit();
+    server.venv_override = options.venv;
     try server.run();
 }
