@@ -11,6 +11,7 @@ const variables = @import("../variables/root.zig");
 const roles = @import("../roles/root.zig");
 const paths = @import("../paths.zig");
 const vs = @import("variable_source.zig");
+const wv = @import("workspace_view.zig");
 
 pub const Result = union(enum) {
     none,
@@ -34,7 +35,8 @@ pub fn definition(self: *Server, a: Allocator, params: std.json.Value) !Result {
     return moduleDefinition(self, a, params);
 }
 
-/// Jump from a variable reference to its visible definitions (ADR-0024).
+/// Jump from a variable reference to its definitions: the reachable ones
+/// ranked by precedence, then the rest of the Workspace (ADR-0024, ADR-0032).
 fn variableDefinition(self: *Server, a: Allocator, params: std.json.Value) !?[]const types.Location {
     const td = json_util.field(params, "textDocument") orelse return null;
     const uri = json_util.string(td, "uri") orelse return null;
@@ -47,6 +49,17 @@ fn variableDefinition(self: *Server, a: Allocator, params: std.json.Value) !?[]c
     var index = variables.Index.init(a, src.source());
     const cur = (try index.occurrenceAt(a, uri, offset)) orelse return null;
     if (cur.kind != .reference) return null;
+
+    if (try wv.View.forUri(self, a, uri)) |found| {
+        var v = found;
+        const path = try paths.uriToPath(a, uri);
+        const reach = try wv.view.reachableFiles(a, v.files, path, roles.resolve.enclosingRole(path));
+        const wdefs = try wv.view.definitions(a, v.files, cur.name, reach);
+        if (wdefs.len == 0) return null;
+        var wlocs = std.array_list.Managed(types.Location).init(a);
+        for (wdefs) |d| try wlocs.append(try v.location(d.uri, d.start, d.end));
+        return try wlocs.toOwnedSlice();
+    }
 
     const defs = try index.definitions(a, uri, cur.name);
     if (defs.len == 0) return null;

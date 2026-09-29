@@ -1,4 +1,5 @@
-//! Find references for Ansible variables (ADR-0025).
+//! Find references for Ansible variables across the Workspace (ADR-0025,
+//! ADR-0032).
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -7,6 +8,7 @@ const types = @import("../lsp/types.zig");
 const Server = @import("../lsp/server.zig").Server;
 const variables = @import("../variables/root.zig");
 const vs = @import("variable_source.zig");
+const wv = @import("workspace_view.zig");
 
 pub fn references(self: *Server, a: Allocator, params: std.json.Value) !?[]const types.Location {
     const td = json_util.field(params, "textDocument") orelse return null;
@@ -25,6 +27,17 @@ pub fn references(self: *Server, a: Allocator, params: std.json.Value) !?[]const
         break :blk json_util.boolean(ctx, "includeDeclaration") orelse false;
     };
 
+    if (try wv.View.forUri(self, a, uri)) |found| {
+        var v = found;
+        var locs = std.array_list.Managed(types.Location).init(a);
+        for (try wv.view.occurrences(a, v.files, cur.name)) |o| {
+            if (o.kind == .definition and !include_decl) continue;
+            try locs.append(try v.location(o.uri, o.start, o.end));
+        }
+        return try locs.toOwnedSlice();
+    }
+
+    // No session Workspace: the enclosing role or playbook only.
     const occ = try index.occurrences(a, uri, cur.name);
     std.mem.sort(variables.Occurrence, occ, {}, vs.lessOccurrence);
 
