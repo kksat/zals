@@ -1,0 +1,18 @@
+{
+  "settings": {
+    "command": ["zals", "--stdio"],
+    "selector": "source.ansible, source.yaml.ansible, source.yaml",
+    "schemes": ["file"],
+    "priority_selector": "source.ansible, source.yaml.ansible",
+    "initializationOptions": {},
+    "settings": {
+      "ansible.validation.enabled": true,
+      "ansible.validation.lint.enabled": true,
+      "ansible.validation.lint.path": "ansible-lint",
+      "ansible.ansible.path": "ansible",
+      "ansible.ansible.useFullyQualifiedCollectionNames": true,
+      "ansible.completion.provideRedirectModules": true,
+      "ansible.completion.provideDisabledModules": true
+    }
+  }
+}
