@@ -120,6 +120,11 @@ zals --stdio
 
 Point any LSP client at the binary with `ansible` as the document language.
 
+### Editor Integrations
+
+* **Helix**: See [`docs/editors/helix.md`](docs/editors/helix.md) or [`editors/helix`](editors/helix/) for `languages.toml` configuration.
+
+
 ## Releasing
 
 Releases are driven by [release-please](https://github.com/googleapis/release-please)
