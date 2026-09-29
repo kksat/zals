@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2025-09-18
 - **Supersedes:** —
-- **Superseded by:** —
+- **Superseded by:** in part by ADR-0032 (search boundary)
 
 ## Context
 

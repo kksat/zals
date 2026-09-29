@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-09-19
 - **Supersedes:** —
-- **Superseded by:** —
+- **Superseded by:** in part by ADR-0032 (`workspace/symbol`)
 
 ## Context
 

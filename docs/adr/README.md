@@ -35,6 +35,8 @@ Each ADR captures one decision, its context, and its consequences. Statuses are
 | [0028](0028-debug-code-actions.md) | Debug code actions | Accepted |
 | [0029](0029-role-navigation.md) | Role go-to-definition and go-to-implementation | Accepted |
 | [0030](0030-extract-tasks-code-actions.md) | Extract tasks code actions | Accepted |
+| [0031](0031-workspace-index.md) | Workspace index | Accepted |
+| [0032](0032-workspace-wide-navigation.md) | Workspace-wide navigation | Accepted |
 
 ## Template
 
