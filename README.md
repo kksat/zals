@@ -120,6 +120,11 @@ zals --stdio
 
 Point any LSP client at the binary with `ansible` as the document language.
 
+### Editor Integrations
+
+* **PyCharm & IntelliJ IDEA**: See [`docs/editors/pycharm.md`](docs/editors/pycharm.md) or [`editors/pycharm`](editors/pycharm/) for the JetBrains plugin.
+
+
 ## Releasing
 
 Releases are driven by [release-please](https://github.com/googleapis/release-please)
