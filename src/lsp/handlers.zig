@@ -135,6 +135,7 @@ fn hoverResult(self: *Server, a: Allocator, params: Value) !Value {
         .role_reference => return encode.hover(a, try providers.role_navigation.hover(self, a, params)),
         else => {},
     };
+    if (try providers.role_navigation.parameterHover(self, a, params)) |h| return encode.hover(a, h);
     return encode.hover(a, try providers.hover.format(a, loc.doc, cur));
 }
 

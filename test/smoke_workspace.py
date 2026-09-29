@@ -49,6 +49,33 @@ FILES = {
         "        type: int\n"
         "        description: Listening port\n"
     ),
+    "roles/app/meta/argument_specs.yml": (
+        "argument_specs:\n"
+        "  main:\n"
+        "    options:\n"
+        "      app_port:\n"
+        "        type: int\n"
+        "        description: App port\n"
+        "  setup:\n"
+        "    options:\n"
+        "      db_name:\n"
+        "        type: str\n"
+        "        description: Database to create\n"
+    ),
+    "roles/app/tasks/main.yml": "- debug: msg=app\n",
+    "playbooks/params.yml": (
+        "- name: Params\n"
+        "  hosts: app\n"
+        "  roles:\n"
+        "    - role: app\n"
+        "      app_port: 5433\n"
+        "  tasks:\n"
+        "    - ansible.builtin.include_role:\n"
+        "        name: app\n"
+        "        tasks_from: setup.yml\n"
+        "      vars:\n"
+        "        db_name: app\n"
+    ),
 }
 
 
@@ -198,6 +225,17 @@ def main():
         files = sorted(rel(root, l) for l in refs)
         check("requirements entries are role references",
               files == ["playbooks/other.yml", "roles/requirements.yml"], str(files))
+
+        params, params_text = c.open("playbooks/params.yml")
+        hov = c.request("textDocument/hover", {"textDocument": {"uri": uri(params)},
+                                               "position": pos(params_text, "app_port")})
+        check("role parameter hover in a roles entry",
+              hov and "```yaml\napp_port:\n  type: int" in hov["contents"]["value"], str(hov))
+        hov = c.request("textDocument/hover", {"textDocument": {"uri": uri(params)},
+                                               "position": pos(params_text, "db_name")})
+        check("role parameter hover uses the tasks_from entry point",
+              hov and "entry point `setup`" in hov["contents"]["value"]
+              and "Database to create" in hov["contents"]["value"], str(hov))
 
         c.close()
     if FAILURES:
