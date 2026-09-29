@@ -12,6 +12,8 @@ const Settings = @import("../workspace/settings.zig").Settings;
 const roots = @import("../workspace/roots.zig");
 const paths = @import("../paths.zig");
 const project_config = @import("../services/project_config.zig");
+const workspace_index = @import("../workspace/index.zig");
+const WorkspaceIndex = workspace_index.WorkspaceIndex;
 const handlers = @import("handlers.zig");
 const exec = @import("../exec/root.zig");
 const DocsLibrary = @import("../services/docs.zig").DocsLibrary;
@@ -52,6 +54,12 @@ pub const Server = struct {
     warned_missing_workspace: bool = false,
     /// `--venv <path>`; wins over `ansible.python.venvPath`. Borrowed from argv.
     venv_override: ?[]const u8 = null,
+    /// Workspace index (ADR-0031).
+    index: *WorkspaceIndex,
+    /// The client supports dynamic registration of watched files.
+    can_watch_files: bool = false,
+    /// Watched-file events keep the index current; otherwise it re-stats.
+    watching_files: bool = false,
 
     pub fn init(allocator: Allocator, transport: Transport) !Server {
         const runner = exec.Posix.posixRunner();
@@ -59,6 +67,8 @@ pub const Server = struct {
         errdefer pool.deinit();
         const writer = try Writer.init(allocator, transport.out_file);
         errdefer writer.deinit();
+        const index = try WorkspaceIndex.create(allocator);
+        errdefer index.destroy();
 
         var server = Server{
             .allocator = allocator,
@@ -74,6 +84,7 @@ pub const Server = struct {
             .docs_service = DocsService.init(allocator, null),
             .opened_uris = std.array_list.Managed([]const u8).init(allocator),
             .root_uris = std.array_list.Managed([]const u8).init(allocator),
+            .index = index,
         };
 
         if (docs_service.computeFingerprint(allocator, runner)) |fp| {
@@ -90,7 +101,9 @@ pub const Server = struct {
         // Ask background work to stop, then join workers so no task touches the
         // docs library afterwards.
         self.docs_service.shutdown.store(true, .release);
+        self.index.shutdown.store(true, .release);
         self.pool.deinit();
+        self.index.destroy();
         self.documents.deinit();
         self.settings.deinit();
         self.docs.deinit();
@@ -125,6 +138,13 @@ pub const Server = struct {
         const method = json_util.string(msg, "method") orelse return;
         const id = json_util.field(msg, "id");
         const params = json_util.field(msg, "params") orelse Value.null;
+
+        self.index.drain();
+        if (self.index.takeReadyEvent()) {
+            var ready = json_util.obj(a);
+            try ready.put("filesCount", json_util.num(@as(i64, @intCast(self.index.count()))));
+            try self.notify(a, "ansible/workspaceIndexReady", .{ .object = ready });
+        }
 
         if (id) |req_id| {
             handlers.handleRequest(self, a, req_id, method, params) catch |err| {
@@ -201,6 +221,58 @@ pub const Server = struct {
                 self.missing_workspace = true;
             }
         }
+        try self.syncIndex(false);
+    }
+
+    /// Scan new Workspaces and drop removed ones. `rescan` re-scans every
+    /// Workspace (the root marker changed). No-op before `initialized`.
+    pub fn syncIndex(self: *Server, rescan: bool) !void {
+        if (!self.initialized) return;
+        var arena = std.heap.ArenaAllocator.init(self.allocator);
+        defer arena.deinit();
+        const session = try self.workspacePaths(arena.allocator());
+        try self.index.syncRoots(self.pool, session, self.settings.root_marker, rescan);
+    }
+
+    /// Ask the client to send `workspace/didChangeWatchedFiles` for Ansible
+    /// files, `ansible.cfg`, and `galaxy.yml` (ADR-0031).
+    pub fn registerFileWatchers(self: *Server, a: Allocator) !void {
+        if (!self.can_watch_files) return;
+        var watchers = std.json.Array.init(a);
+        for ([_][]const u8{ "**/*.{yml,yaml,j2}", "**/ansible.cfg", "**/galaxy.yml" }) |glob| {
+            var w = json_util.obj(a);
+            try w.put("globPattern", json_util.str(glob));
+            try watchers.append(.{ .object = w });
+        }
+        var opts = json_util.obj(a);
+        try opts.put("watchers", .{ .array = watchers });
+        var reg = json_util.obj(a);
+        try reg.put("id", json_util.str("zals-watched-files"));
+        try reg.put("method", json_util.str("workspace/didChangeWatchedFiles"));
+        try reg.put("registerOptions", .{ .object = opts });
+        var regs = std.json.Array.init(a);
+        try regs.append(.{ .object = reg });
+        var params = json_util.obj(a);
+        try params.put("registrations", .{ .array = regs });
+        try out.sendRequest(self.writer, a, "zals-register-watchers", "client/registerCapability", .{ .object = params });
+        self.watching_files = true;
+    }
+
+    /// Re-index one file on disk if it belongs to a session Workspace.
+    pub fn reindexPath(self: *Server, a: Allocator, path: []const u8) void {
+        const root = self.workspaceRootFor(a, path) orelse {
+            self.index.remove(path);
+            return;
+        };
+        if (!@import("../workspace/discover.zig").isAnsibleFile(std.fs.path.basename(path))) return;
+        self.index.reindex(root, path);
+    }
+
+    /// Index entries of the Workspace rooted at `root`, current as of now.
+    pub fn indexEntries(self: *Server, a: Allocator, root: []const u8) ![]const *workspace_index.Entry {
+        self.index.drain();
+        if (!self.watching_files) self.index.refreshStale();
+        return self.index.entriesOf(a, root);
     }
 
     /// Session Workspace roots as filesystem paths.
@@ -222,21 +294,32 @@ pub const Server = struct {
         return self.venv_override orelse self.settings.venv_path;
     }
 
-    /// Every `roles/` directory in the Workspace rooted at `root`. Empty until
-    /// the Workspace index exists.
+    /// Every `roles/` directory in the Workspace rooted at `root`.
     pub fn workspaceRolesDirs(self: *Server, root: ?[]const u8) []const []const u8 {
-        _ = self;
-        _ = root;
-        return &.{};
+        const r = root orelse return &.{};
+        self.index.drain();
+        const info = self.index.info(r) orelse return &.{};
+        return info.roles_dirs;
+    }
+
+    /// Directories in the Workspace rooted at `root` that hold
+    /// `ansible_collections/`.
+    pub fn workspaceCollectionPaths(self: *Server, root: ?[]const u8) []const []const u8 {
+        const r = root orelse return &.{};
+        self.index.drain();
+        const info = self.index.info(r) orelse return &.{};
+        return info.collection_paths;
     }
 
     /// Search-path inputs for `file_path` (ADR-0032).
     pub fn projectContext(self: *Server, a: Allocator, file_path: []const u8) project_config.Context {
+        const root = self.workspaceRootFor(a, file_path);
         return .{
-            .workspace_root = self.workspaceRootFor(a, file_path),
+            .workspace_root = root,
             .venv = self.venvPath(),
             .dump_roles = self.ansible_config.rolesPath(),
             .dump_collections = self.ansible_config.collectionsPaths(),
+            .workspace_collections = self.workspaceCollectionPaths(root),
         };
     }
 

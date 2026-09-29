@@ -7,6 +7,7 @@ const json_util = @import("json_util.zig");
 const types = @import("types.zig");
 const Server = @import("server.zig").Server;
 const providers = @import("../providers/root.zig");
+const paths = @import("../paths.zig");
 
 pub fn didOpen(self: *Server, a: Allocator, params: Value) !void {
     const td = json_util.field(params, "textDocument") orelse return;
@@ -44,6 +45,23 @@ pub fn didSave(self: *Server, a: Allocator, params: Value) !void {
     const td = json_util.field(params, "textDocument") orelse return;
     const uri = json_util.string(td, "uri") orelse return;
     providers.validation.publish(self, a, uri) catch {};
+    const path = paths.uriToPath(a, uri) catch return;
+    self.reindexPath(a, path);
+}
+
+/// Re-index or drop the files named by a watched-file event (ADR-0031).
+pub fn didChangeWatchedFiles(self: *Server, a: Allocator, params: Value) !void {
+    const changes = json_util.array(params, "changes") orelse return;
+    for (changes.items) |c| {
+        const uri = json_util.string(c, "uri") orelse continue;
+        const kind = json_util.integer(c, "type") orelse 2;
+        const path = paths.uriToPath(a, uri) catch continue;
+        if (kind == 3) {
+            self.index.remove(path);
+        } else {
+            self.reindexPath(a, path);
+        }
+    }
 }
 
 pub fn didChangeWorkspaceFolders(self: *Server, a: Allocator, params: Value) !void {

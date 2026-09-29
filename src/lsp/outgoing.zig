@@ -50,3 +50,14 @@ pub fn showMessage(transport: anytype, a: Allocator, level: i64, message: []cons
     try p.put("message", json_util.str(message));
     try sendNotification(transport, a, "window/showMessage", .{ .object = p });
 }
+
+/// Send a server-to-client request. The client's response carries `id` and is
+/// ignored by the dispatcher (it has no method).
+pub fn sendRequest(transport: anytype, a: Allocator, id: []const u8, method: []const u8, params: Value) !void {
+    var o = json_util.obj(a);
+    try o.put("jsonrpc", json_util.str("2.0"));
+    try o.put("id", json_util.str(id));
+    try o.put("method", json_util.str(method));
+    try o.put("params", params);
+    try sendValue(transport, a, .{ .object = o });
+}

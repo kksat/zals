@@ -243,6 +243,12 @@ fn collectRefs(
     try walkRefs(a, node, text, out, false);
 }
 
+/// Every variable reference in `forest`: Jinja root identifiers and names in
+/// bare-expression keys.
+pub fn collectReferences(a: Allocator, forest: *const dom.Forest, out: *std.array_list.Managed(jinja.Ident)) !void {
+    for (forest.roots) |root| try collectRefs(a, root, forest.text, out);
+}
+
 fn walkRefs(
     a: Allocator,
     node: *const Node,

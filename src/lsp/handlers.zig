@@ -53,6 +53,8 @@ pub fn handleNotification(self: *Server, a: Allocator, method: []const u8, param
         try ready.put("modulesCount", json_util.num(self.docs.catalogCount()));
         try self.notify(a, "ansible/docsLibraryReady", .{ .object = ready });
         try self.warnMissingWorkspace(a);
+        try self.registerFileWatchers(a);
+        try self.syncIndex(false);
         return;
     }
     if (std.mem.eql(u8, method, "exit")) {
@@ -67,14 +69,18 @@ pub fn handleNotification(self: *Server, a: Allocator, method: []const u8, param
         const previous = try self.allocator.dupe(u8, self.settings.root_marker);
         defer self.allocator.free(previous);
         try self.settings.update(params);
-        if (!std.mem.eql(u8, previous, self.settings.root_marker))
-            self.warned_missing_workspace = false;
+        const marker_changed = !std.mem.eql(u8, previous, self.settings.root_marker);
+        if (marker_changed) self.warned_missing_workspace = false;
         try self.rebuildWorkspaces();
+        if (marker_changed) try self.syncIndex(true);
         try self.warnMissingWorkspace(a);
         return;
     }
     if (std.mem.eql(u8, method, "workspace/didChangeWorkspaceFolders")) {
         return sync.didChangeWorkspaceFolders(self, a, params);
+    }
+    if (std.mem.eql(u8, method, "workspace/didChangeWatchedFiles")) {
+        return sync.didChangeWatchedFiles(self, a, params);
     }
     // Unknown notifications are ignored, per the LSP spec.
 }
@@ -170,6 +176,9 @@ fn onInitialize(self: *Server, a: Allocator, id: Value, params: Value) !void {
         }
         // Resource operations the client can apply in a `WorkspaceEdit`.
         if (json_util.field(caps, "workspace")) |workspace| {
+            if (json_util.field(workspace, "didChangeWatchedFiles")) |w| {
+                self.can_watch_files = json_util.boolean(w, "dynamicRegistration") orelse false;
+            }
             if (json_util.field(workspace, "workspaceEdit")) |we| {
                 if (json_util.array(we, "resourceOperations")) |ops| {
                     for (ops.items) |op| {
