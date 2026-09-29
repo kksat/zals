@@ -120,6 +120,11 @@ zals --stdio
 
 Point any LSP client at the binary with `ansible` as the document language.
 
+### Editor Integrations
+
+* **Neovim**: See [`docs/editors/neovim.md`](docs/editors/neovim.md) or [`editors/nvim`](editors/nvim/) for Neovim configuration and runtime plugin.
+
+
 ## Releasing
 
 Releases are driven by [release-please](https://github.com/googleapis/release-please)
