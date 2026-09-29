@@ -131,6 +131,10 @@ fn hoverResult(self: *Server, a: Allocator, params: Value) !Value {
     var opened = cursor.Doc.open(a, loc.doc.bytes()) catch return Value.null;
     defer opened.deinit();
     const cur = try opened.at(loc.doc.uri, loc.offset, cursor.fromLibrary(&self.docs));
+    if (cur) |c| switch (c) {
+        .role_reference => return encode.hover(a, try providers.role_navigation.hover(self, a, params)),
+        else => {},
+    };
     return encode.hover(a, try providers.hover.format(a, loc.doc, cur));
 }
 

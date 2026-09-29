@@ -3,7 +3,9 @@
 //! Recognised forms (cursor must be on the role-name *value*, not the key):
 //! - `roles:` string entry (`- demo`) and map entry (`- role: demo`)
 //! - `include_role` / `import_role` `name:` (map form and `name=demo` k=v form)
-//! - `meta/main.yml` `dependencies:` string and `role:` map entries
+//! - `meta/main.yml` `dependencies:` string and `role:`/`name:` map entries
+//! - `requirements.yml` `roles:` string, `name:`, and `src:` entries (a `src:`
+//!   that is a URL, git, or path source is not a role name)
 //!
 //! Jinja-valued names (`"{{ my_role }}"`) are not references; the variable
 //! provider handles them.
@@ -32,11 +34,19 @@ pub fn detect(path: []*Node, text: []const u8) ?Reference {
         if (isModuleKey(key, "include_role") or isModuleKey(key, "import_role")) {
             return kvRoleName(node, text);
         }
+        const listed = inList(path, "roles") or inList(path, "dependencies");
         if (std.mem.eql(u8, key, "role")) {
-            if (inList(path, "roles") or inList(path, "dependencies")) return scalarRef(node, text);
+            if (listed) return scalarRef(node, text);
         }
         if (std.mem.eql(u8, key, "name")) {
-            if (inRoleModule(path)) return scalarRef(node, text);
+            if (inRoleModule(path) or listed) return scalarRef(node, text);
+        }
+        if (std.mem.eql(u8, key, "src")) {
+            if (listed) {
+                const value = node.stringValue() orelse return null;
+                if (isSource(value)) return null;
+                return scalarRef(node, text);
+            }
         }
         return null;
     }
@@ -114,6 +124,14 @@ fn kvRoleName(node: *Node, text: []const u8) ?Reference {
 fn rawText(node: *Node, text: []const u8) []const u8 {
     if (node.end <= text.len and node.start <= node.end) return text[node.start..node.end];
     return "";
+}
+
+/// A requirements `src:` that names a download location, not a role.
+fn isSource(s: []const u8) bool {
+    if (std.mem.indexOf(u8, s, "://") != null) return true;
+    if (std.mem.startsWith(u8, s, "git+") or std.mem.startsWith(u8, s, "git@")) return true;
+    if (std.mem.indexOfAny(u8, s, "/,") != null) return true;
+    return std.mem.endsWith(u8, s, ".tar.gz") or std.mem.endsWith(u8, s, ".tgz");
 }
 
 fn isJinja(s: []const u8) bool {
@@ -224,4 +242,16 @@ test "task name is not a role reference" {
         \\
     ;
     try testing.expect((try detectName(src, "demo")) == null);
+}
+
+test "requirements roles entries" {
+    try expectName("roles:\n  - geerlingguy.nginx\n", "geerlingguy", "geerlingguy.nginx");
+    try expectName("roles:\n  - name: geerlingguy.nginx\n", "geerlingguy", "geerlingguy.nginx");
+    try expectName("roles:\n  - src: geerlingguy.nginx\n", "geerlingguy", "geerlingguy.nginx");
+    const url = "roles:\n  - src: https://github.com/x/role.git\n";
+    try testing.expect((try detectName(url, "https")) == null);
+}
+
+test "dependencies name entry" {
+    try expectName("dependencies:\n  - name: common\n", "common", "common");
 }

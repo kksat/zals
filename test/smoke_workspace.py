@@ -32,9 +32,22 @@ FILES = {
     "playbooks/other.yml": (
         "- name: Web\n"
         "  hosts: web\n"
+        "  roles:\n"
+        "    - geerlingguy.nginx\n"
         "  tasks:\n"
         "    - include_role:\n"
         "        name: db\n"
+    ),
+    "roles/requirements.yml": "roles:\n  - name: geerlingguy.nginx\n",
+    "galaxy_roles/geerlingguy.nginx/README.md": "# nginx from Galaxy\n",
+    "galaxy_roles/geerlingguy.nginx/tasks/main.yml": "- debug: msg=hi\n",
+    "roles/db/meta/argument_specs.yml": (
+        "argument_specs:\n"
+        "  main:\n"
+        "    options:\n"
+        "      port:\n"
+        "        type: int\n"
+        "        description: Listening port\n"
     ),
 }
 
@@ -157,13 +170,34 @@ def main():
         refs = as_list(c.request("textDocument/references", dict(at, context={"includeDeclaration": True})))
         files = sorted({rel(root, l) for l in refs})
         check("variable references span the Workspace",
-              files == ["playbooks/vars/prod.yml", "roles/db/defaults/main.yml",
+              files == ["playbooks/vars/prod.yml", "roles/db/defaults/main.yml", "roles/db/meta/argument_specs.yml",
                         "roles/db/tasks/main.yml", "roles/web/defaults/main.yml"], str(files))
 
         defs = [rel(root, l) for l in as_list(c.request("textDocument/definition", at))]
         check("reachable definitions come first, ranked",
-              defs[:2] == ["playbooks/vars/prod.yml", "roles/db/defaults/main.yml"], str(defs))
-        check("unreachable definitions follow", defs[2:] == ["roles/web/defaults/main.yml"], str(defs))
+              defs[:3] == ["playbooks/vars/prod.yml", "roles/db/defaults/main.yml",
+                           "roles/db/meta/argument_specs.yml"], str(defs))
+        check("unreachable definitions follow", defs[3:] == ["roles/web/defaults/main.yml"], str(defs))
+
+        site, site_text = c.open("playbooks/site.yml")
+        at_db = {"textDocument": {"uri": uri(site)}, "position": pos(site_text, "- db", offset=2)}
+        refs = as_list(c.request("textDocument/references", dict(at_db, context={"includeDeclaration": True})))
+        files = sorted(rel(root, l) for l in refs)
+        check("role references span the Workspace", files == ["playbooks/other.yml", "playbooks/site.yml"], str(files))
+
+        hov = c.request("textDocument/hover", at_db)
+        check("role hover shows argument specs", hov and "Listening port" in hov["contents"]["value"], str(hov))
+
+        other, other_text = c.open("playbooks/other.yml")
+        at_galaxy = {"textDocument": {"uri": uri(other)}, "position": pos(other_text, "geerlingguy")}
+        defs = [rel(root, l) for l in as_list(c.request("textDocument/implementation", at_galaxy))]
+        check("galaxy role resolves through roles_path", defs == ["galaxy_roles/geerlingguy.nginx/tasks/main.yml"], str(defs))
+        hov = c.request("textDocument/hover", at_galaxy)
+        check("role hover shows README", hov and "nginx from Galaxy" in hov["contents"]["value"], str(hov))
+        refs = as_list(c.request("textDocument/references", dict(at_galaxy, context={"includeDeclaration": True})))
+        files = sorted(rel(root, l) for l in refs)
+        check("requirements entries are role references",
+              files == ["playbooks/other.yml", "roles/requirements.yml"], str(files))
 
         c.close()
     if FAILURES:

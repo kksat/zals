@@ -7,6 +7,8 @@ pub const semantic_tokens = @import("semantic_tokens.zig");
 pub const document_symbols = @import("document_symbols.zig");
 pub const code_actions = @import("code_actions.zig");
 pub const validation = @import("validation.zig");
+pub const role_navigation = @import("role_navigation.zig");
+pub const workspace_view = @import("workspace_view.zig");
 
 test {
     @import("std").testing.refAllDecls(@This());
