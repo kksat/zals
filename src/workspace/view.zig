@@ -65,8 +65,9 @@ pub fn occurrences(a: Allocator, files: []const File, name: []const u8) ![]Occur
 
 /// Paths whose definitions can apply in the file at `path` (the Reachable
 /// definitions of `CONTEXT.md`): the file's role scope (every file under
-/// `role_dir`) or the file itself, the playbooks that invoke that role, and
-/// one level of the vars files those load.
+/// `role_dir`) or the file itself, the playbooks that invoke that role (or,
+/// for a task file outside a role, the files that include it), and one level
+/// of the vars files those load.
 pub fn reachableFiles(a: Allocator, files: []const File, path: []const u8, role_dir: ?[]const u8) ![]const []const u8 {
     var set = std.array_list.Managed([]const u8).init(a);
     if (role_dir) |rd| {
@@ -78,6 +79,15 @@ pub fn reachableFiles(a: Allocator, files: []const File, path: []const u8, role_
         for (files) |f| {
             for (f.facts.role_refs) |r| {
                 if (namesRole(r.name, name)) {
+                    try appendUnique(&set, f.path);
+                    break;
+                }
+            }
+        }
+    } else {
+        for (files) |f| {
+            for (f.facts.file_refs) |r| {
+                if (r.kind == .task_file and std.mem.eql(u8, r.target, path)) {
                     try appendUnique(&set, f.path);
                     break;
                 }
@@ -208,6 +218,20 @@ test "a playbook reaches itself and its vars files" {
     const reach = try reachableFiles(a, &files, "/w/site.yml", null);
     try testing.expectEqual(@as(usize, 2), reach.len);
     try testing.expectEqualStrings("/w/extra.yml", reach[1]);
+}
+
+test "a task file outside a role reaches the playbooks that include it" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const files = [_]File{
+        try file(a, "/nowhere-zals/site.yml", "- hosts: all\n  vars:\n    user: bob\n  tasks:\n    - include_tasks: tasks/common.yml\n"),
+        try file(a, "/nowhere-zals/tasks/common.yml", "- debug: msg=\"{{ user }}\"\n"),
+    };
+    const reach = try reachableFiles(a, &files, "/nowhere-zals/tasks/common.yml", null);
+    const defs = try definitions(a, &files, "user", reach);
+    try testing.expectEqual(@as(usize, 1), defs.len);
+    try testing.expect(defs[0].reachable);
 }
 
 test "FQCN reference names a collection role" {

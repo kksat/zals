@@ -39,6 +39,7 @@ test {
     _ = @import("workspace/roots.zig");
     _ = @import("workspace/discover.zig");
     _ = @import("workspace/facts.zig");
+    _ = @import("workspace/file_refs.zig");
     _ = @import("workspace/index.zig");
     _ = @import("workspace/view.zig");
     _ = @import("workspace/settings.zig");

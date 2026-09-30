@@ -62,7 +62,19 @@ FILES = {
         "        type: str\n"
         "        description: Database to create\n"
     ),
-    "roles/app/tasks/main.yml": "- debug: msg=app\n",
+    "roles/app/tasks/main.yml": "- debug: msg=app\n- include_tasks: install.yml\n",
+    "roles/app/tasks/install.yml": "- debug: msg=install\n",
+    "roles/app/handlers/main.yml": "- name: Reinstall\n  import_tasks: install.yml\n",
+    "playbooks/tasks/common.yml": "- name: Greet\n  debug:\n    msg: \"{{ greeting }}\"\n",
+    "playbooks/greet.yml": (
+        "- name: Greet\n"
+        "  hosts: all\n"
+        "  vars:\n"
+        "    greeting: hello\n"
+        "  tasks:\n"
+        "    - ansible.builtin.include_tasks:\n"
+        "        file: tasks/common.yml\n"
+    ),
     "playbooks/params.yml": (
         "- name: Params\n"
         "  hosts: app\n"
@@ -233,6 +245,24 @@ def main():
         check("variable hover lists shadowed definitions", "`5432` — `roles/db/defaults/main.yml:1`" in value, value)
         check("variable hover lists the rest of the Workspace",
               "**Elsewhere in the Workspace:**\n- `80` — `roles/web/defaults/main.yml:1`" in value, value)
+
+        app, app_text = c.open("roles/app/tasks/main.yml")
+        at_inc = {"textDocument": {"uri": uri(app)}, "position": pos(app_text, "install.yml")}
+        defs = [rel(root, l) for l in as_list(c.request("textDocument/definition", at_inc))]
+        check("task file definition opens the target", defs == ["roles/app/tasks/install.yml"], str(defs))
+        refs = sorted(rel(root, l) for l in as_list(c.request("textDocument/references",
+                                                               dict(at_inc, context={"includeDeclaration": True}))))
+        check("task file references span the Workspace",
+              refs == ["roles/app/handlers/main.yml", "roles/app/tasks/main.yml"], str(refs))
+        at_vars = {"textDocument": {"uri": uri(site)}, "position": pos(site_text, "vars/prod.yml")}
+        defs = [rel(root, l) for l in as_list(c.request("textDocument/definition", at_vars))]
+        check("vars file definition opens the target", defs == ["playbooks/vars/prod.yml"], str(defs))
+
+        common, common_text = c.open("playbooks/tasks/common.yml")
+        at_greet = {"textDocument": {"uri": uri(common)}, "position": pos(common_text, "{{ greeting", offset=3)}
+        hov = c.request("textDocument/hover", at_greet)
+        check("a task file reaches the playbook that includes it",
+              hov and "**Active:** `hello` — `playbooks/greet.yml" in hov["contents"]["value"], str(hov))
 
         params, params_text = c.open("playbooks/params.yml")
         hov = c.request("textDocument/hover", {"textDocument": {"uri": uri(params)},

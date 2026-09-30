@@ -27,6 +27,11 @@ const RoleResult = union(enum) {
 
 pub fn definition(self: *Server, a: Allocator, params: std.json.Value) !Result {
     if (try variableDefinition(self, a, params)) |locs| return .{ .locations = locs };
+    switch (try @import("file_navigation.zig").definition(self, a, params)) {
+        .skip => {},
+        .none => return .none,
+        .location => |loc| return .{ .location = loc },
+    }
     switch (try roleDefinition(self, a, params)) {
         .skip => {},
         .none => return .none,

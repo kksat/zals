@@ -36,13 +36,13 @@ pub const View = struct {
         var files = std.array_list.Managed(File).init(a);
         for (try server.indexEntries(a, root)) |e| {
             if (open.fetchRemove(e.path)) |kv| {
-                try files.append(try fromDocument(a, kv.key, kv.value));
+                try files.append(try fromDocument(a, root, kv.key, kv.value));
             } else {
                 try files.append(.{ .path = e.path, .uri = try paths.pathToUri(a, e.path), .facts = e.facts });
             }
         }
         var rest = open.iterator();
-        while (rest.next()) |kv| try files.append(try fromDocument(a, kv.key_ptr.*, kv.value_ptr.*));
+        while (rest.next()) |kv| try files.append(try fromDocument(a, root, kv.key_ptr.*, kv.value_ptr.*));
 
         return .{
             .server = server,
@@ -82,8 +82,8 @@ pub const View = struct {
     }
 };
 
-fn fromDocument(a: Allocator, path: []const u8, doc: *Document) !File {
-    return .{ .path = path, .uri = doc.uri, .facts = try facts_mod.extract(a, path, doc.bytes()) };
+fn fromDocument(a: Allocator, root: []const u8, path: []const u8, doc: *Document) !File {
+    return .{ .path = path, .uri = doc.uri, .facts = try facts_mod.extractIn(a, root, path, doc.bytes()) };
 }
 
 fn under(path: []const u8, root: []const u8) bool {

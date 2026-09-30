@@ -33,7 +33,7 @@ pub const Entry = struct {
         self.root = try a.dupe(u8, root);
         self.mtime = mtime;
         const body = text orelse (readFile(a, path) orelse "");
-        self.facts = try facts_mod.extract(a, path, body);
+        self.facts = try facts_mod.extractIn(a, self.root, path, body);
         return self;
     }
 

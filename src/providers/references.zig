@@ -12,6 +12,7 @@ const wv = @import("workspace_view.zig");
 
 pub fn references(self: *Server, a: Allocator, params: std.json.Value) !?[]const types.Location {
     if (try @import("role_navigation.zig").references(self, a, params)) |locs| return locs;
+    if (try @import("file_navigation.zig").references(self, a, params)) |locs| return locs;
 
     const td = json_util.field(params, "textDocument") orelse return null;
     const uri = json_util.string(td, "uri") orelse return null;

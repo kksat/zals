@@ -9,6 +9,8 @@ const Allocator = std.mem.Allocator;
 const yaml = @import("../yaml/root.zig");
 const variables = @import("../variables/root.zig");
 const role_reference = @import("../roles/reference.zig");
+const file_refs = @import("file_refs.zig");
+pub const FileRef = file_refs.FileRef;
 const Node = yaml.Node;
 
 pub const Definition = variables.definitions.Definition;
@@ -28,10 +30,18 @@ pub const Facts = struct {
     role_refs: []const Span = &.{},
     /// Absolute paths loaded by `vars_files` and `include_vars`.
     vars_targets: []const []const u8 = &.{},
+    /// Task-file and vars-file references with their resolved targets.
+    file_refs: []const FileRef = &.{},
 };
 
 /// Facts for the file at `path` with contents `text`.
 pub fn extract(a: Allocator, path: []const u8, text: []const u8) !Facts {
+    return extractIn(a, null, path, text);
+}
+
+/// Facts for the file at `path` in the Workspace rooted at `root` (used to
+/// resolve file references).
+pub fn extractIn(a: Allocator, root: ?[]const u8, path: []const u8, text: []const u8) !Facts {
     var forest = yaml.parse(a, text) catch return .{};
     defer forest.deinit();
 
@@ -45,7 +55,7 @@ pub fn extract(a: Allocator, path: []const u8, text: []const u8) !Facts {
     for (idents.items, 0..) |r, i| refs[i] = .{ .name = try a.dupe(u8, r.name), .start = r.start, .end = r.end };
 
     var role_refs = std.array_list.Managed(Span).init(a);
-    for (forest.roots) |root| try walkRoleRefs(a, root, forest.text, &role_refs);
+    for (forest.roots) |r| try walkRoleRefs(a, r, forest.text, &role_refs);
 
     const base_dir = std.fs.path.dirname(path) orelse ".";
     const targets = variables.scope.varFileTargets(a, &forest, base_dir) catch &.{};
@@ -57,6 +67,7 @@ pub fn extract(a: Allocator, path: []const u8, text: []const u8) !Facts {
         .var_refs = refs,
         .role_refs = try role_refs.toOwnedSlice(),
         .vars_targets = vars_targets,
+        .file_refs = file_refs.collect(a, &forest, path, root) catch &.{},
     };
 }
 
