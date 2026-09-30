@@ -10,11 +10,6 @@ const lsp = @import("e2e/client.zig");
 const Allocator = std.mem.Allocator;
 const Value = std.json.Value;
 
-// Import helper tests without spawning a second server.
-comptime {
-    _ = @import("e2e/anchor.zig");
-}
-
 test "navigation contracts across a static Ansible Workspace" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

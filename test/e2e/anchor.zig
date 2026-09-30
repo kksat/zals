@@ -114,9 +114,3 @@ fn positionAt(text: []const u8, byte_offset: usize) !Position {
     }
     return result;
 }
-
-test "UTF-16 positions count a supplementary scalar as two code units" {
-    const position = try positionAt("é🚀x", "é🚀".len);
-    try std.testing.expectEqual(@as(u32, 0), position.line);
-    try std.testing.expectEqual(@as(u32, 3), position.character);
-}

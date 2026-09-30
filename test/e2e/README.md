@@ -1,8 +1,9 @@
 # Navigation E2E suite
 
-Run `make e2e` to build zals and run **only** these Zig tests. The suite starts
-one stdio server with an isolated HOME and the checked-in collections/roles
-paths, waits for `ansible/workspaceIndexReady`, then opens source files with
+Run `make e2e` to build zals and run **one** Zig E2E test over the named
+cases. It starts one stdio server with an isolated HOME and the checked-in
+collections/roles paths, waits for `ansible/workspaceIndexReady`, then opens
+source files with
 their unchanged on-disk contents. It does not install collections, copy the
 fixture, run Ansible, send edits, or test file watching.
 
