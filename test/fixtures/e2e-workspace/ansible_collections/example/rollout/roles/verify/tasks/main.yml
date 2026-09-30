@@ -29,3 +29,6 @@
 - name: Show the service name
   ansible.builtin.debug:
     msg: "{{ service.name | default('unnamed') }}"
+
+- name: Include verification details
+  ansible.builtin.include_tasks: details.yml

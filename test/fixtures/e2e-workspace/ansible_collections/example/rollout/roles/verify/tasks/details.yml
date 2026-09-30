@@ -1,0 +1,4 @@
+---
+- name: Explain the verification
+  ansible.builtin.debug:
+    msg: The rollout passed its checks

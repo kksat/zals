@@ -9,6 +9,7 @@ const preflight = "ansible_collections/example/rollout/roles/preflight/tasks/mai
 const snapshot_tasks = "ansible_collections/example/rollout/roles/snapshot/tasks/main.yml";
 const snapshot_handler = "ansible_collections/example/rollout/roles/snapshot/handlers/main.yml";
 const snapshot_details = "ansible_collections/example/rollout/roles/snapshot/tasks/details.yml";
+const verify = "ansible_collections/example/rollout/roles/verify/tasks/main.yml";
 const migrate = "ansible_collections/example/rollout/roles/migrate/tasks/main.yml";
 const rollback = "ansible_collections/example/rollout/roles/rollback/tasks/main.yml";
 const negative = "negative/files.yml";
@@ -203,6 +204,18 @@ pub const all = [_]m.Case{
         .method = .references,
         .from = m.cursor(snapshot_handler, "ansible.builtin.import_tasks: <details.yml>"),
         .expected = details_refs,
+    },
+    .{
+        .name = "file/same details.yml spelling in another Role: definition opens verification tasks",
+        .method = .definition,
+        .from = m.cursor(verify, "ansible.builtin.include_tasks: <details.yml>"),
+        .expected = &.{m.fileStart("ansible_collections/example/rollout/roles/verify/tasks/details.yml")},
+    },
+    .{
+        .name = "file/same details.yml spelling in another Role: references do not join snapshot",
+        .method = .references,
+        .from = m.cursor(verify, "ansible.builtin.include_tasks: <details.yml>"),
+        .expected = &.{m.span(verify, "ansible.builtin.include_tasks: <details.yml>")},
     },
     .{
         .name = "file/rollback include_tasks: definition opens recovery tasks",
