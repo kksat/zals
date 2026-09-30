@@ -33,6 +33,10 @@
     - name: Read rollout runtime variables
       ansible.builtin.include_vars: vars/runtime.yml
 
+    - name: Report the channel selected by runtime vars
+      ansible.builtin.debug:
+        msg: "Channel {{ rollout_channel }}"
+
     - name: Include shared deployment tasks
       ansible.builtin.include_tasks: tasks/common.yml
 

@@ -1,5 +1,6 @@
 ---
 release_tag: release-from-vars-file
+rollout_channel: planned
 rollout_targets: [api, worker]
 optional_targets: [metrics]
 verify_changed: false

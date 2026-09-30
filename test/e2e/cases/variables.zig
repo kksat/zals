@@ -750,4 +750,31 @@ pub const all = [_]m.Case{
         .include_declaration = true,
         .expected = &.{},
     },
+    .{
+        .name = "variable/include_vars outranks vars_files for the same name",
+        .method = .definition,
+        .from = m.cursor(rollout, "Channel {{ <rollout_channel> }}"),
+        .expected = &.{
+            m.span(runtime, "<rollout_channel>: active"),
+            m.span(release, "<rollout_channel>: planned"),
+        },
+    },
+    .{
+        .name = "variable/include_vars and vars_files: references without declarations",
+        .method = .references,
+        .from = m.cursor(rollout, "Channel {{ <rollout_channel> }}"),
+        .include_declaration = false,
+        .expected = &.{m.span(rollout, "Channel {{ <rollout_channel> }}")},
+    },
+    .{
+        .name = "variable/include_vars and vars_files: references with both declarations",
+        .method = .references,
+        .from = m.cursor(rollout, "Channel {{ <rollout_channel> }}"),
+        .include_declaration = true,
+        .expected = &.{
+            m.span(rollout, "Channel {{ <rollout_channel> }}"),
+            m.span(runtime, "<rollout_channel>: active"),
+            m.span(release, "<rollout_channel>: planned"),
+        },
+    },
 };
