@@ -7,7 +7,8 @@
   [ADR-0025](0025-variable-references.md); the resolution order of
   [ADR-0029](0029-role-navigation.md); the `workspace/symbol` exclusion of
   [ADR-0027](0027-document-symbols.md)
-- **Superseded by:** —
+- **Superseded by:** in part by
+  [ADR-0034](0034-resolved-role-reference-identity.md) (Role find-references matching)
 
 ## Context
 
@@ -70,7 +71,8 @@ when none matches do they use step 7, returning every match there.
 - **Role references** include `requirements.yml` `roles:` entries (`name:`,
   `src:`, or a bare string, unless the value is a git or URL source).
   Find-references returns every Role reference in the Workspace with the same
-  name. Hover shows the role's `README.md`, else its unrendered argument specs,
+  name (superseded by [ADR-0034](0034-resolved-role-reference-identity.md)).
+  Hover shows the role's `README.md`, else its unrendered argument specs,
   else its unrendered `meta/main.yml`, else the name and resolved path. There is
   no `textDocument/declaration`; clients fall back to definition.
 - **Role parameters** (keys of a `roles:` entry, keys under `vars:` of an
@@ -109,8 +111,9 @@ when none matches do they use step 7, returning every match there.
 
 - Navigation matches what `ansible-playbook` would run whenever the
   configuration is complete, and still finds roles when it is not.
-- Role and collection references are matched by name; two different roles
-  that share a name are listed together.
+- Collection references remain matched by name. Role references were also
+  name-matched, so two different Roles with the same name were listed together
+  (superseded by ADR-0034).
 - Nearest-`ansible.cfg` resolution is more generous than Ansible, which reads
   only the working directory's file.
 - Collections in other virtual environments stay invisible until selected.

@@ -37,6 +37,9 @@ Each ADR captures one decision, its context, and its consequences. Statuses are
 | [0030](0030-extract-tasks-code-actions.md) | Extract tasks code actions | Accepted |
 | [0031](0031-workspace-index.md) | Workspace index | Accepted |
 | [0032](0032-workspace-wide-navigation.md) | Workspace-wide navigation | Accepted |
+| [0033](0033-semantic-navigation-e2e-oracles.md) | Semantic navigation E2E oracles | Accepted |
+| [0034](0034-resolved-role-reference-identity.md) | Match role references by resolved identity | Accepted |
+| [0035](0035-isolated-navigation-fixture.md) | Isolate the navigation E2E fixture and dependency | Accepted |
 
 ## Template
 

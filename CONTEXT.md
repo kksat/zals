@@ -10,11 +10,11 @@ tree.
 ## Language
 
 **Workspace**:
-The nearest directory containing `.git` at or above a folder or file, whether
-`.git` is a directory or a file. A nested `.git` is its own Workspace and stays
-out of the session until an opened folder walks up to it, one per distinct
-`.git`, and a folder with no `.git` at or above it has none. A variable name is
-sought across the Workspace that owns the file.
+The nearest directory containing the configured root marker (`.git` by default,
+as a file or directory) at or above a folder or file. Nested markers define
+separate Workspaces; a Workspace joins the session only when an opened folder
+reaches it, and a variable name is sought across the Workspace that owns its
+file.
 _Avoid_: workspace folder, root URI, multi-root workspace
 
 **Role**:
@@ -95,11 +95,13 @@ _Avoid_: role argument, role input, role call param
 **Role reference**:
 A site that names a role to apply: an entry in a play's `roles:` list, the
 `name` of an `include_role`/`import_role` task, an entry in a role's
-`meta/main.yml` `dependencies:`, or a `roles:` entry in `requirements.yml`. Go-to-definition opens the role's argument
-specs, metadata, or main task file; go-to-implementation opens its main task
-file; find-references returns every site in the Workspace that names that role;
-hover shows the role's `README.md`, falling back to its argument specs,
-metadata, or resolved path.
+`meta/main.yml` `dependencies:`, or a `roles:` entry in `requirements.yml`.
+Go-to-definition opens the role's argument specs, metadata, or main task file;
+go-to-implementation opens its main task file; find-references returns Workspace
+sites whose possible resolved Roles overlap, including short and fully
+qualified names for the same Role, while an
+unresolved reference finds only itself; hover shows the role's `README.md`,
+falling back to its argument specs, metadata, or resolved path.
 _Avoid_: role usage, role mention
 
 **Module key**:
