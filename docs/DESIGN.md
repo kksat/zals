@@ -17,11 +17,12 @@ The v1 target is **feature parity with upstream's Tier 1 surface**:
 | Feature | Notes |
 | --- | --- |
 | Semantic tokens | full-document token stream |
-| Hover | keywords, modules, module options |
+| Hover | keywords, modules, module options, variables, roles, role parameters, collections |
 | Completion (+ resolve) | modules, options, values, keywords |
-| Go to definition | module source files, variable definitions, and roles |
+| Go to definition | module source files, variable definitions, roles, task and vars files, collections |
 | Go to implementation | role main task files |
-| Find references | variables, within the enclosing role or playbook |
+| Find references | variables, roles, task and vars files, and collections, across the Workspace |
+| Workspace symbols | collections, roles, playbooks, task files, plays, tasks, handlers |
 | Validation | `ansible-lint`, `ansible-playbook --syntax-check` fallback, JSON-schema validation |
 
 Out of scope for v1 (Tier 2/3): the VS Code extension, inventory and metadata
@@ -30,8 +31,11 @@ notifications, execution environments, and `--generate-docs`.
 Post-parity extensions: variable navigation (find-references and variable
 go-to-definition, §5), document symbols ([ADR-0027](adr/0027-document-symbols.md)),
 debug code actions ([ADR-0028](adr/0028-debug-code-actions.md)), role
-navigation ([ADR-0029](adr/0029-role-navigation.md)), and extract-tasks code
-actions ([ADR-0030](adr/0030-extract-tasks-code-actions.md)).
+navigation ([ADR-0029](adr/0029-role-navigation.md)), extract-tasks code
+actions ([ADR-0030](adr/0030-extract-tasks-code-actions.md)), and workspace-wide
+navigation over a persistent Workspace index
+([ADR-0031](adr/0031-workspace-index.md),
+[ADR-0032](adr/0032-workspace-wide-navigation.md)).
 
 Parity is behavioral, not byte-for-byte. Intentional differences are tracked in
 [`docs/deviations.md`](deviations.md).
@@ -109,23 +113,30 @@ Find-references and go-to-definition for variables share one model
 ([ADR-0024](adr/0024-variable-go-to-definition.md),
 [ADR-0025](adr/0025-variable-references.md)). The `src/variables/` layer scans
 Jinja expressions and bare-expression keys for root identifiers, detects
-definition sites over the DOM, and resolves the enclosing role or playbook
-scope. The scope is the role's conventional directories or the playbook file,
-plus one level of `vars_files`/`include_vars` targets. References is name-based;
-go-to-definition is scope-aware and ranks visible definitions by precedence.
-Files are read through a `FileSource` seam (open documents first, then disk) so
-the model is testable in isolation.
+definition sites over the DOM. Searches run over the Workspace that owns the
+file ([ADR-0032](adr/0032-workspace-wide-navigation.md)), read from the
+Workspace index (`src/workspace/index.zig`, [ADR-0031](adr/0031-workspace-index.md))
+with open documents layered on top. References is name-based. Go-to-definition
+and hover rank the reachable definitions (role scope or playbook, the
+playbooks that invoke the role or include the task file, and their vars files)
+by precedence and list the others after them. Files outside a session
+Workspace fall back to the role or playbook file set read through the
+`FileSource` seam.
 
 ## 5a. Roles
 
 Role navigation ([ADR-0029](adr/0029-role-navigation.md)) lives in
 `src/roles/`. It detects role references over the DOM (`roles:` entries,
-`include_role`/`import_role` names, and `meta/main.yml` dependencies), resolves
-the name against playbook-adjacent `roles/`, `DEFAULT_ROLES_PATH`, workspace
-roots, and declared collections, and selects a target file: argument specs,
-metadata, or the main task file for definition; the main task file for
-implementation. `DEFAULT_ROLES_PATH` and `COLLECTIONS_PATHS` come from a cached
-`ansible-config dump` shared with the module index.
+`include_role`/`import_role` names, `meta/main.yml` dependencies, and
+`requirements.yml` roles), resolves the name in `ansible-playbook`'s order
+(FQCN, declared collections, sibling role, adjacent `roles/` up to the
+Workspace root, `roles_path`, Ansible's defaults) with a Workspace-wide fallback,
+and selects a target file: argument specs, metadata, or the main task file for
+definition; the main task file for implementation. Search paths come per file
+from `ANSIBLE_*` variables, the nearest `ansible.cfg`, then a cached
+`ansible-config dump` (`src/services/project_config.zig`); the selected
+virtual environment (`ansible.python.venvPath` or `--venv`) adds its
+collections ([ADR-0032](adr/0032-workspace-wide-navigation.md)).
 
 ## 6. Documentation data
 

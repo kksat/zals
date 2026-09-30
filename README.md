@@ -24,9 +24,15 @@ Tier 1 — the client-agnostic language server surface:
 - Completion (+ resolve)
 - Go to definition (module source, variable definitions, and roles)
 - Go to implementation (role main task files)
-- Find references (variables, within the enclosing role or playbook)
+- Find references (variables, roles, task and vars files, collections)
 - Validation: `ansible-lint`, `ansible-playbook --syntax-check` fallback, and
   JSON-schema validation of Ansible metadata files
+
+Workspace-wide navigation (post-parity): find-references, definition, and
+hover for variables, roles, role parameters, task and vars files, and
+collections across the Workspace, plus `workspace/symbol`. See
+[ADR-0031](docs/adr/0031-workspace-index.md) and
+[ADR-0032](docs/adr/0032-workspace-wide-navigation.md).
 
 Variable navigation (find-references and variable go-to-definition) is a
 post-parity extension; upstream has no counterpart. See
