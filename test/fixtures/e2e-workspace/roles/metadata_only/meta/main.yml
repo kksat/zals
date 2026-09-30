@@ -1,0 +1,5 @@
+---
+galaxy_info:
+  author: Rollout fixture
+  description: A role whose only navigation target is metadata
+dependencies: []

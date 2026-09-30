@@ -14,6 +14,7 @@ Galaxy-installed collection.
 `roles/deploy` deliberately collides with `example.rollout.roles/deploy`; the
 playbooks select different targets according to their collection context.
 `ops/roles/check` and `services/roles/check` exercise ambiguous editor fallback.
+The `metadata_only` Role deliberately has metadata but no main task file.
 
 Files under `negative/` contain intentional non-matches or missing targets;
 positive playbooks remain structurally valid Ansible. The marker file is

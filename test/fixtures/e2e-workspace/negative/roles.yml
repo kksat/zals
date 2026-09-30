@@ -7,6 +7,7 @@
   roles:
     - example.missing.deploy
     - absent_role
+    - metadata_only
   tasks:
     - name: deploy
       ansible.builtin.debug:

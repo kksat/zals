@@ -523,4 +523,22 @@ pub const all = [_]m.Case{
         .from = m.cursor("playbooks/rollback.yml", "tasks_from: <details>"),
         .expected = &.{},
     },
+    .{
+        .name = "role/metadata-only target: definition opens metadata",
+        .method = .definition,
+        .from = m.cursor("negative/roles.yml", "    - <metadata_only>"),
+        .expected = &.{m.fileStart("roles/metadata_only/meta/main.yml")},
+    },
+    .{
+        .name = "role/metadata-only target: implementation has no main task file",
+        .method = .implementation,
+        .from = m.cursor("negative/roles.yml", "    - <metadata_only>"),
+        .expected = &.{},
+    },
+    .{
+        .name = "role/metadata-only target: references still find the invocation",
+        .method = .references,
+        .from = m.cursor("negative/roles.yml", "    - <metadata_only>"),
+        .expected = &.{m.span("negative/roles.yml", "    - <metadata_only>")},
+    },
 };
