@@ -15,6 +15,7 @@ const jinja = @import("jinja.zig");
 const definitions_mod = @import("definitions.zig");
 const scope = @import("scope.zig");
 const source_mod = @import("source.zig");
+const roles = @import("../roles/resolve.zig");
 
 pub const FileSource = source_mod.FileSource;
 pub const DirEntry = source_mod.DirEntry;
@@ -77,7 +78,7 @@ pub const Index = struct {
         offset: usize,
     ) !?Cursor {
         var defs = std.array_list.Managed(Definition).init(a);
-        try definitions_mod.collect(a, forest, scope.fileKind(path), &defs);
+        try definitions_mod.collect(a, forest, scope.fileKind(path, roles.enclosingRole(path)), &defs);
         for (defs.items) |d| {
             if (d.start <= offset and offset <= d.end) {
                 return .{ .name = d.name, .kind = .definition, .start = d.start, .end = d.end };
@@ -97,17 +98,21 @@ pub const Index = struct {
     pub fn occurrences(self: *Index, a: Allocator, uri: []const u8, name: []const u8) ![]Occurrence {
         const files = try self.fileSet(a, uri);
         var out = std.array_list.Managed(Occurrence).init(a);
-        for (files) |file_uri| {
+        for (files.uris) |file_uri| {
             const path = try scope.uriToPath(a, file_uri);
             const scan = try self.scanFile(a, file_uri, path);
             for (scan.definitions) |d| {
                 if (std.mem.eql(u8, d.name, name)) {
+                    var site = d.site;
+                    for (files.loads) |load| {
+                        if (std.mem.eql(u8, load.path, path) and load.site.rank() < site.rank()) site = load.site;
+                    }
                     try out.append(.{
                         .uri = file_uri,
                         .start = d.start,
                         .end = d.end,
                         .kind = .definition,
-                        .site = d.site,
+                        .site = site,
                     });
                 }
             }
@@ -152,7 +157,7 @@ pub const Index = struct {
         defer forest.deinit();
 
         var defs = std.array_list.Managed(Definition).init(a);
-        try definitions_mod.collect(a, &forest, scope.fileKind(path), &defs);
+        try definitions_mod.collect(a, &forest, scope.fileKind(path, scope.roleRoot(a, self.source, path)), &defs);
 
         var refs = std.array_list.Managed(jinja.Ident).init(a);
         for (forest.roots) |root| try collectRefs(a, root, forest.text, &refs);
@@ -165,7 +170,12 @@ pub const Index = struct {
 
     /// The file set for `uri`: the role's conventional dirs, or the playbook
     /// file, plus one level of `vars_files`/`include_vars` targets.
-    fn fileSet(self: *Index, a: Allocator, uri: []const u8) ![]const []const u8 {
+    const FileSet = struct {
+        uris: []const []const u8,
+        loads: []const scope.VarFileLoad,
+    };
+
+    fn fileSet(self: *Index, a: Allocator, uri: []const u8) !FileSet {
         const path = try scope.uriToPath(a, uri);
         var base = std.array_list.Managed([]const u8).init(a);
         if (scope.roleRoot(a, self.source, path)) |root| {
@@ -176,6 +186,7 @@ pub const Index = struct {
         }
 
         var all = std.array_list.Managed([]const u8).init(a);
+        var loads = std.array_list.Managed(scope.VarFileLoad).init(a);
         for (base.items) |u| try appendUnique(a, &all, u);
 
         for (base.items) |u| {
@@ -184,13 +195,14 @@ pub const Index = struct {
             var forest = yaml.parse(a, text) catch continue;
             defer forest.deinit();
             const base_dir = std.fs.path.dirname(p) orelse ".";
-            const targets = try scope.varFileTargets(a, &forest, base_dir);
-            for (targets) |t| {
-                const target_uri = try scope.pathToUri(a, t);
+            const targets = try scope.varFileLoads(a, &forest, base_dir);
+            for (targets) |load| {
+                try loads.append(load);
+                const target_uri = try scope.pathToUri(a, load.path);
                 try appendUnique(a, &all, target_uri);
             }
         }
-        return all.toOwnedSlice();
+        return .{ .uris = try all.toOwnedSlice(), .loads = try loads.toOwnedSlice() };
     }
 };
 
@@ -360,6 +372,7 @@ const MapSource = struct {
 test "references across a role" {
     var files = std.StringHashMap([]const u8).init(testing.allocator);
     defer files.deinit();
+    try files.put("file:///r/meta/main.yml", "---\n");
     try files.put("file:///r/defaults/main.yml", "app_name: demo\napp_port: 8080\n");
     try files.put("file:///r/tasks/main.yml",
         \\- name: show
@@ -408,6 +421,7 @@ test "occurrenceAt finds a reference" {
 test "definitions are ranked" {
     var files = std.StringHashMap([]const u8).init(testing.allocator);
     defer files.deinit();
+    try files.put("file:///r/meta/main.yml", "---\n");
     try files.put("file:///r/defaults/main.yml", "foo: 1\n");
     try files.put("file:///r/vars/main.yml", "foo: 2\n");
     var src = MapSource{ .files = files };
@@ -510,6 +524,33 @@ test "vars_files targets are in scope" {
         if (o.kind == .definition) defs += 1;
     }
     try testing.expectEqual(@as(usize, 1), defs);
+}
+
+test "include_vars definitions outrank vars_files from the same playbook" {
+    var files = std.StringHashMap([]const u8).init(testing.allocator);
+    defer files.deinit();
+    try files.put("file:///p/play.yml",
+        \\- hosts: all
+        \\  vars_files: [release.yml]
+        \\  tasks:
+        \\    - include_vars: runtime.yml
+        \\    - debug: msg="{{ rollout_channel }}"
+        \\
+    );
+    try files.put("file:///p/release.yml", "rollout_channel: planned\n");
+    try files.put("file:///p/runtime.yml", "rollout_channel: active\n");
+    var src = MapSource{ .files = files };
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var index = Index.init(a, src.source());
+
+    const defs = try index.definitions(a, "file:///p/play.yml", "rollout_channel");
+    try testing.expectEqual(@as(usize, 2), defs.len);
+    try testing.expectEqualStrings("file:///p/runtime.yml", defs[0].uri);
+    try testing.expectEqual(Site.include_vars, defs[0].site.?);
+    try testing.expectEqualStrings("file:///p/release.yml", defs[1].uri);
+    try testing.expectEqual(Site.vars_files, defs[1].site.?);
 }
 
 test "fixture playbook scope is the file alone" {

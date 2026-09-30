@@ -29,6 +29,21 @@ pub const Occurrence = struct {
     reachable: bool = false,
 };
 
+pub const Reachability = struct {
+    paths: []const []const u8,
+    /// Loads from base files only; targets are followed one level.
+    loads: []const variables.scope.VarFileLoad,
+
+    fn loadSite(self: Reachability, path: []const u8) ?Site {
+        var best: ?Site = null;
+        for (self.loads) |load| {
+            if (!std.mem.eql(u8, load.path, path)) continue;
+            if (best == null or load.site.rank() < best.?.rank()) best = load.site;
+        }
+        return best;
+    }
+};
+
 pub fn find(files: []const File, path: []const u8) ?*const File {
     for (files) |*f| if (std.mem.eql(u8, f.path, path)) return f;
     return null;
@@ -69,8 +84,9 @@ pub fn occurrences(a: Allocator, files: []const File, name: []const u8) ![]Occur
 /// that Role (or, for a task file outside a role, the files that include it),
 /// and one level of the vars files those load. Role invokers are resolved by
 /// the provider, which has the per-file project configuration.
-pub fn reachableFiles(a: Allocator, files: []const File, path: []const u8, role_dir: ?[]const u8, role_invokers: []const []const u8) ![]const []const u8 {
+pub fn reachableFiles(a: Allocator, files: []const File, path: []const u8, role_dir: ?[]const u8, role_invokers: []const []const u8) !Reachability {
     var set = std.array_list.Managed([]const u8).init(a);
+    var loads = std.array_list.Managed(variables.scope.VarFileLoad).init(a);
     if (role_dir) |rd| {
         const prefix = try std.fmt.allocPrint(a, "{s}/", .{rd});
         for (files) |f| {
@@ -92,22 +108,30 @@ pub fn reachableFiles(a: Allocator, files: []const File, path: []const u8, role_
     const base_len = set.items.len;
     for (set.items[0..base_len]) |p| {
         const f = find(files, p) orelse continue;
-        for (f.facts.vars_targets) |t| try appendUnique(&set, t);
+        for (f.facts.var_loads) |load| {
+            try loads.append(load);
+            try appendUnique(&set, load.path);
+        }
     }
-    return set.toOwnedSlice();
+    return .{ .paths = try set.toOwnedSlice(), .loads = try loads.toOwnedSlice() };
 }
 
 /// Definitions of `name`: the reachable ones ranked by precedence (ADR-0024),
 /// then every other definition in `files` by position.
-pub fn definitions(a: Allocator, files: []const File, name: []const u8, reachable: []const []const u8) ![]Occurrence {
+pub fn definitions(a: Allocator, files: []const File, name: []const u8, reachable: Reachability) ![]Occurrence {
     const all = try occurrences(a, files, name);
     var near = std.array_list.Managed(Occurrence).init(a);
     var far = std.array_list.Managed(Occurrence).init(a);
     for (all) |o| {
         if (o.kind != .definition) continue;
         var copy = o;
-        if (contains(reachable, o.path)) {
+        if (contains(reachable.paths, o.path)) {
             copy.reachable = true;
+            // Files are indexed independently of their invokers. An explicit
+            // load may outrank the file's intrinsic definition site.
+            if (reachable.loadSite(o.path)) |site| {
+                if (copy.site == null or site.rank() < copy.site.?.rank()) copy.site = site;
+            }
             try near.append(copy);
         } else {
             try far.append(copy);
@@ -200,8 +224,32 @@ test "a playbook reaches itself and its vars files" {
         try file(a, "/w/unrelated.yml", "x: 2\n"),
     };
     const reach = try reachableFiles(a, &files, "/w/site.yml", null, &.{});
-    try testing.expectEqual(@as(usize, 2), reach.len);
-    try testing.expectEqualStrings("/w/extra.yml", reach[1]);
+    try testing.expectEqual(@as(usize, 2), reach.paths.len);
+    try testing.expectEqualStrings("/w/extra.yml", reach.paths[1]);
+}
+
+test "include_vars outranks vars_files for a reachable variable" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const files = [_]File{
+        try file(a, "/w/play.yml",
+            \\- hosts: all
+            \\  vars_files: [vars/release.yml]
+            \\  tasks:
+            \\    - include_vars: vars/runtime.yml
+            \\
+        ),
+        try file(a, "/w/vars/release.yml", "channel: planned\n"),
+        try file(a, "/w/vars/runtime.yml", "channel: active\n"),
+    };
+    const reach = try reachableFiles(a, &files, "/w/play.yml", null, &.{});
+    const defs = try definitions(a, &files, "channel", reach);
+    try testing.expectEqual(@as(usize, 2), defs.len);
+    try testing.expectEqualStrings("/w/vars/runtime.yml", defs[0].path);
+    try testing.expectEqual(Site.include_vars, defs[0].site.?);
+    try testing.expectEqualStrings("/w/vars/release.yml", defs[1].path);
+    try testing.expectEqual(Site.vars_files, defs[1].site.?);
 }
 
 test "a task file outside a role reaches the playbooks that include it" {

@@ -66,7 +66,7 @@ pub const View = struct {
     /// A role's invoking files are selected by resolved directory, not its
     /// basename. Each reference uses its own declared collections and the
     /// referencing file's configured search paths.
-    pub fn reachableFiles(self: *View, path: []const u8) ![]const []const u8 {
+    pub fn reachableFiles(self: *View, path: []const u8) !view.Reachability {
         const role_dir = roles.resolve.enclosingRole(path);
         var invokers = std.array_list.Managed([]const u8).init(self.a);
         if (role_dir) |target| {

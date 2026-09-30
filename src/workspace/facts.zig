@@ -9,6 +9,7 @@ const Allocator = std.mem.Allocator;
 const yaml = @import("../yaml/root.zig");
 const variables = @import("../variables/root.zig");
 const role_reference = @import("../roles/reference.zig");
+const role_resolve = @import("../roles/resolve.zig");
 const file_refs = @import("file_refs.zig");
 const collection_refs = @import("collection_refs.zig");
 pub const symbols = @import("symbols.zig");
@@ -38,8 +39,8 @@ pub const Facts = struct {
     /// Role references (role invocations, `include_role`/`import_role`
     /// names, role dependencies).
     role_refs: []const RoleRef = &.{},
-    /// Absolute paths loaded by `vars_files` and `include_vars`.
-    vars_targets: []const []const u8 = &.{},
+    /// Absolute targets and source kinds of `vars_files`/`include_vars` loads.
+    var_loads: []const variables.scope.VarFileLoad = &.{},
     /// Task-file and vars-file references with their resolved targets.
     file_refs: []const FileRef = &.{},
     /// Collection references; `name` is `namespace.collection`.
@@ -62,7 +63,7 @@ pub fn extractIn(a: Allocator, root: ?[]const u8, path: []const u8, text: []cons
     defer forest.deinit();
 
     var defs = std.array_list.Managed(Definition).init(a);
-    variables.definitions.collect(a, &forest, variables.scope.fileKind(path), &defs) catch {};
+    variables.definitions.collect(a, &forest, variables.scope.fileKind(path, role_resolve.enclosingRole(path)), &defs) catch {};
     for (defs.items) |*d| d.name = try a.dupe(u8, d.name);
 
     var idents = std.array_list.Managed(variables.jinja.Ident).init(a);
@@ -76,15 +77,13 @@ pub fn extractIn(a: Allocator, root: ?[]const u8, path: []const u8, text: []cons
     const sym = symbols.collect(a, &forest, path) catch symbols.Result{};
 
     const base_dir = std.fs.path.dirname(path) orelse ".";
-    const targets = variables.scope.varFileTargets(a, &forest, base_dir) catch &.{};
-    const vars_targets = try a.alloc([]const u8, targets.len);
-    for (targets, 0..) |t, i| vars_targets[i] = try a.dupe(u8, t);
+    const var_loads = variables.scope.varFileLoads(a, &forest, base_dir) catch &.{};
 
     return .{
         .var_defs = try defs.toOwnedSlice(),
         .var_refs = refs,
         .role_refs = try role_refs.toOwnedSlice(),
-        .vars_targets = vars_targets,
+        .var_loads = var_loads,
         .file_refs = file_refs.collect(a, &forest, path, root) catch &.{},
         .collection_refs = collectionSpans(a, &forest, path) catch &.{},
         .shape = sym.shape,
@@ -179,7 +178,8 @@ test "extract records role references and vars targets" {
     try testing.expectEqualStrings("cache", f.role_refs[2].name);
     try testing.expectEqualStrings("web", text[f.role_refs[0].start..f.role_refs[0].end]);
     try testing.expectEqual(@as(usize, 0), f.role_refs[0].declared_collections.len);
-    try testing.expectEqualStrings("/w/vars/prod.yml", f.vars_targets[0]);
+    try testing.expectEqualStrings("/w/vars/prod.yml", f.var_loads[0].path);
+    try testing.expectEqual(variables.Site.vars_files, f.var_loads[0].site);
 }
 
 test "role facts retain per-site declared collections after parsing" {
