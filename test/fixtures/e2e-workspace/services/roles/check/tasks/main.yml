@@ -1,0 +1,4 @@
+---
+- name: Check service readiness
+  ansible.builtin.debug:
+    msg: Service is ready

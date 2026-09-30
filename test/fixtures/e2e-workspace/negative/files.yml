@@ -1,0 +1,16 @@
+---
+- name: File paths that cannot be navigated
+  hosts: localhost
+  gather_facts: false
+  vars:
+    file_choice: missing.yml
+  tasks:
+    - name: A missing literal task file
+      ansible.builtin.include_tasks: no-such-file.yml
+    - name: An absolute but absent task file
+      ansible.builtin.include_tasks: /__zals_e2e_missing__/absent.yml
+    - name: A computed task file is not a static file reference
+      ansible.builtin.include_tasks: "{{ file_choice }}"
+    - name: A computed vars file is not a static file reference
+      ansible.builtin.include_vars:
+        file: "{{ file_choice }}"

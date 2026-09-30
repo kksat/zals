@@ -1,0 +1,4 @@
+---
+- name: Report the rollout status
+  ansible.builtin.debug:
+    msg: "Reporting {{ release_tag }}"

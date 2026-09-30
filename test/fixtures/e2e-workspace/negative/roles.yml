@@ -1,0 +1,19 @@
+---
+- name: Exercise unresolved and non-role sites
+  hosts: localhost
+  gather_facts: false
+  vars:
+    dynamic_role: example.rollout.deploy
+  roles:
+    - example.missing.deploy
+    - absent_role
+  tasks:
+    - name: deploy
+      ansible.builtin.debug:
+        msg: The task name is not a role reference
+    - name: A Jinja-valued name is not a static role
+      ansible.builtin.include_role:
+        name: "{{ dynamic_role }}"
+    - name: A second identical missing name stays unresolved
+      ansible.builtin.include_role:
+        name: example.missing.deploy

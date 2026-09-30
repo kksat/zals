@@ -1,0 +1,4 @@
+---
+- name: Check partner service
+  ansible.builtin.debug:
+    msg: Partner service is healthy

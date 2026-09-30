@@ -1,0 +1,4 @@
+---
+release_tag: candidate
+app_port: 8080
+deployment_enabled: true

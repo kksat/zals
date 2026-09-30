@@ -1,0 +1,4 @@
+---
+- name: Deploy the project-only service
+  ansible.builtin.debug:
+    msg: This is the standalone deploy role

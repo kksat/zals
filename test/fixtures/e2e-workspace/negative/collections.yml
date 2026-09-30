@@ -1,0 +1,10 @@
+---
+- name: Name the absent collection
+  hosts: localhost
+  gather_facts: false
+  collections:
+    - fixture.missing
+  tasks:
+    - name: The module key names a collection that is absent
+      fixture.missing.fake_module:
+        msg: not installed

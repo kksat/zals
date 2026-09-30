@@ -1,0 +1,12 @@
+---
+collections:
+  - name: example.shared
+  - fixture.metrics
+  - name: fixture.missing
+  - name: https://example.invalid/collection.git
+    type: git
+roles:
+  - name: partner.health
+  - src: example.rollout.snapshot
+  - example.rollout.verify
+  - src: https://example.invalid/role.git

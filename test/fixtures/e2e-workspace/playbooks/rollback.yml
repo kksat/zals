@@ -1,0 +1,17 @@
+---
+- name: Roll back a service
+  hosts: localhost
+  gather_facts: false
+  roles:
+    - example.rollout.rollback
+  tasks:
+    - name: Notify the shared collection
+      ansible.builtin.include_role:
+        name: example.shared.notify
+    - name: Report recovery via the installed collection
+      ansible.builtin.include_role:
+        name: fixture.metrics.report
+    - name: Revisit snapshot details through a different entry point
+      ansible.builtin.include_role:
+        name: example.rollout.snapshot
+        tasks_from: details

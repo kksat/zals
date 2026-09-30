@@ -1,0 +1,4 @@
+---
+- name: Check operational readiness
+  ansible.builtin.debug:
+    msg: Operations are ready

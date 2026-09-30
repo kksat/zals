@@ -1,0 +1,4 @@
+---
+- name: Check the snapshot details
+  ansible.builtin.debug:
+    msg: Snapshot complete

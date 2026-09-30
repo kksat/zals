@@ -1,0 +1,4 @@
+---
+- name: Notify the team of the rollout
+  ansible.builtin.debug:
+    msg: "Notifying about {{ release_tag }}"

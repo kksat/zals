@@ -1,0 +1,7 @@
+---
+- name: Restore the rollout snapshot
+  ansible.builtin.import_role:
+    name: example.rollout.snapshot
+
+- name: Include rollback tasks
+  ansible.builtin.include_tasks: recover.yml

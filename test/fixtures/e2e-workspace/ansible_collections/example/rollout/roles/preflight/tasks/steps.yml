@@ -1,0 +1,4 @@
+---
+- name: Explain readiness
+  ansible.builtin.debug:
+    msg: "{{ preflight_ready }}: {{ shared_note }}"

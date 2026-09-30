@@ -1,0 +1,3 @@
+---
+- name: Recheck snapshot details
+  ansible.builtin.import_tasks: details.yml

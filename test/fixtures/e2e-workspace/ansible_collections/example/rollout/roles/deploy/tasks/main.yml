@@ -1,0 +1,14 @@
+---
+- name: Deploy the selected image
+  ansible.builtin.debug:
+    msg: "Deploy {{ deploy_image }} for {{ release_tag }}"
+  register: deployment_result
+
+- name: Confirm the deployment
+  ansible.builtin.debug:
+    msg: "{{ deployment_result.msg }}"
+  when: deployment_result is defined
+
+- name: Include verification from the sibling role
+  ansible.builtin.include_role:
+    name: verify

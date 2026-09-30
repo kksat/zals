@@ -1,0 +1,21 @@
+---
+- name: Check release prerequisites
+  ansible.builtin.debug:
+    msg: "🚀 {{ release_tag }} on port {{ app_port }}: {{ readiness_label }}"
+  when: deployment_enabled | bool
+
+- name: Prepare rollout facts
+  ansible.builtin.set_fact:
+    preflight_ready: true
+
+- name: Include preflight steps
+  ansible.builtin.include_tasks: steps.yml
+
+- name: Load rollout overrides
+  ansible.builtin.include_vars:
+    file: overrides.yml
+
+- name: Render the rollout notice
+  ansible.builtin.template:
+    src: notice.j2
+    dest: /tmp/rollout-notice.txt

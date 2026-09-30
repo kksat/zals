@@ -1,0 +1,6 @@
+---
+- name: Search both check roles through the editor fallback
+  hosts: localhost
+  gather_facts: false
+  roles:
+    - check

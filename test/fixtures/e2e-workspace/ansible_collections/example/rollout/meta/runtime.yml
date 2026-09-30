@@ -1,0 +1,8 @@
+---
+plugin_routing:
+  modules:
+    old_report:
+      redirect: fixture.metrics.report
+action_groups:
+  rollout:
+    - example.shared.notify

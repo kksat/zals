@@ -1,0 +1,10 @@
+---
+argument_specs:
+  main:
+    options:
+      release_tag:
+        type: str
+        description: Label of the rollout
+      app_port:
+        type: int
+        description: Port of the deployed service

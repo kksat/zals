@@ -1,0 +1,11 @@
+---
+namespace: example
+name: rollout
+version: 1.0.0
+readme: README.md
+description: Fictional application rollout for navigation tests
+license: [MIT]
+dependencies:
+  example.shared: ">=1.0.0"
+  fixture.metrics: ">=1.0.0"
+  fixture.missing: ">=1.0.0"

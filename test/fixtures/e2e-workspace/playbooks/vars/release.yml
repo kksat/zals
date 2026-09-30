@@ -1,0 +1,9 @@
+---
+release_tag: release-from-vars-file
+rollout_targets: [api, worker]
+optional_targets: [metrics]
+verify_changed: false
+verify_failed: false
+verify_complete: true
+service:
+  name: rollout-api

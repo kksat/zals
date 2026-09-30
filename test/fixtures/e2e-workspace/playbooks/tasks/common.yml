@@ -1,0 +1,4 @@
+---
+- name: Report the chosen release
+  ansible.builtin.debug:
+    msg: "{{ release_tag }} on {{ app_port }}"

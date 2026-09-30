@@ -1,0 +1,8 @@
+---
+- name: Notify the installed reporting role
+  ansible.builtin.include_role:
+    name: fixture.metrics.report
+
+- name: Notify the shared collection role
+  ansible.builtin.import_role:
+    name: example.shared.notify

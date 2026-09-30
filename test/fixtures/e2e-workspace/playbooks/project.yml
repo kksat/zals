@@ -1,0 +1,10 @@
+---
+- name: Deploy a project role without a collection declaration
+  hosts: localhost
+  gather_facts: false
+  roles:
+    - deploy
+  tasks:
+    - name: Include the project-only deploy role
+      ansible.builtin.include_role:
+        name: deploy

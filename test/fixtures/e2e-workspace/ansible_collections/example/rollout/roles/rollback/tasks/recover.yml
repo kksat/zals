@@ -1,0 +1,4 @@
+---
+- name: Confirm recovery
+  ansible.builtin.debug:
+    msg: "Restored {{ release_tag }}"

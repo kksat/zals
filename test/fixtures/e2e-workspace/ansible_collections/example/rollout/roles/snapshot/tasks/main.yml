@@ -1,0 +1,8 @@
+---
+- name: Snapshot the running service
+  ansible.builtin.debug:
+    msg: "Snapshot for {{ release_tag }}"
+
+- name: Import snapshot details
+  ansible.builtin.import_tasks:
+    file: details.yml

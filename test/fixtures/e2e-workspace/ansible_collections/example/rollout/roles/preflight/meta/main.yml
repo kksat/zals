@@ -1,0 +1,7 @@
+---
+collections:
+  - example.shared
+dependencies:
+  - example.rollout.snapshot
+  - role: example.shared.notify
+  - name: fixture.metrics.report

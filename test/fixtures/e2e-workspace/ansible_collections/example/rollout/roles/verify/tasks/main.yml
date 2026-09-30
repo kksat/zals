@@ -1,0 +1,31 @@
+---
+- name: Verify rollout conditions
+  ansible.builtin.assert:
+    that:
+      - release_ready
+      - rollout_phase == 'staged'
+  changed_when: verify_changed
+  failed_when: verify_failed
+
+- name: Wait for completion
+  ansible.builtin.debug:
+    msg: "{{ release_tag }} ready"
+  until: verify_complete
+  retries: 1
+  delay: 0
+
+- name: Inspect rollout targets
+  ansible.builtin.debug:
+    msg: "{{ target_item }}"
+  loop: rollout_targets
+  loop_control:
+    loop_var: target_item
+
+- name: Check optional targets
+  ansible.builtin.debug:
+    msg: "{{ item }}"
+  with_items: optional_targets
+
+- name: Show the service name
+  ansible.builtin.debug:
+    msg: "{{ service.name | default('unnamed') }}"

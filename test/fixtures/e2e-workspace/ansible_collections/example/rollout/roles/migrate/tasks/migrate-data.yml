@@ -1,0 +1,4 @@
+---
+- name: Check the migration
+  ansible.builtin.debug:
+    msg: "Data migrated for {{ release_tag }}"

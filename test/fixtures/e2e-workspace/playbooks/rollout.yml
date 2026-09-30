@@ -1,0 +1,80 @@
+---
+- name: Roll out the application
+  hosts: localhost
+  gather_facts: false
+  collections:
+    - example.rollout
+  vars_files:
+    - vars/release.yml
+  vars_prompt:
+    - name: rollout_approval
+      prompt: Approve this rollout
+      private: false
+  vars:
+    release_ready: true
+    rollout_phase: staged
+  roles:
+    - role: example.rollout.preflight
+      release_tag: release-candidate
+    - role: deploy
+      deploy_image: example/app:candidate
+    - example.rollout.verify
+  tasks:
+    - name: Include application migration
+      ansible.builtin.include_role:
+        name: example.rollout.migrate
+
+    - name: Include the rollout notifier by short name
+      ansible.builtin.include_role: name=notify
+
+    - name: Import a snapshot with a quoted role argument
+      ansible.builtin.import_role: "name=example.rollout.snapshot"
+
+    - name: Read rollout runtime variables
+      ansible.builtin.include_vars: vars/runtime.yml
+
+    - name: Include shared deployment tasks
+      ansible.builtin.include_tasks: tasks/common.yml
+
+    - name: Import shared deployment tasks
+      ansible.builtin.import_tasks: file=tasks/common.yml
+
+    - name: Announce the rollout
+      ansible.builtin.debug:
+        msg: "🚀 {{ release_tag }}: {{ runtime_label }}"
+      when: rollout_approval | bool
+
+    - name: Run a collection-scoped task
+      collections:
+        - example.shared
+      ansible.builtin.debug:
+        msg: "{{ release_tag }} is staged"
+
+    - name: Include common tasks with a file map
+      ansible.builtin.include_tasks:
+        file: tasks/common.yml
+
+    - name: Import common tasks with a scalar path
+      ansible.builtin.import_tasks: tasks/common.yml
+
+    - name: Load runtime vars with a key-value path
+      ansible.builtin.include_vars: file=vars/runtime.yml
+
+    - name: Explain the rollout block
+      collections:
+        - example.shared
+      vars:
+        block_marker: in-block
+      block:
+        - name: Show the block marker
+          ansible.builtin.debug:
+            msg: "{{ block_marker }}"
+        - name: Show a task-local marker
+          vars:
+            task_marker: in-task
+          ansible.builtin.debug:
+            msg: "{{ task_marker }}"
+
+    - name: Record the rollout metric
+      fixture.metrics.record:
+        label: "{{ release_tag }}"

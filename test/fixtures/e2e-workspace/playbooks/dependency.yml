@@ -1,0 +1,8 @@
+---
+- name: Check the installed dependency
+  hosts: localhost
+  gather_facts: false
+  collections:
+    - fixture.metrics
+  roles:
+    - fixture.metrics.report

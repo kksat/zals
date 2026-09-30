@@ -1,0 +1,7 @@
+---
+version: 3
+dependencies:
+  galaxy:
+    collections:
+      - name: fixture.metrics
+        version: 1.0.0

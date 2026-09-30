@@ -1,0 +1,6 @@
+---
+- name: Check a role with a YAML main task file
+  hosts: localhost
+  gather_facts: false
+  roles:
+    - healthcheck

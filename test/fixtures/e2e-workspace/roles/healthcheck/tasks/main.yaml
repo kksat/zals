@@ -1,0 +1,4 @@
+---
+- name: Check the application health
+  ansible.builtin.debug:
+    msg: The rollout is healthy

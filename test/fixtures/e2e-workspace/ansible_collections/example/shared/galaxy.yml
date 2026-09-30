@@ -1,0 +1,7 @@
+---
+namespace: example
+name: shared
+version: 1.0.0
+readme: README.md
+description: Shared notifications for the rollout fixture
+license: [MIT]
