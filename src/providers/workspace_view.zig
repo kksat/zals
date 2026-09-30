@@ -10,6 +10,8 @@ const Document = @import("../workspace/document.zig").Document;
 const paths = @import("../paths.zig");
 const facts_mod = @import("../workspace/facts.zig");
 const discover = @import("../workspace/discover.zig");
+const roles = @import("../roles/root.zig");
+const util = @import("util.zig");
 pub const view = @import("../workspace/view.zig");
 
 pub const File = view.File;
@@ -61,6 +63,26 @@ pub const View = struct {
         return try init(server, a, root);
     }
 
+    /// A role's invoking files are selected by resolved directory, not its
+    /// basename. Each reference uses its own declared collections and the
+    /// referencing file's configured search paths.
+    pub fn reachableFiles(self: *View, path: []const u8) ![]const []const u8 {
+        const role_dir = roles.resolve.enclosingRole(path);
+        var invokers = std.array_list.Managed([]const u8).init(self.a);
+        if (role_dir) |target| {
+            for (self.files) |f| {
+                if (f.facts.role_refs.len == 0) continue;
+                const base = util.roleResolver(self.server, self.a, f.path, &.{});
+                for (f.facts.role_refs) |ref| {
+                    if (!roleRefResolvesTo(base, f.path, ref, target)) continue;
+                    try invokers.append(f.path);
+                    break;
+                }
+            }
+        }
+        return view.reachableFiles(self.a, self.files, path, role_dir, invokers.items);
+    }
+
     pub fn location(self: *View, uri: []const u8, start: usize, end: usize) !types.Location {
         if (self.server.documents.get(uri)) |doc| {
             return .{ .uri = uri, .range = doc.rangeFromOffsets(start, end) };
@@ -86,6 +108,15 @@ fn fromDocument(a: Allocator, root: []const u8, path: []const u8, doc: *Document
     return .{ .path = path, .uri = doc.uri, .facts = try facts_mod.extractIn(a, root, path, doc.bytes()) };
 }
 
+fn roleRefResolvesTo(base: roles.Resolver, file_path: []const u8, ref: facts_mod.RoleRef, target: []const u8) bool {
+    var resolver = base;
+    resolver.declared_collections = ref.declared_collections;
+    for (resolver.resolveAll(ref.name, file_path)) |dir| {
+        if (std.mem.eql(u8, dir, target)) return true;
+    }
+    return false;
+}
+
 fn under(path: []const u8, root: []const u8) bool {
     return path.len > root.len and std.mem.startsWith(u8, path, root) and path[root.len] == '/';
 }
@@ -94,4 +125,31 @@ fn readFile(a: Allocator, path: []const u8) ?[]const u8 {
     const f = std.fs.cwd().openFile(path, .{}) catch return null;
     defer f.close();
     return f.readToEndAlloc(a, 16 * 1024 * 1024) catch null;
+}
+
+const testing = std.testing;
+
+test "variable reachability joins short and FQCN role aliases, not colliding basenames" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.makePath("ansible_collections/ns/first/roles/notify/tasks");
+    try tmp.dir.makePath("ansible_collections/ns/second/roles/notify/tasks");
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const root = try tmp.dir.realpathAlloc(a, ".");
+    const first = try std.fs.path.join(a, &.{ root, "ansible_collections/ns/first/roles/notify" });
+    const second = try std.fs.path.join(a, &.{ root, "ansible_collections/ns/second/roles/notify" });
+    const play_first = try std.fs.path.join(a, &.{ root, "first.yml" });
+    const play_second = try std.fs.path.join(a, &.{ root, "second.yml" });
+    const play_alias = try std.fs.path.join(a, &.{ root, "alias.yml" });
+    const first_ref = (try facts_mod.extract(a, play_first, "- hosts: all\n  collections: [ns.first]\n  roles: [notify]\n")).role_refs[0];
+    const second_ref = (try facts_mod.extract(a, play_second, "- hosts: all\n  collections: [ns.second]\n  roles: [notify]\n")).role_refs[0];
+    const alias_ref = (try facts_mod.extract(a, play_alias, "- hosts: all\n  roles: [ns.first.notify]\n")).role_refs[0];
+    const resolver = roles.Resolver{ .allocator = a, .collections_paths = &.{root}, .workspace_root = root };
+    try testing.expect(roleRefResolvesTo(resolver, play_first, first_ref, first));
+    try testing.expect(!roleRefResolvesTo(resolver, play_first, first_ref, second));
+    try testing.expect(roleRefResolvesTo(resolver, play_second, second_ref, second));
+    try testing.expect(!roleRefResolvesTo(resolver, play_second, second_ref, first));
+    try testing.expect(roleRefResolvesTo(resolver, play_alias, alias_ref, first));
 }

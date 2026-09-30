@@ -8,7 +8,6 @@ const types = @import("../lsp/types.zig");
 const Server = @import("../lsp/server.zig").Server;
 const util = @import("util.zig");
 const yaml = @import("../yaml/root.zig");
-const roles = @import("../roles/root.zig");
 const variables = @import("../variables/root.zig");
 const paths = @import("../paths.zig");
 const vs = @import("variable_source.zig");
@@ -36,7 +35,7 @@ pub fn hoverName(self: *Server, a: Allocator, uri: []const u8, name: []const u8,
     if (try wv.View.forUri(self, a, uri)) |found| {
         var v = found;
         root = v.root;
-        const reach = try wv.view.reachableFiles(a, v.files, path, roles.resolve.enclosingRole(path));
+        const reach = try v.reachableFiles(path);
         for (try wv.view.definitions(a, v.files, name, reach)) |d| {
             try entries.append(try describe(a, &v, d.uri, d.start, d.site, d.reachable));
         }

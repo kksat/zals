@@ -65,25 +65,18 @@ pub fn occurrences(a: Allocator, files: []const File, name: []const u8) ![]Occur
 
 /// Paths whose definitions can apply in the file at `path` (the Reachable
 /// definitions of `CONTEXT.md`): the file's role scope (every file under
-/// `role_dir`) or the file itself, the playbooks that invoke that role (or,
-/// for a task file outside a role, the files that include it), and one level
-/// of the vars files those load.
-pub fn reachableFiles(a: Allocator, files: []const File, path: []const u8, role_dir: ?[]const u8) ![]const []const u8 {
+/// `role_dir`) or the file itself, the files whose references resolve to
+/// that Role (or, for a task file outside a role, the files that include it),
+/// and one level of the vars files those load. Role invokers are resolved by
+/// the provider, which has the per-file project configuration.
+pub fn reachableFiles(a: Allocator, files: []const File, path: []const u8, role_dir: ?[]const u8, role_invokers: []const []const u8) ![]const []const u8 {
     var set = std.array_list.Managed([]const u8).init(a);
     if (role_dir) |rd| {
         const prefix = try std.fmt.allocPrint(a, "{s}/", .{rd});
         for (files) |f| {
             if (std.mem.startsWith(u8, f.path, prefix)) try appendUnique(&set, f.path);
         }
-        const name = std.fs.path.basename(rd);
-        for (files) |f| {
-            for (f.facts.role_refs) |r| {
-                if (namesRole(r.name, name)) {
-                    try appendUnique(&set, f.path);
-                    break;
-                }
-            }
-        }
+        for (role_invokers) |invoker| try appendUnique(&set, invoker);
     } else {
         for (files) |f| {
             for (f.facts.file_refs) |r| {
@@ -123,15 +116,6 @@ pub fn definitions(a: Allocator, files: []const File, name: []const u8, reachabl
     std.mem.sort(Occurrence, near.items, {}, lessRank);
     try near.appendSlice(far.items);
     return near.toOwnedSlice();
-}
-
-/// A role reference `ref` names the role directory basename `role`: exactly,
-/// or as the last segment of an FQCN.
-pub fn namesRole(ref: []const u8, role: []const u8) bool {
-    if (std.mem.eql(u8, ref, role)) return true;
-    if (std.mem.count(u8, ref, ".") < 2) return false;
-    const last = ref[std.mem.lastIndexOfScalar(u8, ref, '.').? + 1 ..];
-    return std.mem.eql(u8, last, role);
 }
 
 fn lessPosition(_: void, x: Occurrence, y: Occurrence) bool {
@@ -196,7 +180,7 @@ test "reachable definitions exclude unrelated roles" {
         try file(a, "/w/playbooks/vars/prod.yml", "port: 8080\n"),
         try file(a, "/w/playbooks/other.yml", "- hosts: all\n  vars:\n    port: 1\n"),
     };
-    const reach = try reachableFiles(a, &files, "/w/roles/db/tasks/main.yml", "/w/roles/db");
+    const reach = try reachableFiles(a, &files, "/w/roles/db/tasks/main.yml", "/w/roles/db", &.{"/w/playbooks/site.yml"});
     const defs = try definitions(a, &files, "port", reach);
     try testing.expectEqual(@as(usize, 4), defs.len);
     // play vars_files (rank below role defaults) comes first among reachable.
@@ -215,7 +199,7 @@ test "a playbook reaches itself and its vars files" {
         try file(a, "/w/extra.yml", "x: 1\n"),
         try file(a, "/w/unrelated.yml", "x: 2\n"),
     };
-    const reach = try reachableFiles(a, &files, "/w/site.yml", null);
+    const reach = try reachableFiles(a, &files, "/w/site.yml", null, &.{});
     try testing.expectEqual(@as(usize, 2), reach.len);
     try testing.expectEqualStrings("/w/extra.yml", reach[1]);
 }
@@ -228,15 +212,8 @@ test "a task file outside a role reaches the playbooks that include it" {
         try file(a, "/nowhere-zals/site.yml", "- hosts: all\n  vars:\n    user: bob\n  tasks:\n    - include_tasks: tasks/common.yml\n"),
         try file(a, "/nowhere-zals/tasks/common.yml", "- debug: msg=\"{{ user }}\"\n"),
     };
-    const reach = try reachableFiles(a, &files, "/nowhere-zals/tasks/common.yml", null);
+    const reach = try reachableFiles(a, &files, "/nowhere-zals/tasks/common.yml", null, &.{});
     const defs = try definitions(a, &files, "user", reach);
     try testing.expectEqual(@as(usize, 1), defs.len);
     try testing.expect(defs[0].reachable);
-}
-
-test "FQCN reference names a collection role" {
-    try testing.expect(namesRole("acme.web.nginx", "nginx"));
-    try testing.expect(namesRole("nginx", "nginx"));
-    try testing.expect(!namesRole("geerlingguy.nginx", "nginx"));
-    try testing.expect(namesRole("geerlingguy.nginx", "geerlingguy.nginx"));
 }

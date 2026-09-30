@@ -63,7 +63,7 @@ fn variableDefinition(self: *Server, a: Allocator, params: std.json.Value) !?[]c
     if (try wv.View.forUri(self, a, uri)) |found| {
         var v = found;
         const path = try paths.uriToPath(a, uri);
-        const reach = try wv.view.reachableFiles(a, v.files, path, roles.resolve.enclosingRole(path));
+        const reach = try v.reachableFiles(path);
         const wdefs = try wv.view.definitions(a, v.files, cur.name, reach);
         if (wdefs.len == 0) return null;
         var wlocs = std.array_list.Managed(types.Location).init(a);
