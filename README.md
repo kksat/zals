@@ -132,7 +132,9 @@ separate CI jobs.
 zals --stdio
 ```
 
-Point any LSP client at the binary with `ansible` as the document language.
+Point your LSP client at the binary and attach it to Ansible source buffers.
+For Neovim, see the [filetype and LSP setup](docs/neovim.md), including
+`requirements.yml`, collection metadata, and Jinja templates.
 
 ## Releasing
 
