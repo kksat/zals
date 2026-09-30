@@ -83,4 +83,32 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_mod_tests.step);
     test_step.dependOn(&run_exe_tests.step);
+
+    // Separate, black-box navigation suite. Build zals, then run one Zig test
+    // process against the checked-in Workspace; do not mix it into `test`.
+    const e2e_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("test/e2e.zig"),
+        .target = target,
+        .optimize = optimize,
+    }) });
+    const run_e2e = b.addRunArtifact(e2e_tests);
+    run_e2e.step.dependOn(b.getInstallStep());
+    run_e2e.setCwd(b.path("."));
+    // A cached success must never hide new or changed fixture references.
+    run_e2e.addFileInput(exe.getEmittedBin());
+    addE2eInputs(b, run_e2e, "test/fixtures/e2e-workspace");
+    addE2eInputs(b, run_e2e, "test/dependencies");
+    const e2e_step = b.step("e2e", "Run navigation end-to-end tests");
+    e2e_step.dependOn(&run_e2e.step);
+}
+
+fn addE2eInputs(b: *std.Build, run: *std.Build.Step.Run, path: []const u8) void {
+    var dir = std.fs.cwd().openDir(path, .{ .iterate = true }) catch @panic("missing E2E fixture directory");
+    defer dir.close();
+    var walker = dir.walk(b.allocator) catch @panic("cannot walk E2E fixtures");
+    defer walker.deinit();
+    while (walker.next() catch @panic("cannot read E2E fixture")) |entry| {
+        if (entry.kind != .file) continue;
+        run.addFileInput(b.path(b.fmt("{s}/{s}", .{ path, entry.path })));
+    }
 }

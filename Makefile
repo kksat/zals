@@ -13,13 +13,16 @@ endif
 
 ARGS ?=
 
-.PHONY: build test run fmt clean parity smoke
+.PHONY: build test e2e run fmt clean parity smoke
 
 build:
 	zig build
 
 test:
 	zig build test
+
+e2e:
+	zig build e2e
 
 # Compare zals against the upstream Ansible Language Server. Requires the
 # upstream package (see test/parity/compare.py) and a built zals binary.
@@ -38,7 +41,7 @@ run: build
 	./zig-out/bin/zals $(ARGS)
 
 fmt:
-	zig fmt src build.zig
+	zig fmt src build.zig test/e2e.zig test/e2e
 
 clean:
 	rm -rf zig-out .zig-cache
