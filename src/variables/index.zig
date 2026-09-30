@@ -194,8 +194,7 @@ pub const Index = struct {
             const text = (try self.source.read(a, u)) orelse continue;
             var forest = yaml.parse(a, text) catch continue;
             defer forest.deinit();
-            const base_dir = std.fs.path.dirname(p) orelse ".";
-            const targets = try scope.varFileLoads(a, &forest, base_dir);
+            const targets = try scope.varFileLoads(a, &forest, p, null);
             for (targets) |load| {
                 try loads.append(load);
                 const target_uri = try scope.pathToUri(a, load.path);

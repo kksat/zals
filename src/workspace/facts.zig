@@ -76,8 +76,7 @@ pub fn extractIn(a: Allocator, root: ?[]const u8, path: []const u8, text: []cons
 
     const sym = symbols.collect(a, &forest, path) catch symbols.Result{};
 
-    const base_dir = std.fs.path.dirname(path) orelse ".";
-    const var_loads = variables.scope.varFileLoads(a, &forest, base_dir) catch &.{};
+    const var_loads = variables.scope.varFileLoads(a, &forest, path, root) catch &.{};
 
     return .{
         .var_defs = try defs.toOwnedSlice(),
