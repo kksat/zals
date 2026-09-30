@@ -99,6 +99,8 @@ release page and put `zals` on your `PATH`.
 ```sh
 make build           # build the server into zig-out/bin/zals
 make test            # run unit tests
+make e2e             # run Zig navigation E2E tests against the fixture Workspace
+make smoke           # run the existing stdio smoke tests
 make run ARGS=--version
 ```
 
@@ -107,7 +109,13 @@ Or invoke Zig directly:
 ```sh
 zig build
 zig build test
+zig build e2e
 ```
+
+The [navigation E2E suite](test/e2e/README.md) uses a static Ansible Workspace
+and an explicitly written location oracle; it needs no Galaxy installation,
+virtual environment, or Ansible execution. Unit, E2E, and smoke targets run in
+separate CI jobs.
 
 > **macOS 26 + Xcode 26.5 SDK:** Zig 0.15.1's bundled lld fails to link against
 > the SDK's `libSystem.B.tbd` (it lists `arm64e-macos` but not `arm64-macos`),
