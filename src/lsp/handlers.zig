@@ -107,6 +107,9 @@ fn emptyCompletion(a: Allocator) !Value {
 
 fn completionResult(self: *Server, a: Allocator, params: Value) !Value {
     const loc = documentOffset(self, params) orelse return emptyCompletion(a);
+    if (try providers.collections.completion(self, a, params)) |items| {
+        return encode.completionList(a, .{ .items = items });
+    }
     var opened = cursor.Doc.open(a, loc.doc.bytes()) catch return emptyCompletion(a);
     defer opened.deinit();
     const lookup = cursor.fromLibrary(&self.docs);
@@ -131,6 +134,7 @@ fn hoverResult(self: *Server, a: Allocator, params: Value) !Value {
     var opened = cursor.Doc.open(a, loc.doc.bytes()) catch return Value.null;
     defer opened.deinit();
     const cur = try opened.at(loc.doc.uri, loc.offset, cursor.fromLibrary(&self.docs));
+    if (try providers.collections.hover(self, a, params)) |h| return encode.hover(a, h);
     if (cur) |c| switch (c) {
         .role_reference => return encode.hover(a, try providers.role_navigation.hover(self, a, params)),
         else => {},

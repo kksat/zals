@@ -39,6 +39,21 @@ FILES = {
         "        name: db\n"
     ),
     "roles/requirements.yml": "roles:\n  - name: geerlingguy.nginx\n",
+    "collections/requirements.yml": "collections:\n  - name: acme.web\n  - community.general\n",
+    "collections/ansible_collections/acme/web/galaxy.yml": "namespace: acme\nname: web\nversion: 1.0.0\n",
+    "collections/ansible_collections/acme/web/README.md": "# acme.web collection\n",
+    "collections/ansible_collections/acme/web/roles/nginx/tasks/main.yml": "- debug: msg=nginx\n",
+    ".venv/lib/python3.12/site-packages/ansible_collections/community/general/MANIFEST.json":
+        '{"collection_info": {"namespace": "community", "name": "general"}}\n',
+    ".venv-old/lib/python3.12/site-packages/ansible_collections/old/stuff/MANIFEST.json": "{}\n",
+    "playbooks/collections.yml": (
+        "- name: Collections\n"
+        "  hosts: all\n"
+        "  collections:\n"
+        "    - community.general\n"
+        "  roles:\n"
+        "    - acme.web.nginx\n"
+    ),
     "galaxy_roles/geerlingguy.nginx/README.md": "# nginx from Galaxy\n",
     "galaxy_roles/geerlingguy.nginx/tasks/main.yml": "- debug: msg=hi\n",
     "roles/db/meta/argument_specs.yml": (
@@ -98,8 +113,10 @@ def frame(obj):
 
 class Client:
     def __init__(self, root):
+        # Keep the machine's installed collections out of the checks.
+        env = dict(os.environ, ANSIBLE_COLLECTIONS_PATH=os.path.join(root, "no-such-collections"))
         self.proc = subprocess.Popen([BIN, "--stdio"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                     stderr=subprocess.DEVNULL)
+                                     stderr=subprocess.DEVNULL, env=env)
         self.next_id = 1
         self.notifications = []
         self.root = root
@@ -263,6 +280,28 @@ def main():
         hov = c.request("textDocument/hover", at_greet)
         check("a task file reaches the playbook that includes it",
               hov and "**Active:** `hello` — `playbooks/greet.yml" in hov["contents"]["value"], str(hov))
+
+        cols, cols_text = c.open("playbooks/collections.yml")
+        at_cg = {"textDocument": {"uri": uri(cols)}, "position": pos(cols_text, "community.general")}
+        defs = [rel(root, l) for l in as_list(c.request("textDocument/definition", at_cg))]
+        check("installed collection definition opens MANIFEST.json from the selected venv",
+              defs == [".venv/lib/python3.12/site-packages/ansible_collections/community/general/MANIFEST.json"],
+              str(defs))
+        at_aw = {"textDocument": {"uri": uri(cols)}, "position": pos(cols_text, "acme.web.nginx")}
+        hov = c.request("textDocument/hover", at_aw)
+        check("collection hover shows README", hov and "acme.web collection" in hov["contents"]["value"], str(hov))
+        refs = sorted(rel(root, l) for l in as_list(c.request("textDocument/references",
+                                                               dict(at_aw, context={"includeDeclaration": True}))))
+        check("collection references span the Workspace",
+              refs == ["collections/requirements.yml", "playbooks/collections.yml"], str(refs))
+        at_role = {"textDocument": {"uri": uri(cols)}, "position": pos(cols_text, "nginx")}
+        impl = [rel(root, l) for l in as_list(c.request("textDocument/implementation", at_role))]
+        check("FQCN role resolves into a Workspace collection",
+              impl == ["collections/ansible_collections/acme/web/roles/nginx/tasks/main.yml"], str(impl))
+        comp = c.request("textDocument/completion", at_cg)
+        labels = sorted(i["label"] for i in (comp or {}).get("items", []))
+        check("collection completion lists Workspace and venv collections, not other venvs",
+              labels == ["acme.web", "community.general"], str(labels))
 
         params, params_text = c.open("playbooks/params.yml")
         hov = c.request("textDocument/hover", {"textDocument": {"uri": uri(params)},

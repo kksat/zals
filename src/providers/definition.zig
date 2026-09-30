@@ -32,6 +32,11 @@ pub fn definition(self: *Server, a: Allocator, params: std.json.Value) !Result {
         .none => return .none,
         .location => |loc| return .{ .location = loc },
     }
+    switch (try @import("collections.zig").definition(self, a, params)) {
+        // An unresolved FQCN prefix still lets the module or role resolve.
+        .skip, .none => {},
+        .location => |loc| return .{ .location = loc },
+    }
     switch (try roleDefinition(self, a, params)) {
         .skip => {},
         .none => return .none,
