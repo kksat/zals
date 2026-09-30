@@ -8,7 +8,9 @@ another and share variables and task files.
 
 `example.shared` is a second Workspace collection. `fixture.metrics` lives in
 `test/dependencies/ansible_collections/` outside this Workspace but on the
-configured collections path. `fixture.missing` is deliberately absent.
+configured collections path. `fixture.missing` is deliberately absent;
+`fixture.notes` is a README-only path stub for definition fallback, not a
+Galaxy-installed collection.
 `roles/deploy` deliberately collides with `example.rollout.roles/deploy`; the
 playbooks select different targets according to their collection context.
 `ops/roles/check` and `services/roles/check` exercise ambiguous editor fallback.

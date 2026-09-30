@@ -4,6 +4,7 @@
   gather_facts: false
   collections:
     - fixture.missing
+    - fixture.notes
   tasks:
     - name: The module key names a collection that is absent
       fixture.missing.fake_module:
