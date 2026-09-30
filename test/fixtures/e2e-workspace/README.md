@@ -13,6 +13,8 @@ configured collections path. `fixture.missing` is deliberately absent;
 Galaxy-installed collection.
 `roles/deploy` deliberately collides with `example.rollout.roles/deploy`; the
 playbooks select different targets according to their collection context.
+`playbooks/collection-overrides.yml` contrasts play, task, and block
+collection declarations for the two `notify` Roles.
 `ops/roles/check` and `services/roles/check` exercise ambiguous editor fallback.
 The `metadata_only` Role deliberately has metadata but no main task file.
 

@@ -20,6 +20,7 @@ const notes_readme = "@deps/ansible_collections/fixture/notes/README.md";
 // Complete Workspace reference groups, written independently of zals. FQCN
 // sites select the namespace.collection prefix, not the role or module suffix.
 const rollout_refs: []const m.ExpectedLocation = &.{
+    m.span("playbooks/collection-overrides.yml", "collections:\n    - <example.rollout>\n  tasks:"),
     m.span(nonstandard, "name: <example.rollout>.notify"),
     m.span(rollback, "- <example.rollout>.rollback"),
     m.span(rollback, "name: <example.rollout>.snapshot"),
@@ -34,6 +35,8 @@ const rollout_refs: []const m.ExpectedLocation = &.{
     m.span(rollback_tasks, "name: <example.rollout>.snapshot"),
 };
 const shared_refs: []const m.ExpectedLocation = &.{
+    m.span("playbooks/collection-overrides.yml", "Notify with a task collection override\n      collections:\n        - <example.shared>"),
+    m.span("playbooks/collection-overrides.yml", "Notify with a block collection override\n      collections:\n        - <example.shared>"),
     m.span(req, "name: <example.shared>"),
     m.span(galaxy, "  <example.shared>: \">=1.0.0\""),
     m.span(preflight_meta, "  - <example.shared>\ndependencies:"),

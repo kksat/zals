@@ -1,0 +1,24 @@
+---
+- name: Choose a notifier in each collection context
+  hosts: localhost
+  gather_facts: false
+  collections:
+    - example.rollout
+  tasks:
+    - name: Notify with the play collection
+      ansible.builtin.include_role:
+        name: notify
+
+    - name: Notify with a task collection override
+      collections:
+        - example.shared
+      ansible.builtin.include_role:
+        name: notify
+
+    - name: Notify with a block collection override
+      collections:
+        - example.shared
+      block:
+        - name: Import the shared notifier
+          ansible.builtin.import_role:
+            name: notify

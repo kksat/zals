@@ -28,11 +28,14 @@ const snapshot_refs = &[_]m.ExpectedLocation{
 const rollout_notify_refs = &[_]m.ExpectedLocation{
     m.span("playbooks/rollout.yml", "include_role: name=<notify>"),
     m.span("negative/nonstandard-paths.yml", "    - name: <example.rollout.notify>"),
+    m.span("playbooks/collection-overrides.yml", "Notify with the play collection\n      ansible.builtin.include_role:\n        name: <notify>"),
 };
 const shared_notify_refs = &[_]m.ExpectedLocation{
     m.span("ansible_collections/example/rollout/roles/preflight/meta/main.yml", "  - role: <example.shared.notify>"),
     m.span("ansible_collections/example/rollout/roles/notify/tasks/main.yml", "    name: <example.shared.notify>"),
     m.span("playbooks/rollback.yml", "        name: <example.shared.notify>"),
+    m.span("playbooks/collection-overrides.yml", "Notify with a task collection override\n      collections:\n        - example.shared\n      ansible.builtin.include_role:\n        name: <notify>"),
+    m.span("playbooks/collection-overrides.yml", "- name: Import the shared notifier\n          ansible.builtin.import_role:\n            name: <notify>"),
 };
 const installed_report_refs = &[_]m.ExpectedLocation{
     m.span("playbooks/dependency.yml", "    - <fixture.metrics.report>"),
@@ -300,6 +303,60 @@ pub const all = [_]m.Case{
         .method = .references,
         .from = m.cursor("playbooks/rollout.yml", "include_role: name=<notify>"),
         .expected = rollout_notify_refs,
+    },
+    .{
+        .name = "role/play collection: short notifier definition selects rollout",
+        .method = .definition,
+        .from = m.cursor("playbooks/collection-overrides.yml", "Notify with the play collection\n      ansible.builtin.include_role:\n        name: <notify>"),
+        .expected = &.{m.fileStart("ansible_collections/example/rollout/roles/notify/tasks/main.yml")},
+    },
+    .{
+        .name = "role/play collection: short notifier implementation selects rollout",
+        .method = .implementation,
+        .from = m.cursor("playbooks/collection-overrides.yml", "Notify with the play collection\n      ansible.builtin.include_role:\n        name: <notify>"),
+        .expected = &.{m.fileStart("ansible_collections/example/rollout/roles/notify/tasks/main.yml")},
+    },
+    .{
+        .name = "role/play collection: references exclude task/block overrides",
+        .method = .references,
+        .from = m.cursor("playbooks/collection-overrides.yml", "Notify with the play collection\n      ansible.builtin.include_role:\n        name: <notify>"),
+        .expected = rollout_notify_refs,
+    },
+    .{
+        .name = "role/task collection overrides play: definition selects shared notifier",
+        .method = .definition,
+        .from = m.cursor("playbooks/collection-overrides.yml", "Notify with a task collection override\n      collections:\n        - example.shared\n      ansible.builtin.include_role:\n        name: <notify>"),
+        .expected = &.{m.fileStart("ansible_collections/example/shared/roles/notify/tasks/main.yml")},
+    },
+    .{
+        .name = "role/task collection overrides play: implementation selects shared notifier",
+        .method = .implementation,
+        .from = m.cursor("playbooks/collection-overrides.yml", "Notify with a task collection override\n      collections:\n        - example.shared\n      ansible.builtin.include_role:\n        name: <notify>"),
+        .expected = &.{m.fileStart("ansible_collections/example/shared/roles/notify/tasks/main.yml")},
+    },
+    .{
+        .name = "role/task collection overrides play: references join shared FQCN aliases",
+        .method = .references,
+        .from = m.cursor("playbooks/collection-overrides.yml", "Notify with a task collection override\n      collections:\n        - example.shared\n      ansible.builtin.include_role:\n        name: <notify>"),
+        .expected = shared_notify_refs,
+    },
+    .{
+        .name = "role/block collection overrides play: definition selects shared notifier",
+        .method = .definition,
+        .from = m.cursor("playbooks/collection-overrides.yml", "- name: Import the shared notifier\n          ansible.builtin.import_role:\n            name: <notify>"),
+        .expected = &.{m.fileStart("ansible_collections/example/shared/roles/notify/tasks/main.yml")},
+    },
+    .{
+        .name = "role/block collection overrides play: implementation selects shared notifier",
+        .method = .implementation,
+        .from = m.cursor("playbooks/collection-overrides.yml", "- name: Import the shared notifier\n          ansible.builtin.import_role:\n            name: <notify>"),
+        .expected = &.{m.fileStart("ansible_collections/example/shared/roles/notify/tasks/main.yml")},
+    },
+    .{
+        .name = "role/block collection overrides play: references exclude rollout notify",
+        .method = .references,
+        .from = m.cursor("playbooks/collection-overrides.yml", "- name: Import the shared notifier\n          ansible.builtin.import_role:\n            name: <notify>"),
+        .expected = shared_notify_refs,
     },
     .{
         .name = "role/dependency role map: shared notify definition",
