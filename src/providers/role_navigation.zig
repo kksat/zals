@@ -159,21 +159,26 @@ fn roleArg(args: *yaml.Node, field: []const u8) ?[]const u8 {
 }
 
 /// Hover on a Role parameter: the unrendered option from the role's argument
-/// specs. Null when the cursor is not on one, or the option is not specified.
+/// specs, else the variable hover for that name. Null when the cursor is not
+/// on a Role parameter.
 pub fn parameterHover(self: *Server, a: Allocator, params: Value) !?types.Hover {
     var cur = util.parseAt(self, a, params) orelse return null;
     defer cur.forest.deinit();
     const param = parameterAt(cur.path) orelse return null;
     const path = try paths.uriToPath(a, cur.doc.uri);
     const collections = yaml.collections.getDeclaredCollections(cur.forest.allocator(), cur.path) catch &.{};
-    const dir = util.resolveRole(self, a, param.role, path, collections) orelse return null;
-    const spec = (try optionSpec(a, dir, param.entry_point, param.name)) orelse return null;
+    const range = cur.doc.rangeFromOffsets(param.start, param.end);
+    const name = try a.dupe(u8, param.name);
+    const spec = blk: {
+        const dir = util.resolveRole(self, a, param.role, path, collections) orelse break :blk null;
+        break :blk try optionSpec(a, dir, param.entry_point, param.name);
+    } orelse return @import("variable_hover.zig").hoverName(self, a, cur.doc.uri, name, range);
     const text = try std.fmt.allocPrint(
         a,
         "**Role parameter** `{s}` — role `{s}` (`meta/{s}`, entry point `{s}`)\n\n```yaml\n{s}\n```",
         .{ param.name, param.role, spec.file, param.entry_point, spec.yaml },
     );
-    return markdown(cur.doc.rangeFromOffsets(param.start, param.end), text);
+    return markdown(range, text);
 }
 
 pub const OptionSpec = struct { file: []const u8, yaml: []const u8 };

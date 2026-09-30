@@ -136,6 +136,10 @@ fn hoverResult(self: *Server, a: Allocator, params: Value) !Value {
         else => {},
     };
     if (try providers.role_navigation.parameterHover(self, a, params)) |h| return encode.hover(a, h);
+    if (cur) |c| switch (c) {
+        .variable => return encode.hover(a, try providers.variable_hover.hover(self, a, params)),
+        else => {},
+    };
     return encode.hover(a, try providers.hover.format(a, loc.doc, cur));
 }
 

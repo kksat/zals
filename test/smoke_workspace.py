@@ -226,6 +226,14 @@ def main():
         check("requirements entries are role references",
               files == ["playbooks/other.yml", "roles/requirements.yml"], str(files))
 
+        hov = c.request("textDocument/hover", at)
+        value = hov["contents"]["value"] if hov else ""
+        check("variable hover shows the active definition",
+              "**Active:** `8080` — `playbooks/vars/prod.yml:1`" in value, value)
+        check("variable hover lists shadowed definitions", "`5432` — `roles/db/defaults/main.yml:1`" in value, value)
+        check("variable hover lists the rest of the Workspace",
+              "**Elsewhere in the Workspace:**\n- `80` — `roles/web/defaults/main.yml:1`" in value, value)
+
         params, params_text = c.open("playbooks/params.yml")
         hov = c.request("textDocument/hover", {"textDocument": {"uri": uri(params)},
                                                "position": pos(params_text, "app_port")})
