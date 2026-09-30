@@ -1,3 +1,4 @@
 ---
 runtime_label: smoke-test
 rollout_channel: active
+root_loaded_flag: true

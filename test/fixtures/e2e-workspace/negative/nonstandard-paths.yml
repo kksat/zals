@@ -2,9 +2,14 @@
 - name: Exercise editor-supported path forms
   hosts: localhost
   gather_facts: false
+  vars:
+    root_loaded_flag: false
   vars_files: playbooks/vars/release.yml
   roles:
     - name: example.rollout.notify
   tasks:
     - name: Load a vars file by key-value argument
       ansible.builtin.include_vars: file=playbooks/vars/runtime.yml
+    - name: Read a variable loaded from the Workspace root
+      ansible.builtin.debug:
+        msg: "{{ root_loaded_flag }}"

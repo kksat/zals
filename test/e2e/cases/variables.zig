@@ -777,4 +777,31 @@ pub const all = [_]m.Case{
             m.span(release, "<rollout_channel>: planned"),
         },
     },
+    .{
+        .name = "variable/include_vars file= Workspace-root fallback outranks play vars",
+        .method = .definition,
+        .from = m.cursor("negative/nonstandard-paths.yml", "msg: \"{{ <root_loaded_flag> }}\""),
+        .expected = &.{
+            m.span(runtime, "<root_loaded_flag>: true"),
+            m.span("negative/nonstandard-paths.yml", "<root_loaded_flag>: false"),
+        },
+    },
+    .{
+        .name = "variable/include_vars file= root fallback: references without declarations",
+        .method = .references,
+        .from = m.cursor("negative/nonstandard-paths.yml", "msg: \"{{ <root_loaded_flag> }}\""),
+        .include_declaration = false,
+        .expected = &.{m.span("negative/nonstandard-paths.yml", "msg: \"{{ <root_loaded_flag> }}\"")},
+    },
+    .{
+        .name = "variable/include_vars file= root fallback: references with both declarations",
+        .method = .references,
+        .from = m.cursor("negative/nonstandard-paths.yml", "msg: \"{{ <root_loaded_flag> }}\""),
+        .include_declaration = true,
+        .expected = &.{
+            m.span("negative/nonstandard-paths.yml", "msg: \"{{ <root_loaded_flag> }}\""),
+            m.span(runtime, "<root_loaded_flag>: true"),
+            m.span("negative/nonstandard-paths.yml", "<root_loaded_flag>: false"),
+        },
+    },
 };
