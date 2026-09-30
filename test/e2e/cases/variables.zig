@@ -804,4 +804,50 @@ pub const all = [_]m.Case{
             m.span("negative/nonstandard-paths.yml", "<root_loaded_flag>: false"),
         },
     },
+    .{
+        .name = "variable/bare when in Role: deployment_enabled default definition",
+        .method = .definition,
+        .from = m.cursor(pf_tasks, "when: <deployment_enabled> | bool"),
+        .expected = &.{m.span(pf_defaults, "<deployment_enabled>: true")},
+    },
+    .{
+        .name = "variable/bare when in Role: deployment_enabled reads without declarations",
+        .method = .references,
+        .from = m.cursor(pf_tasks, "when: <deployment_enabled> | bool"),
+        .include_declaration = false,
+        .expected = &.{m.span(pf_tasks, "when: <deployment_enabled> | bool")},
+    },
+    .{
+        .name = "variable/bare when in Role: deployment_enabled reads with declaration",
+        .method = .references,
+        .from = m.cursor(pf_tasks, "when: <deployment_enabled> | bool"),
+        .include_declaration = true,
+        .expected = &.{
+            m.span(pf_tasks, "when: <deployment_enabled> | bool"),
+            m.span(pf_defaults, "<deployment_enabled>: true"),
+        },
+    },
+    .{
+        .name = "variable/Jinja-valued role name: dynamic_role resolves as a play var",
+        .method = .definition,
+        .from = m.cursor("negative/roles.yml", "name: \"{{ <dynamic_role> }}\""),
+        .expected = &.{m.span("negative/roles.yml", "<dynamic_role>: example.rollout.deploy")},
+    },
+    .{
+        .name = "variable/Jinja-valued role name: dynamic_role reads without declaration",
+        .method = .references,
+        .from = m.cursor("negative/roles.yml", "name: \"{{ <dynamic_role> }}\""),
+        .include_declaration = false,
+        .expected = &.{m.span("negative/roles.yml", "name: \"{{ <dynamic_role> }}\"")},
+    },
+    .{
+        .name = "variable/Jinja-valued role name: dynamic_role reads with declaration",
+        .method = .references,
+        .from = m.cursor("negative/roles.yml", "name: \"{{ <dynamic_role> }}\""),
+        .include_declaration = true,
+        .expected = &.{
+            m.span("negative/roles.yml", "name: \"{{ <dynamic_role> }}\""),
+            m.span("negative/roles.yml", "<dynamic_role>: example.rollout.deploy"),
+        },
+    },
 };

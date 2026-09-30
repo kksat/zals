@@ -598,4 +598,22 @@ pub const all = [_]m.Case{
         .from = m.cursor("negative/roles.yml", "    - <metadata_only>"),
         .expected = &.{m.span("negative/roles.yml", "    - <metadata_only>")},
     },
+    .{
+        .name = "role/rollback play: definition opens the rollback main task file",
+        .method = .definition,
+        .from = m.cursor("playbooks/rollback.yml", "    - <example.rollout.rollback>"),
+        .expected = &.{m.fileStart("ansible_collections/example/rollout/roles/rollback/tasks/main.yml")},
+    },
+    .{
+        .name = "role/rollback play: implementation opens the rollback main task file",
+        .method = .implementation,
+        .from = m.cursor("playbooks/rollback.yml", "    - <example.rollout.rollback>"),
+        .expected = &.{m.fileStart("ansible_collections/example/rollout/roles/rollback/tasks/main.yml")},
+    },
+    .{
+        .name = "role/rollback play: references include its sole invocation",
+        .method = .references,
+        .from = m.cursor("playbooks/rollback.yml", "    - <example.rollout.rollback>"),
+        .expected = &.{m.span("playbooks/rollback.yml", "    - <example.rollout.rollback>")},
+    },
 };
