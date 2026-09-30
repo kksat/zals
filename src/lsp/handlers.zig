@@ -34,6 +34,8 @@ pub fn handleRequest(self: *Server, a: Allocator, id: Value, method: []const u8,
         return self.sendResult(a, id, try semanticResult(self, a, params));
     if (std.mem.eql(u8, method, "textDocument/documentSymbol"))
         return self.sendResult(a, id, try providers.document_symbols.documentSymbol(self, a, params));
+    if (std.mem.eql(u8, method, "workspace/symbol"))
+        return self.sendResult(a, id, try providers.workspace_symbols.workspaceSymbol(self, a, params));
     if (std.mem.eql(u8, method, "textDocument/codeAction"))
         return self.sendResult(a, id, try providers.code_actions.codeActions(self, a, params));
     if (std.mem.eql(u8, method, "ansible/refreshConfiguration")) {

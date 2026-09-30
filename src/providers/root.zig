@@ -11,6 +11,7 @@ pub const role_navigation = @import("role_navigation.zig");
 pub const variable_hover = @import("variable_hover.zig");
 pub const file_navigation = @import("file_navigation.zig");
 pub const collections = @import("collections.zig");
+pub const workspace_symbols = @import("workspace_symbols.zig");
 pub const workspace_view = @import("workspace_view.zig");
 
 test {

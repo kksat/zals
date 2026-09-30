@@ -303,6 +303,22 @@ def main():
         check("collection completion lists Workspace and venv collections, not other venvs",
               labels == ["acme.web", "community.general"], str(labels))
 
+        syms = c.request("workspace/symbol", {"query": "nginx"}) or []
+        got = sorted((s_["name"], s_["kind"], s_.get("containerName", "")) for s_ in syms)
+        check("workspace symbols include collection roles and exclude installed collections",
+              ("nginx", 2, "acme.web") in got and all("general" not in n for n, _, _ in got), str(got))
+        syms = c.request("workspace/symbol", {"query": "install"}) or []
+        got = sorted((s_["name"], s_["kind"], s_.get("containerName", "")) for s_ in syms)
+        check("task files carry their role as container", ("install.yml", 1, "app") in got, str(got))
+        syms = c.request("workspace/symbol", {"query": "greet"}) or []
+        got = sorted((s_["name"], s_["kind"], s_.get("containerName", "")) for s_ in syms)
+        check("plays, tasks, and playbooks are symbols",
+              ("Greet", 3, "playbooks/greet.yml") in got and ("Greet", 12, "playbooks/tasks/common.yml") in got
+              and ("playbooks/greet.yml", 1, "") in got, str(got))
+        syms = c.request("workspace/symbol", {"query": "acme"}) or []
+        got = sorted((s_["name"], s_["kind"]) for s_ in syms)
+        check("Workspace collections are package symbols", ("acme.web", 4) in got, str(got))
+
         params, params_text = c.open("playbooks/params.yml")
         hov = c.request("textDocument/hover", {"textDocument": {"uri": uri(params)},
                                                "position": pos(params_text, "app_port")})

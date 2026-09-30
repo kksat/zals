@@ -11,6 +11,7 @@ const variables = @import("../variables/root.zig");
 const role_reference = @import("../roles/reference.zig");
 const file_refs = @import("file_refs.zig");
 const collection_refs = @import("collection_refs.zig");
+pub const symbols = @import("symbols.zig");
 pub const FileRef = file_refs.FileRef;
 const Node = yaml.Node;
 
@@ -35,6 +36,10 @@ pub const Facts = struct {
     file_refs: []const FileRef = &.{},
     /// Collection references; `name` is `namespace.collection`.
     collection_refs: []const Span = &.{},
+    /// Playbook, task file, or neither.
+    shape: symbols.Shape = .other,
+    /// Named plays, tasks, and handlers.
+    symbols: []const symbols.Symbol = &.{},
 };
 
 /// Facts for the file at `path` with contents `text`.
@@ -60,6 +65,8 @@ pub fn extractIn(a: Allocator, root: ?[]const u8, path: []const u8, text: []cons
     var role_refs = std.array_list.Managed(Span).init(a);
     for (forest.roots) |r| try walkRoleRefs(a, r, forest.text, &role_refs);
 
+    const sym = symbols.collect(a, &forest, path) catch symbols.Result{};
+
     const base_dir = std.fs.path.dirname(path) orelse ".";
     const targets = variables.scope.varFileTargets(a, &forest, base_dir) catch &.{};
     const vars_targets = try a.alloc([]const u8, targets.len);
@@ -72,6 +79,8 @@ pub fn extractIn(a: Allocator, root: ?[]const u8, path: []const u8, text: []cons
         .vars_targets = vars_targets,
         .file_refs = file_refs.collect(a, &forest, path, root) catch &.{},
         .collection_refs = collectionSpans(a, &forest, path) catch &.{},
+        .shape = sym.shape,
+        .symbols = sym.symbols,
     };
 }
 

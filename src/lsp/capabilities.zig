@@ -54,6 +54,7 @@ pub fn build(a: Allocator, encoding: []const u8, workspace_folders: bool) !Value
     var doc_symbol = json_util.obj(a);
     try doc_symbol.put("label", json_util.str("zals"));
     try caps.put("documentSymbolProvider", .{ .object = doc_symbol });
+    try caps.put("workspaceSymbolProvider", json_util.booleanValue(true));
 
     var code_action = json_util.obj(a);
     var code_action_kinds = std.json.Array.init(a);
