@@ -88,7 +88,7 @@ fn roleDefinition(self: *Server, a: Allocator, params: std.json.Value) !RoleResu
     const arena = cur.forest.allocator();
     const ref = roles.reference.detect(cur.path, cur.forest.text) orelse return .skip;
     const path = try paths.uriToPath(a, cur.doc.uri);
-    const collections = yaml.collections.getDeclaredCollections(arena, cur.path) catch &.{};
+    const collections = yaml.collections.getRoleDeclaredCollections(arena, path, cur.path) catch &.{};
     var locs = std.array_list.Managed(types.Location).init(a);
     for (util.resolveRoleAll(self, a, ref.name, path, collections)) |dir| {
         const target = roles.targets.definitionTarget(a, dir) orelse continue;

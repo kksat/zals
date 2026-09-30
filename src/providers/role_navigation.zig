@@ -10,30 +10,52 @@ const yaml = @import("../yaml/root.zig");
 const roles = @import("../roles/root.zig");
 const paths = @import("../paths.zig");
 const wv = @import("workspace_view.zig");
+const RoleRef = @import("../workspace/facts.zig").RoleRef;
 
-/// Every Role reference in the Workspace that names the role under the
-/// cursor. Null when the cursor is not on a role reference.
+/// Every Role reference in the Workspace that can resolve to the same role
+/// directory as the cursor. Null when the cursor is not on a role reference.
 pub fn references(self: *Server, a: Allocator, params: Value) !?[]const types.Location {
     var cur = util.parseAt(self, a, params) orelse return null;
     defer cur.forest.deinit();
     const ref = roles.reference.detect(cur.path, cur.forest.text) orelse return null;
-    const name = try a.dupe(u8, ref.name);
+    const own = types.Location{ .uri = cur.doc.uri, .range = cur.doc.rangeFromOffsets(ref.start, ref.end) };
+    const path = try paths.uriToPath(a, cur.doc.uri);
+    const declared = try yaml.collections.getRoleDeclaredCollections(cur.forest.allocator(), path, cur.path);
+    const targets = util.resolveRoleAll(self, a, ref.name, path, declared);
+    // Unresolved references have no identity to share, even with another
+    // unresolved occurrence of the same spelling.
+    if (targets.len == 0) return try a.dupe(types.Location, &.{own});
 
-    var v = (try wv.View.forUri(self, a, cur.doc.uri)) orelse {
-        // No session Workspace: only this document.
-        const one = try a.alloc(types.Location, 1);
-        one[0] = .{ .uri = cur.doc.uri, .range = cur.doc.rangeFromOffsets(ref.start, ref.end) };
-        return one;
-    };
+    var v = (try wv.View.forUri(self, a, cur.doc.uri)) orelse return try a.dupe(types.Location, &.{own});
     var locs = std.array_list.Managed(types.Location).init(a);
+    try locs.append(own);
     for (v.files) |f| {
+        if (f.facts.role_refs.len == 0) continue;
+        // Build search paths once per file, not per reference. Facts already
+        // retain the collections visible at each site from the index/open doc.
+        const resolver = util.roleResolver(self, a, f.path, &.{});
         for (f.facts.role_refs) |r| {
-            if (!std.mem.eql(u8, r.name, name)) continue;
+            if (std.mem.eql(u8, f.uri, cur.doc.uri) and r.start == ref.start and r.end == ref.end) continue;
+            if (!roleRefMatches(resolver, f.path, r, targets)) continue;
             try locs.append(try v.location(f.uri, r.start, r.end));
         }
     }
     std.mem.sort(types.Location, locs.items, {}, lessLocation);
     return try locs.toOwnedSlice();
+}
+
+/// The file's search paths are shared; each site supplies its own collections.
+fn roleRefMatches(base: roles.Resolver, path: []const u8, ref: RoleRef, targets: []const []const u8) bool {
+    var resolver = base;
+    resolver.declared_collections = ref.declared_collections;
+    return overlaps(targets, resolver.resolveAll(ref.name, path));
+}
+
+fn overlaps(left: []const []const u8, right: []const []const u8) bool {
+    for (left) |x| for (right) |y| {
+        if (std.mem.eql(u8, x, y)) return true;
+    };
+    return false;
 }
 
 /// Hover on a role reference: the role's `README.md`, else its unrendered
@@ -45,7 +67,7 @@ pub fn hover(self: *Server, a: Allocator, params: Value) !?types.Hover {
     const ref = roles.reference.detect(cur.path, cur.forest.text) orelse return null;
     const name = try a.dupe(u8, ref.name);
     const path = try paths.uriToPath(a, cur.doc.uri);
-    const collections = yaml.collections.getDeclaredCollections(cur.forest.allocator(), cur.path) catch &.{};
+    const collections = yaml.collections.getRoleDeclaredCollections(cur.forest.allocator(), path, cur.path) catch &.{};
     const range = cur.doc.rangeFromOffsets(ref.start, ref.end);
 
     const dir = util.resolveRole(self, a, name, path, collections) orelse {
@@ -260,6 +282,132 @@ fn lessLocation(_: void, x: types.Location, y: types.Location) bool {
 }
 
 const testing = std.testing;
+
+fn testFacts(a: Allocator, path: []const u8, text: []const u8) ![]const RoleRef {
+    return (try @import("../workspace/facts.zig").extract(a, path, text)).role_refs;
+}
+
+test "role references distinguish same-name roles and join short/FQCN aliases" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.makePath("collections/ansible_collections/ns/one/roles/web/tasks");
+    try tmp.dir.makePath("collections/ansible_collections/ns/two/roles/web/tasks");
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const root = try tmp.dir.realpathAlloc(a, ".");
+    const cp = try std.fs.path.join(a, &.{ root, "collections" });
+    const path = try std.fs.path.join(a, &.{ root, "site.yml" });
+    const refs = try testFacts(a, path,
+        \\- hosts: all
+        \\  collections: [ns.one]
+        \\  roles: [web]
+        \\- hosts: all
+        \\  collections: [ns.two]
+        \\  roles: [web]
+        \\- hosts: all
+        \\  roles: [ns.one.web]
+        \\
+    );
+    try testing.expectEqual(@as(usize, 3), refs.len);
+    const base = roles.Resolver{ .allocator = a, .collections_paths = &.{cp}, .workspace_root = root };
+    var query = base;
+    query.declared_collections = refs[0].declared_collections;
+    const targets = query.resolveAll(refs[0].name, path);
+    try testing.expectEqual(@as(usize, 1), targets.len);
+    try testing.expect(roleRefMatches(base, path, refs[0], targets));
+    try testing.expect(!roleRefMatches(base, path, refs[1], targets));
+    try testing.expect(roleRefMatches(base, path, refs[2], targets));
+}
+
+test "requirements collections are install dependencies, not role resolution context" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.makePath("collections/ansible_collections/ns/one/roles/web/tasks");
+    try tmp.dir.makePath("roles/web/tasks");
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const root = try tmp.dir.realpathAlloc(a, ".");
+    const cp = try std.fs.path.join(a, &.{ root, "collections" });
+    const rp = try std.fs.path.join(a, &.{ root, "roles" });
+    const req_path = try std.fs.path.join(a, &.{ root, "requirements.yml" });
+    const play_path = try std.fs.path.join(a, &.{ root, "site.yml" });
+    const req = (try testFacts(a, req_path,
+        \\collections: [ns.one]
+        \\roles: [web]
+        \\
+    ))[0];
+    const play_refs = try testFacts(a, play_path,
+        \\- hosts: all
+        \\  collections: [ns.one]
+        \\  roles: [web]
+        \\- hosts: all
+        \\  roles: [web]
+        \\
+    );
+    try testing.expectEqual(@as(usize, 0), req.declared_collections.len);
+    const base = roles.Resolver{ .allocator = a, .roles_paths = &.{rp}, .collections_paths = &.{cp}, .workspace_root = root };
+    var query = base;
+    query.declared_collections = req.declared_collections;
+    const targets = query.resolveAll(req.name, req_path);
+    try testing.expectEqual(@as(usize, 1), targets.len);
+    try testing.expectEqualStrings(try std.fs.path.join(a, &.{ rp, "web" }), targets[0]);
+    try testing.expect(!roleRefMatches(base, play_path, play_refs[0], targets));
+    try testing.expect(roleRefMatches(base, play_path, play_refs[1], targets));
+}
+
+test "ambiguous fallback matches any shared target, not just first" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.makePath("apps/roles/db/tasks");
+    try tmp.dir.makePath("infra/roles/db/tasks");
+    try tmp.dir.makePath("apps/playbooks");
+    try tmp.dir.makePath("infra/playbooks");
+    try tmp.dir.makePath("other");
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const root = try tmp.dir.realpathAlloc(a, ".");
+    const apps = try std.fs.path.join(a, &.{ root, "apps", "roles" });
+    const infra = try std.fs.path.join(a, &.{ root, "infra", "roles" });
+    const unknown_path = try std.fs.path.join(a, &.{ root, "other", "site.yml" });
+    const apps_path = try std.fs.path.join(a, &.{ root, "apps", "playbooks", "site.yml" });
+    const infra_path = try std.fs.path.join(a, &.{ root, "infra", "playbooks", "site.yml" });
+    const base = roles.Resolver{ .allocator = a, .workspace_root = root, .workspace_roles_dirs = &.{ apps, infra } };
+    const ref = (try testFacts(a, unknown_path, "- hosts: all\n  roles: [db]\n"))[0];
+    const fallback = base.resolveAll(ref.name, unknown_path);
+    try testing.expectEqual(@as(usize, 2), fallback.len);
+    try testing.expect(roleRefMatches(base, apps_path, ref, fallback));
+    try testing.expect(roleRefMatches(base, infra_path, ref, fallback));
+    const apps_only = base.resolveAll(ref.name, apps_path);
+    try testing.expectEqual(@as(usize, 1), apps_only.len);
+    try testing.expect(!roleRefMatches(base, infra_path, ref, apps_only));
+}
+
+test "unresolved role reference returns only its own location" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const root = try tmp.dir.realpathAlloc(a, ".");
+    const path = try std.fs.path.join(a, &.{ root, "site.yml" });
+    const uri = try paths.pathToUri(a, path);
+    var server = try Server.init(testing.allocator, @import("../lsp/transport.zig").Transport.init(std.fs.File.stdin(), std.fs.File.stdout()));
+    defer server.deinit();
+    _ = try server.documents.open(uri, "ansible", 1, "- hosts: all\n  roles: [missing, missing]\n");
+    const params_text = try std.fmt.allocPrint(a, "{{\"textDocument\":{{\"uri\":\"{s}\"}},\"position\":{{\"line\":1,\"character\":11}}}}", .{uri});
+    const params = try std.json.parseFromSliceLeaky(Value, a, params_text, .{});
+    const locs = (try references(&server, a, params)).?;
+    try testing.expectEqual(@as(usize, 1), locs.len);
+    try testing.expectEqualStrings(uri, locs[0].uri);
+    try testing.expectEqual(@as(u32, 10), locs[0].range.start.character);
+    // Even an unresolved candidate may not join a resolved query.
+    const base = roles.Resolver{ .allocator = a };
+    const candidate = (try testFacts(a, path, "- hosts: all\n  roles: [missing]\n"))[0];
+    try testing.expect(!roleRefMatches(base, path, candidate, &.{"/some/role"}));
+}
 
 test "role card prefers README, then argument specs, then metadata" {
     var tmp = testing.tmpDir(.{});

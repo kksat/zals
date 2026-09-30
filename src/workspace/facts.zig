@@ -24,12 +24,20 @@ pub const Span = struct {
     end: usize,
 };
 
+/// A role invocation with the collections visible at this specific site.
+pub const RoleRef = struct {
+    name: []const u8,
+    start: usize,
+    end: usize,
+    declared_collections: []const []const u8 = &.{},
+};
+
 pub const Facts = struct {
     var_defs: []const Definition = &.{},
     var_refs: []const Span = &.{},
     /// Role references (role invocations, `include_role`/`import_role`
     /// names, role dependencies).
-    role_refs: []const Span = &.{},
+    role_refs: []const RoleRef = &.{},
     /// Absolute paths loaded by `vars_files` and `include_vars`.
     vars_targets: []const []const u8 = &.{},
     /// Task-file and vars-file references with their resolved targets.
@@ -62,8 +70,8 @@ pub fn extractIn(a: Allocator, root: ?[]const u8, path: []const u8, text: []cons
     const refs = try a.alloc(Span, idents.items.len);
     for (idents.items, 0..) |r, i| refs[i] = .{ .name = try a.dupe(u8, r.name), .start = r.start, .end = r.end };
 
-    var role_refs = std.array_list.Managed(Span).init(a);
-    for (forest.roots) |r| try walkRoleRefs(a, r, forest.text, &role_refs);
+    var role_refs = std.array_list.Managed(RoleRef).init(a);
+    for (forest.roots) |r| try walkRoleRefs(a, &forest, path, r, &role_refs);
 
     const sym = symbols.collect(a, &forest, path) catch symbols.Result{};
 
@@ -93,16 +101,24 @@ fn collectionSpans(a: Allocator, forest: *const yaml.Forest, path: []const u8) !
 
 /// Visit every scalar and keep those `roles.reference.detect` recognises, so
 /// the index and the cursor agree on what a role reference is.
-fn walkRoleRefs(a: Allocator, node: *Node, text: []const u8, out: *std.array_list.Managed(Span)) !void {
+fn walkRoleRefs(a: Allocator, forest: *yaml.Forest, file_path: []const u8, node: *Node, out: *std.array_list.Managed(RoleRef)) !void {
     switch (node.kind) {
         .scalar => {
-            const path = try ancestors(a, node);
-            if (role_reference.detect(path, text)) |ref| {
-                try out.append(.{ .name = try a.dupe(u8, ref.name), .start = ref.start, .end = ref.end });
+            const path = try ancestors(forest.allocator(), node);
+            if (role_reference.detect(path, forest.text)) |ref| {
+                const declared = try yaml.collections.getRoleDeclaredCollections(forest.allocator(), file_path, path);
+                const collections = try a.alloc([]const u8, declared.len);
+                for (declared, 0..) |name, i| collections[i] = try a.dupe(u8, name);
+                try out.append(.{
+                    .name = try a.dupe(u8, ref.name),
+                    .start = ref.start,
+                    .end = ref.end,
+                    .declared_collections = collections,
+                });
             }
         },
-        .map, .seq => for (node.items) |item| try walkRoleRefs(a, item, text, out),
-        .pair => if (node.val) |v| try walkRoleRefs(a, v, text, out),
+        .map, .seq => for (node.items) |item| try walkRoleRefs(a, forest, file_path, item, out),
+        .pair => if (node.val) |v| try walkRoleRefs(a, forest, file_path, v, out),
         else => {},
     }
 }
@@ -162,5 +178,53 @@ test "extract records role references and vars targets" {
     try testing.expectEqualStrings("db", f.role_refs[1].name);
     try testing.expectEqualStrings("cache", f.role_refs[2].name);
     try testing.expectEqualStrings("web", text[f.role_refs[0].start..f.role_refs[0].end]);
+    try testing.expectEqual(@as(usize, 0), f.role_refs[0].declared_collections.len);
     try testing.expectEqualStrings("/w/vars/prod.yml", f.vars_targets[0]);
+}
+
+test "role facts retain per-site declared collections after parsing" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const f = try extract(a, "/w/site.yml",
+        \\- hosts: all
+        \\  collections: [ns.first]
+        \\  roles: [web]
+        \\- hosts: all
+        \\  collections: [ns.second]
+        \\  roles: [web]
+        \\
+    );
+    try testing.expectEqual(@as(usize, 2), f.role_refs.len);
+    try testing.expectEqualStrings("ns.first", f.role_refs[0].declared_collections[0]);
+    try testing.expectEqualStrings("ns.second", f.role_refs[1].declared_collections[0]);
+
+    const task = try extract(a, "/w/tasks.yml",
+        \\- hosts: all
+        \\  collections: [ns.play]
+        \\  tasks:
+        \\    - name: Invoke a role
+        \\      collections: [ns.task]
+        \\      include_role:
+        \\        name: web
+        \\
+    );
+    try testing.expectEqual(@as(usize, 1), task.role_refs.len);
+    try testing.expectEqualStrings("ns.task", task.role_refs[0].declared_collections[0]);
+    try testing.expectEqualStrings("ns.play", task.role_refs[0].declared_collections[1]);
+
+    const metadata = try extract(a, "/w/roles/web/meta/main.yml",
+        \\collections: [ns.meta]
+        \\dependencies: [web]
+        \\
+    );
+    try testing.expectEqualStrings("ns.meta", metadata.role_refs[0].declared_collections[0]);
+
+    const non_play = try extract(a, "/w/config.yml",
+        \\collections: [ns.install]
+        \\roles: [web]
+        \\
+    );
+    try testing.expectEqual(@as(usize, 1), non_play.role_refs.len);
+    try testing.expectEqual(@as(usize, 0), non_play.role_refs[0].declared_collections.len);
 }
