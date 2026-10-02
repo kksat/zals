@@ -74,16 +74,6 @@ DEVELOPER_DIR=/nonexistent zig test test/e2e.zig
 - **GREEN:** independent suite 3/3; `make test` passed; semantic suite
   **338 cases, 0 failures**.
 
-## Verification slice 5 — expression contexts
-
-- Added one stdio test with six explicitly enumerated reads: interpolation,
-  single/double-quoted template statement subscripts (including bracket
-  whitespace), bare `when` sequence expressions, and a read in an unrelated
-  Role in the same Workspace. Both modes are requested from every read and key.
-- **GREEN on first run:** independent suite 5/5. Existing paths already support
-  these contexts after slice 1; no speculative production change or fabricated
-  RED was needed.
-
 ## Slice 4 — strings and comments
 
 - Added one test with complete genuine-read/key answers and eleven negative
@@ -97,3 +87,26 @@ DEVELOPER_DIR=/nonexistent zig test test/e2e.zig
   the string skip bounded by the expression length.
 - **GREEN:** independent suite 4/4; `make test` passed; semantic suite
   **338 cases, 0 failures**.
+
+## Verification slice 5 — expression contexts
+
+- Added one stdio test with six explicitly enumerated reads: interpolation,
+  single/double-quoted template statement subscripts (including bracket
+  whitespace), bare `when` sequence expressions, and a read in an unrelated
+  Role in the same Workspace. Both modes are requested from every read and key.
+- **GREEN on first run:** independent suite 5/5. Existing paths already support
+  these contexts after slice 1; no speculative production change or fabricated
+  RED was needed.
+
+## Verification slices 6/7 — roots and non-literal subscripts
+
+- Added the complete, separately enumerated same-named root-Variable group:
+  a direct root read, a dynamic-subscript root read, a bare-expression dynamic
+  root read, and only the root key when declarations are included. Every origin
+  is requested in both modes. The existing three-read field oracle remains
+  unchanged despite these added root references.
+- Added negative requests in both modes for integer, negative, decimal, and
+  computed-string subscripts. Static string *expressions* containing a field's
+  spelling do not turn into static field reads.
+- **GREEN on first run:** independent suite 7/7. No production change needed;
+  these are deliberate verification controls, not fabricated failing tests.

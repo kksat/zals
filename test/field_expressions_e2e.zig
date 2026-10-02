@@ -170,6 +170,38 @@ test "stdio bare expressions and template statements share the Workspace field g
     }, context_reads, context_with_definitions);
 }
 
+const root_reads: []const m.ExpectedLocation = &.{
+    m.span(tasks, "root-read {{ <field_name> }}"),
+    m.span(tasks, "dynamic-subscript {{ record[<field_name>] }}"),
+    m.span(tasks, "when: record[<field_name>] is defined"),
+};
+const roots_with_definitions: []const m.ExpectedLocation = &.{
+    m.span(tasks, "root-read {{ <field_name> }}"),
+    m.span(tasks, "dynamic-subscript {{ record[<field_name>] }}"),
+    m.span(tasks, "when: record[<field_name>] is defined"),
+    m.span(defaults, "\n<field_name>: root-only"),
+};
+
+test "stdio dynamic subscripts read root Variables, separately from same-named fields" {
+    try checkGroup(&.{
+        m.cursor(tasks, "root-read {{ <field_name> }}"),
+        m.cursor(tasks, "dynamic-subscript {{ record[<field_name>] }}"),
+        m.cursor(tasks, "when: record[<field_name>] is defined"),
+        m.cursor(defaults, "\n<field_name>: root-only"),
+    }, root_reads, roots_with_definitions);
+}
+
+test "stdio numeric and computed-string subscripts are not named field reads" {
+    try checkGroup(&.{
+        m.cursor(tasks, "numeric {{ record[<0>] }}"),
+        m.cursor(tasks, "{{ record[<42>] }}"),
+        m.cursor(tasks, "{{ record[<-1>] }}"),
+        m.cursor(tasks, "{{ record[<1.0>] }}"),
+        m.cursor(tasks, "computed-single {{ record['<field_name>' ~ suffix] }}"),
+        m.cursor(tasks, "computed-double {{ record[\"<field_name>\" + suffix] }}"),
+    }, &.{}, &.{});
+}
+
 /// Both reference modes have separate, complete written answers. Every origin
 /// sees the same Workspace-wide leaf-NAME group, not receiver object identity.
 fn checkGroup(origins: []const m.Anchor, reads: []const m.ExpectedLocation, with_definitions: []const m.ExpectedLocation) !void {

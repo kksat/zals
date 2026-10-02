@@ -46,3 +46,12 @@
   when:
     - receiver['context_field'] == 'active'
     - receiver.context_field is defined
+- name: Root Variables stay separate from same-named fields
+  ansible.builtin.debug:
+    msg: |-
+      root-read {{ field_name }}
+      dynamic-subscript {{ record[field_name] }}
+      numeric {{ record[0] }} / {{ record[42] }} / {{ record[-1] }} / {{ record[1.0] }}
+      computed-single {{ record['field_name' ~ suffix] }}
+      computed-double {{ record["field_name" + suffix] }}
+  when: record[field_name] is defined
