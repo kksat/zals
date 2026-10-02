@@ -1,3 +1,6 @@
 - name: Read the setup receiver input
   ansible.builtin.debug:
     msg: "{{ input_value }}"
+- name: Read the setup endpoint region
+  ansible.builtin.debug:
+    msg: "{{ input_config.endpoint.region_name }}"

@@ -7,7 +7,7 @@ source files with
 their unchanged on-disk contents. It does not install collections, copy the
 fixture, run Ansible, send edits, or test file watching.
 
-Cases live in `cases/{roles,collections,files,variables,role_parameters,fields}.zig`. Each named case
+Cases live in `cases/{roles,collections,files,variables,role_parameters,fields,field_parameters}.zig`. Each named case
 spells out its full expected locations. `cursor(path, "...<selected>...")`
 selects a unique source snippet; `span(...)` marks a unique expected range;
 `fileStart(path)` expects the zero-width range at the start of a file. Markers
@@ -28,6 +28,10 @@ explicit origin; a role or entry-point context does not narrow root references.
 Field cases exercise both declaration modes and ordered definition/implementation
 plus hover from every read, concrete key, and nested schema key in a small group.
 Schema-only, metadata, unbound, and same-named-root cases are deliberate controls.
+Passed-field cases check full-path callee/entry-point targets, lists and quoted
+YAML keys, intermediate dictionaries, and negative collisions. Both complete
+reference answers are requested from all 27 explicit sites of a field group,
+including unrelated roots and roles, unresolved calls, and ordinary task vars.
 The separate `test/role_parameter_edits_e2e.zig` stdio scenario checks unsaved
 argument-spec documentation and shifted key ranges without changing fixture
 files on disk.
@@ -41,6 +45,7 @@ files on disk.
 | --- | --- | --- |
 | `navigation-e2e` | `test/e2e.zig` | Read-only semantic navigation with complete written location oracles |
 | `field-expressions-e2e` | `test/field_expressions_e2e.zig` | Dot/static-subscript reads, expression contexts, literal/plugin/method negatives |
+| `field-parameter-edits-e2e` | `test/field_parameter_edits_e2e.zig` | Changed full-path contracts/values and complete Workspace field references |
 | `role-parameter-edits-e2e` | `test/role_parameter_edits_e2e.zig` | Unsaved argument-spec ranges and hover |
 | `collection-symbols-e2e` | `test/collection_symbols_e2e.zig` | Collection layouts, member symbols, open buffers, and watcher boundaries |
 | `navigation-uris-e2e` | `test/navigation_uris_e2e.zig` | Absolute and escaped targets from relative/absolute search paths |

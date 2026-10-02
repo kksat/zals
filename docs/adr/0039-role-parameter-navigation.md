@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-02
+- **Extended by:** [ADR-0042](0042-passed-role-field-navigation.md) (nested fields)
 - **Extends:** [ADR-0032](0032-workspace-wide-navigation.md) and
   [ADR-0036](0036-variable-navigation-from-bindings.md)
 

@@ -32,4 +32,6 @@ Name matching intentionally merges unrelated objects. It does not execute
 playbooks, expand YAML aliases, infer loop aliases, or trace object identity.
 The written stdio oracles exercise all actions from reads, list keys, quoted
 mapping keys, and nested schema options, plus schema-only, metadata, unbound,
-and same-named-root controls. See the [scope guide](../variable-navigation.md).
+and same-named-root controls. [ADR-0042](0042-passed-role-field-navigation.md)
+extends contract/implementation selection for passed role fields without
+narrowing references. See the [scope guide](../variable-navigation.md).

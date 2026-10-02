@@ -4,3 +4,12 @@ argument_specs:
       input_value:
         type: str
         description: Other receiver input
+      input_config:
+        type: dict
+        options:
+          endpoint:
+            type: dict
+            options:
+              region_name:
+                type: str
+                description: Other endpoint region contract.

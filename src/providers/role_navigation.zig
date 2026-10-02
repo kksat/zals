@@ -263,6 +263,13 @@ pub fn optionSpec(a: Allocator, role_dir: []const u8, entry: []const u8, name: [
 }
 
 fn optionSpecFrom(a: Allocator, source: ?variables.FileSource, role_dir: []const u8, entry: []const u8, name: []const u8) !?OptionSpec {
+    return optionSpecPathFrom(a, source, role_dir, entry, &.{name});
+}
+
+/// A root option followed by nested `options:` keys at the selected entry point.
+/// Source reads honor the server's open-buffer overlay when supplied.
+pub fn optionSpecPathFrom(a: Allocator, source: ?variables.FileSource, role_dir: []const u8, entry: []const u8, names: []const []const u8) !?OptionSpec {
+    if (names.len == 0) return null;
     for ([_][]const u8{ "argument_specs.yml", "argument_specs.yaml", "main.yml", "main.yaml" }) |file| {
         const text = if (source) |src| blk: {
             const path = try std.fs.path.join(a, &.{ role_dir, "meta", file });
@@ -271,20 +278,21 @@ fn optionSpecFrom(a: Allocator, source: ?variables.FileSource, role_dir: []const
         var forest = yaml.parse(a, text) catch continue;
         defer forest.deinit();
         for (forest.roots) |root| {
-            const pair = optionPair(root, entry, name) orelse continue;
+            const pair = optionPairPath(root, entry, names) orelse continue;
             const key = pair.key orelse continue;
+            const range = variables.definitions.scalarRange(key, forest.text, names[names.len - 1]);
             return .{
                 .file = file,
                 .yaml = try dedent(a, text, pair.start, pair.end),
-                .start = key.start,
-                .end = key.end,
+                .start = range.start,
+                .end = range.end,
             };
         }
     }
     return null;
 }
 
-fn optionPair(root: *yaml.Node, entry: []const u8, name: []const u8) ?*yaml.Node {
+fn optionPairPath(root: *yaml.Node, entry: []const u8, names: []const []const u8) ?*yaml.Node {
     if (!root.isMap()) return null;
     const specs = (yaml.dom.findPair(root, "argument_specs") orelse return null).val orelse return null;
     if (!specs.isMap()) return null;
@@ -292,7 +300,15 @@ fn optionPair(root: *yaml.Node, entry: []const u8, name: []const u8) ?*yaml.Node
     if (!ep.isMap()) return null;
     const options = (yaml.dom.findPair(ep, "options") orelse return null).val orelse return null;
     if (!options.isMap()) return null;
-    return yaml.dom.findPair(options, name);
+    var pair = yaml.dom.findPair(options, names[0]) orelse return null;
+    for (names[1..]) |name| {
+        const value = pair.val orelse return null;
+        if (!value.isMap()) return null;
+        const nested = (yaml.dom.findPair(value, "options") orelse return null).val orelse return null;
+        if (!nested.isMap()) return null;
+        pair = yaml.dom.findPair(nested, name) orelse return null;
+    }
+    return pair;
 }
 
 /// `text[start..end]` with the start line's indentation removed from every

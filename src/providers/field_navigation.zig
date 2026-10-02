@@ -16,6 +16,10 @@ pub fn locations(self: *Server, a: Allocator, params: Value, target: @import("va
     var source = vs.ServerSource{ .server = self };
     var index = variables.Index.init(a, source.source());
     const cur = (try index.fieldOccurrenceAt(a, loc.doc.uri, loc.offset)) orelse return null;
+    const parameters = @import("field_parameter_navigation.zig");
+    if (target == .definition) {
+        if (try parameters.definition(self, a, params)) |found| return found;
+    } else if (try parameters.implementation(self, a, params)) |found| return found;
     var out = std.array_list.Managed(types.Location).init(a);
     if (try wv.View.forUri(self, a, loc.doc.uri)) |found| {
         var view = found;
@@ -38,6 +42,7 @@ pub fn hover(self: *Server, a: Allocator, params: Value) !?types.Hover {
     var source = vs.ServerSource{ .server = self };
     var index = variables.Index.init(a, source.source());
     const cur = (try index.fieldOccurrenceAt(a, loc.doc.uri, loc.offset)) orelse return null;
+    if (try @import("field_parameter_navigation.zig").hover(self, a, params)) |found| return found;
     const variable_hover = @import("variable_hover.zig");
     var entries = std.array_list.Managed(variable_hover.Entry).init(a);
     var root: ?[]const u8 = null;

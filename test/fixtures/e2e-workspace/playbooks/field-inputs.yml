@@ -1,0 +1,92 @@
+---
+- hosts: localhost
+  gather_facts: false
+  roles:
+    - role: fixture.inputs.receiver
+      input_config:
+        endpoint:
+          region_name: passed-role-map-region
+    - role: fixture.inputs.receiver
+      vars:
+        input_config:
+          endpoint:
+            region_name: passed-role-vars-region
+  tasks:
+    - name: Pass a nested endpoint region
+      ansible.builtin.include_role:
+        name: fixture.inputs.receiver
+      vars:
+        input_config:
+          endpoint:
+            region_name: passed-main-region
+    - name: Import a nested region at another entry point
+      ansible.builtin.import_role:
+        name: fixture.inputs.receiver
+        tasks_from: setup.yaml
+      vars:
+        input_config:
+          endpoint:
+            region_name: passed-setup-region
+    - name: Include a nested region with key-value arguments
+      include_role: name=fixture.inputs.receiver tasks_from=setup.yml
+      vars:
+        input_config:
+          endpoint:
+            region_name: passed-kv-region
+    - name: Resolve nested fields using task collection context
+      collections: [fixture.other]
+      include_role:
+        name: receiver
+      vars:
+        input_config:
+          endpoint:
+            region_name: passed-other-region
+    - name: Fields inside a list retain their root and mapping key path
+      include_role:
+        name: fixture.inputs.receiver
+      vars:
+        input_configs:
+          - endpoint:
+              region_name: passed-list-region
+    - name: YAML metadata and quoted keys have unquoted target ranges
+      import_role:
+        name: yaml_receiver
+      vars:
+        input_config:
+          endpoint:
+            "region_name": passed-yaml-region
+    - name: A schema-only field has no concrete callee implementation
+      import_role:
+        name: fixture.inputs.receiver
+      vars:
+        input_config:
+          endpoint:
+            declared_only_region: passed-schema-only-region
+    - name: A concrete callee path can exist without an argument-spec field
+      include_role:
+        name: fixture.inputs.receiver
+      vars:
+        input_config:
+          endpoint:
+            concrete_only_region: passed-without-schema
+    - name: An unresolved callee cannot implement a field from its leaf name
+      include_role:
+        name: uninstalled.inputs.receiver
+      vars:
+        input_config:
+          endpoint:
+            region_name: unresolved-region
+    - name: Another intermediate key does not match the callee path
+      include_role:
+        name: fixture.inputs.receiver
+      vars:
+        input_config:
+          other_endpoint:
+            region_name: wrong-path-region
+    - name: Ordinary task vars are not passed role parameters
+      debug:
+        msg: "{{ local.region_name }}"
+      vars:
+        input_config:
+          endpoint:
+            region_name: non-role-vars-region

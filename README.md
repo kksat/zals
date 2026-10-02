@@ -63,7 +63,9 @@ go-to-implementation (`textDocument/implementation`) opens its main task file.
 See [ADR-0029](docs/adr/0029-role-navigation.md). Passed parameter keys navigate
 to the called role's selected argument-spec option and concrete bindings, using
 the same role context as hover
-([ADR-0039](docs/adr/0039-role-parameter-navigation.md)).
+([ADR-0039](docs/adr/0039-role-parameter-navigation.md)). Nested passed fields
+use the full parameter path while keeping references Workspace-wide
+([ADR-0042](docs/adr/0042-passed-role-field-navigation.md)).
 
 Extract-tasks code actions are a fifth post-parity extension: move the task(s)
 under the cursor or selection into a new sibling `taskN.yml` and replace them

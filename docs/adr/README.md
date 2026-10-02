@@ -46,6 +46,7 @@ Each ADR captures one decision, its context, and its consequences. Statuses are
 | [0039](0039-role-parameter-navigation.md) | Role parameter navigation | Accepted |
 | [0040](0040-navigation-file-uris.md) | Absolute, escaped navigation file URIs | Accepted |
 | [0041](0041-field-name-navigation.md) | Field-name navigation | Accepted |
+| [0042](0042-passed-role-field-navigation.md) | Passed role-field navigation | Accepted |
 
 ## Template
 

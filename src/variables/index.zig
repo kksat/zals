@@ -30,6 +30,9 @@ pub const Occurrence = struct {
     end: usize,
     kind: OccurrenceKind,
     site: ?Site = null,
+    /// Root and mapping keys for a field definition; lists add no component.
+    /// Root occurrences and field reads do not carry a structured binding path.
+    field_path: []const []const u8 = &.{},
 };
 
 pub const Cursor = struct {
@@ -83,7 +86,7 @@ pub const Index = struct {
                 for (files.loads) |load| {
                     if (std.mem.eql(u8, load.path, path) and load.site.rank() < site.rank()) site = load.site;
                 }
-                try out.append(.{ .uri = file_uri, .start = d.start, .end = d.end, .kind = .definition, .site = site });
+                try out.append(.{ .uri = file_uri, .start = d.start, .end = d.end, .kind = .definition, .site = site, .field_path = d.path });
             }
             for (scan.field_refs) |r| {
                 if (std.mem.eql(u8, r.name, name)) try out.append(.{

@@ -125,6 +125,12 @@ pub fn build(b: *std.Build) void {
             .inputs = &.{"test/fixtures/navigation-uris"},
         },
         .{
+            .name = "field-parameter-edits-e2e",
+            .source = "test/field_parameter_edits_e2e.zig",
+            .description = "Run unsaved passed-field schema, value, and references tests",
+            .inputs = &.{ "test/fixtures/e2e-workspace", "test/dependencies" },
+        },
+        .{
             .name = "role-parameter-edits-e2e",
             .source = "test/role_parameter_edits_e2e.zig",
             .description = "Run unsaved role argument-spec navigation tests",

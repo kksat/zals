@@ -7,8 +7,48 @@ argument_specs:
       receiver_declared_only:
         type: str
         description: Schema-only receiver input
+      input_config:
+        type: dict
+        options:
+          endpoint:
+            type: dict
+            options:
+              region_name:
+                type: str
+                description: Main endpoint region contract.
+              declared_only_region:
+                type: str
+                description: Schema-only endpoint region contract.
+      input_configs:
+        type: list
+        elements: dict
+        options:
+          endpoint:
+            type: dict
+            options:
+              region_name:
+                type: str
+                description: List endpoint region contract.
+      alternate_config:
+        type: dict
+        options:
+          endpoint:
+            type: dict
+            options:
+              region_name:
+                type: str
+                description: Wrong root region contract.
   setup:
     options:
       input_value:
         type: str
         description: Setup receiver input
+      input_config:
+        type: dict
+        options:
+          endpoint:
+            type: dict
+            options:
+              region_name:
+                type: str
+                description: Setup endpoint region contract.

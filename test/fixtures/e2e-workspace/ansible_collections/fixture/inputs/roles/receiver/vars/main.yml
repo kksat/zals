@@ -1,1 +1,4 @@
 input_value: receiver-vars
+input_config:
+  endpoint:
+    region_name: receiver-region-vars

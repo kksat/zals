@@ -1,1 +1,4 @@
 yaml_input: yaml-default
+input_config:
+  endpoint:
+    "region_name": yaml-region-default

@@ -25,6 +25,12 @@ entry points, per-task collection context, and unresolved/schema-only negatives.
 `roles/yaml_receiver` uses `meta/main.yaml` and YAML defaults/main tasks.
 Their root-variable references remain Workspace-wide, while passed-key
 contracts and implementations stay specific to the called Role.
+`playbooks/field-inputs.yml` adds nested parameter paths, list elements,
+intermediate keys, quoted YAML keys, and selected entry-point contracts.
+Same-leaf fields under another root and another collection deliberately share
+Workspace-wide references but are excluded from callee/path implementations.
+Schema-only, unresolved, nonmatching-path, and ordinary task-vars cases are
+negative controls. Buffer edits are tested separately without changing disk.
 
 `roles/field_nav` describes the same field in a list default, a quoted key
 under an unrelated vars root, and a nested argument-spec option. Two differently

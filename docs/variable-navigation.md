@@ -93,6 +93,27 @@ From the option itself or a normal read, ordinary root-variable navigation
 still applies, so definition results can be broader than from a passed key.
 See [ADR-0039](adr/0039-role-parameter-navigation.md).
 
+### Nested fields passed to a role
+
+A nested mapping key under a passed parameter also uses that callee context.
+For `input_config.endpoint.region_name`, definition and hover follow the selected
+entry point's `options.input_config.options.endpoint.options.region_name`.
+Implementation returns only concrete callee keys with that **complete path**;
+it excludes a same-named key under `alternate_config`, caller values, unrelated
+roles, and schema declarations. Lists contain values, not path components, so
+keys inside `input_configs: [{endpoint: {region_name: ...}}]` match the analogous
+list/dict schema. Intermediate dictionary keys are also navigation entry points.
+
+References deliberately remain the complete Workspace-wide **leaf-name** group
+from every origin, including called fields, other roles, other roots, and other
+entry points. The callee-specific exception is only for contract/implementation
+selection; it does not infer object identity or trace loop aliases. An unresolved
+callee or schema-only field has no callee implementation. If no selected
+full-path option exists, definition/hover retain ordinary name-based fallback;
+a generic fallback hover is labeled **Variable field**, not **Role parameter
+field**. Metadata, defaults, and vars overlays supersede disk ranges and values.
+See [ADR-0042](adr/0042-passed-role-field-navigation.md).
+
 ### What is the same from every site?
 
 Given the same indexed/open-document state, **find-references has an identical

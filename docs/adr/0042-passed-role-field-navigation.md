@@ -1,0 +1,35 @@
+# ADR-0042: Passed role-field navigation
+
+- **Status:** Accepted
+- **Date:** 2026-10-02
+- **Extends:** [ADR-0039](0039-role-parameter-navigation.md), [ADR-0041](0041-field-name-navigation.md)
+
+A concrete nested key inside a passed role parameter has a callee contract,
+just like the root parameter. Definition and hover prefer the resolved role's
+selected argument-spec entry point, following the root option and every nested
+`options:` key. Implementation matches the complete root-and-key path among
+concrete bindings in the callee's conventional role/file set. Lists add no path
+component. This avoids selecting a different root's coincidentally equal leaf,
+another entry point, the caller's own value, or an unrelated role.
+
+References remain Workspace-wide **leaf-name** matching from every read and
+key, including passed keys and schema keys. The user chose this symmetry over
+callee-scoped references; the path is a contract/implementation selector, not a
+runtime object identity or a reference-search boundary. Root variables remain
+a separate name group.
+
+Map/key-value include/import tasks and `roles:` entries (direct or under `vars:`)
+share role resolution and collection context. `tasks_from` normalization, YAML
+metadata variants, absolute escaped URIs, and unsaved buffers follow the existing
+root-parameter rules. Schema-only fields and unresolved callees have no concrete
+implementation. If no selected full-path option exists, definition and hover
+fall back to ordinary field navigation, explicitly labeled as a Variable field
+rather than asserting a callee contract. Implementation can still return a
+matching concrete callee path without a schema.
+
+The static stdio fixture checks exact positive contracts and negative collisions,
+ordered concrete targets, and both independently authored reference answers from
+all 27 sites of a small group. A separate buffer-edit scenario covers moved,
+quoted schema keys, changed descriptions and concrete values, and complete
+references with stale disk sites excluded. No playbook execution, loop tracing,
+YAML alias expansion, or fixture mutation is involved.

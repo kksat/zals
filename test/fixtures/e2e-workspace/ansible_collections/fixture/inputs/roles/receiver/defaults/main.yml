@@ -1,1 +1,11 @@
 input_value: receiver-default
+input_config:
+  endpoint:
+    region_name: receiver-region-default
+    concrete_only_region: receiver-without-schema
+alternate_config:
+  endpoint:
+    region_name: wrong-root-region
+input_configs:
+  - endpoint:
+      region_name: receiver-list-region

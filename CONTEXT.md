@@ -96,6 +96,12 @@ contract is the selected argument-spec option; its implementations are concrete
 bindings in the called Role.
 _Avoid_: role argument, role input, role call param
 
+**Role parameter field**:
+A Variable field inside a structured Role parameter. Its contract belongs to
+that parameter's complete key path in the called Role's selected entry point;
+its reference name remains the field's leaf name throughout the Workspace.
+_Avoid_: nested role argument, scoped attribute
+
 **Role reference**:
 A site that names a role to apply: an entry in a play's `roles:` list, the
 `name` of an `include_role`/`import_role` task, an entry in a role's

@@ -1,1 +1,4 @@
 input_value: other-default
+input_config:
+  endpoint:
+    region_name: other-region-default
