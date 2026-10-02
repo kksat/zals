@@ -2,8 +2,10 @@
 
 ## Agreed seam and scope
 
-Public `textDocument/references` over a real `zig-out/bin/zals --stdio`
-process, using the shared framing client and unique-span UTF-16 anchor helper.
+Public `textDocument/references`, `textDocument/definition`,
+`textDocument/implementation`, and `textDocument/hover` over a real
+`zig-out/bin/zals --stdio` process, using the shared framing client and
+unique-span UTF-16 anchor helper.
 No production imports, private-function tests, inferred answers, mutable fixture
 copies, watcher events, or external repositories. The checked-in Workspace is
 `test/fixtures/field-expressions-workspace`; temporary directories isolate HOME
@@ -218,6 +220,32 @@ DEVELOPER_DIR=/nonexistent zig test test/e2e.zig
   `/tmp/zals-yaml-scalar-unit-green.log`,
   `/tmp/zals-yaml-scalar-navigation-green.log`.
 
+## Slice 11 verification — navigation and root-identity controls
+
+- Added all-action verification from every quoted/plain/block/template field
+  read and its concrete key: independently marked definition/implementation
+  targets and exact original-source hover ranges, including the YAML-escaped
+  leaf spelling. Hover must show **Variable field** and its field value, never
+  the same-named root value.
+- Independently authored complete root-reference answers cover both quoted
+  dynamic subscripts, a bare-expression dynamic subscript, a YAML-escaped root
+  identifier, and their sole root binding. Definition/implementation and hover
+  stay in the **Variable** group from every root origin; no concrete field key
+  or static-subscript read joins this group.
+- A further control checks that two YAML backslashes normalize to one Jinja
+  backslash without decoding the resulting Jinja key escape into `yaml_field`.
+  Both declaration modes retain only that raw-name read.
+- These were verification slices, not fabricated production REDs: after the
+  test client accepted LSP's legal singleton Location response for definition,
+  all behavioral checks were GREEN without any additional production changes.
+- **GREEN:** focused action/root tests **2/2**; complete independent suite
+  **13/13**, **308 exact reference requests + 51 definition/implementation/hover
+  requests**; `make test` passed; semantic suite **496 cases, 0 failures**.
+  Logs: `/tmp/zals-yaml-scalar-actions-green.log`,
+  `/tmp/zals-yaml-scalar-final-lexical.log`,
+  `/tmp/zals-yaml-scalar-final-unit.log`,
+  `/tmp/zals-yaml-scalar-final-navigation.log`.
+
 ## Known limitations
 
 ### Static-subscript literal escapes
@@ -238,10 +266,11 @@ not claimed as supported. Honoring escapes while skipping string boundaries
 
 - `make build`: passed.
 - `DEVELOPER_DIR=/nonexistent zig test test/field_expressions_e2e.zig`:
-  **10 tests passed**, **272 reference requests** with exact full-result oracles.
+  **13 tests passed**, **308 reference requests + 51 other navigation requests**
+  with exact full-result/range oracles.
 - `make test`: passed.
 - `DEVELOPER_DIR=/nonexistent zig test test/e2e.zig`:
-  **338 semantic cases, 0 failures**.
+  **496 semantic cases, 0 failures**.
 - The parent registers this independent suite as `zig build field-expressions-e2e`
   and includes it in `make e2e` / CI, tracking the server and checked-in fixture
   inputs. Direct `zig test` invocation also remains available.

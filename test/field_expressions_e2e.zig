@@ -80,6 +80,45 @@ test "stdio YAML scalar quoting preserves the complete field group and original 
     try checkGroup(yaml_origins, yaml_reads, yaml_with_definitions);
 }
 
+test "stdio quoted YAML fields have exact definition implementation and hover spans" {
+    try checkNavigation(yaml_origins, &.{m.span(defaults, "  <yaml_field>: quoted-value")}, &.{ "**Variable field** `yaml_field`", "quoted-value" }, &.{ "**Variable**", "root-quoted-value" });
+}
+
+const yaml_root_reads: []const m.ExpectedLocation = &.{
+    m.span(tasks, "🛰 yaml-dynamic-single {{ object[<yaml_field>] }}"),
+    m.span(tasks, "🛰 yaml-dynamic-double {{ object[<yaml_field>] }}"),
+    m.span(tasks, "yaml-root-escape {{ <\\u0079aml_field> }}"),
+    m.span(tasks, "when: \"object[<yaml_field>] == \\\"dynamic-active\\\"\""),
+};
+const yaml_roots_with_definitions: []const m.ExpectedLocation = &.{
+    m.span(tasks, "🛰 yaml-dynamic-single {{ object[<yaml_field>] }}"),
+    m.span(tasks, "🛰 yaml-dynamic-double {{ object[<yaml_field>] }}"),
+    m.span(tasks, "yaml-root-escape {{ <\\u0079aml_field> }}"),
+    m.span(tasks, "when: \"object[<yaml_field>] == \\\"dynamic-active\\\"\""),
+    m.span(defaults, "\n<yaml_field>: root-quoted-value"),
+};
+const yaml_root_origins: []const m.Anchor = &.{
+    m.cursor(tasks, "🛰 yaml-dynamic-single {{ object[<yaml_field>] }}"),
+    m.cursor(tasks, "🛰 yaml-dynamic-double {{ object[<yaml_field>] }}"),
+    m.cursor(tasks, "yaml-root-escape {{ <\\u0079aml_field> }}"),
+    m.cursor(tasks, "when: \"object[<yaml_field>] == \\\"dynamic-active\\\"\""),
+    m.cursor(defaults, "\n<yaml_field>: root-quoted-value"),
+};
+
+test "stdio quoted YAML dynamic and escaped roots do not acquire same-named field bindings" {
+    try checkGroup(yaml_root_origins, yaml_root_reads, yaml_roots_with_definitions);
+    try checkNavigation(yaml_root_origins, &.{m.span(defaults, "\n<yaml_field>: root-quoted-value")}, &.{ "**Variable** `yaml_field`", "root-quoted-value" }, &.{ "**Variable field**", "\nquoted-value" });
+    // Two YAML backslashes become one Jinja backslash; the Jinja key escape
+    // remains a raw name, NOT an alias of the ordinary yaml_field group.
+    try checkGroup(&.{
+        m.cursor(tasks, "yaml-jinja-escape {{ object['<\\\\u0079aml_field>'] }}"),
+    }, &.{
+        m.span(tasks, "yaml-jinja-escape {{ object['<\\\\u0079aml_field>'] }}"),
+    }, &.{
+        m.span(tasks, "yaml-jinja-escape {{ object['<\\\\u0079aml_field>'] }}"),
+    });
+}
+
 const filter_reads: []const m.ExpectedLocation = &.{
     m.span(tasks, "plain-filter {{ record.<filter_field> |"),
     m.span(tasks, "plain-test {{ record.<filter_field> is"),
@@ -484,29 +523,8 @@ fn checkGroup(origins: []const m.Anchor, reads: []const m.ExpectedLocation, with
     var temp_home = std.testing.tmpDir(.{});
     defer temp_home.cleanup();
     const home = try temp_home.dir.realpathAlloc(a, ".");
-    var client = try lsp.Client.startWithOptions(a, binary, fixture, fixture, home, .{
-        .collections_path = fixture,
-    });
+    var client = try initializedClient(a, binary, fixture, home);
     defer client.deinit();
-    const init_result = try client.request("initialize", .{
-        .processId = @as(?i64, null),
-        .rootUri = try std.fmt.allocPrint(a, "file://{s}", .{fixture}),
-        .capabilities = .{}, // Default UTF-16.
-        .initializationOptions = .{ .ansible = .{
-            .workspace = .{ .rootMarker = "fixture-workspace-root" },
-            .python = .{ .venvPath = "" },
-            .validation = .{ .enabled = false, .lint = .{ .enabled = false } },
-        } },
-    });
-    const caps = lsp.field(init_result, "capabilities") orelse return error.MissingCapabilities;
-    const references = lsp.field(caps, "referencesProvider") orelse return error.MissingReferencesProvider;
-    try std.testing.expect(references == .bool and references.bool);
-    if (lsp.field(caps, "positionEncoding")) |encoding| {
-        try std.testing.expect(encoding == .string);
-        try std.testing.expectEqualStrings("utf-16", encoding.string);
-    }
-    try client.notify("initialized", .{});
-    try client.waitForIndex();
 
     const resolver: anchor.Resolver = .{ .allocator = a, .fixture = fixture, .deps = fixture };
     var opened = std.StringHashMap(void).init(a);
@@ -549,6 +567,87 @@ fn checkGroup(origins: []const m.Anchor, reads: []const m.ExpectedLocation, with
         }
     }
     try std.testing.expectEqual(@as(usize, 0), failures);
+}
+
+fn initializedClient(a: Allocator, binary: []const u8, fixture: []const u8, home: []const u8) !lsp.Client {
+    var client = try lsp.Client.startWithOptions(a, binary, fixture, fixture, home, .{
+        .collections_path = fixture,
+    });
+    errdefer client.deinit();
+    const init_result = try client.request("initialize", .{
+        .processId = @as(?i64, null),
+        .rootUri = try std.fmt.allocPrint(a, "file://{s}", .{fixture}),
+        .capabilities = .{}, // Default UTF-16.
+        .initializationOptions = .{ .ansible = .{
+            .workspace = .{ .rootMarker = "fixture-workspace-root" },
+            .python = .{ .venvPath = "" },
+            .validation = .{ .enabled = false, .lint = .{ .enabled = false } },
+        } },
+    });
+    const caps = lsp.field(init_result, "capabilities") orelse return error.MissingCapabilities;
+    const references = lsp.field(caps, "referencesProvider") orelse return error.MissingReferencesProvider;
+    try std.testing.expect(references == .bool and references.bool);
+    if (lsp.field(caps, "positionEncoding")) |encoding| {
+        try std.testing.expect(encoding == .string);
+        try std.testing.expectEqualStrings("utf-16", encoding.string);
+    }
+    try client.notify("initialized", .{});
+    try client.waitForIndex();
+    return client;
+}
+
+/// Definitions/implementations are ordered complete answers; hover must select
+/// the independently marked original source span, never a decoded-text span.
+fn checkNavigation(origins: []const m.Anchor, targets: []const m.ExpectedLocation, contains: []const []const u8, excludes: []const []const u8) !void {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const fixture = try std.fs.cwd().realpathAlloc(a, "test/fixtures/field-expressions-workspace");
+    const binary = try std.fs.cwd().realpathAlloc(a, "zig-out/bin/zals");
+    var temp_home = std.testing.tmpDir(.{});
+    defer temp_home.cleanup();
+    const home = try temp_home.dir.realpathAlloc(a, ".");
+    var client = try initializedClient(a, binary, fixture, home);
+    defer client.deinit();
+    const resolver: anchor.Resolver = .{ .allocator = a, .fixture = fixture, .deps = fixture };
+    const expected = try a.alloc(anchor.Location, targets.len);
+    for (targets, 0..) |target, i| expected[i] = try resolver.location(target);
+    var opened = std.StringHashMap(void).init(a);
+    for (origins) |origin| {
+        const source = try resolver.cursor(origin);
+        if (!opened.contains(origin.path)) {
+            try client.notify("textDocument/didOpen", .{ .textDocument = .{
+                .uri = source.uri,
+                .languageId = if (std.mem.endsWith(u8, origin.path, ".j2")) "jinja2" else "yaml",
+                .version = @as(u32, 1),
+                .text = try resolver.readText(origin.path),
+            } });
+            try opened.put(origin.path, {});
+        }
+        const params = .{ .textDocument = .{ .uri = source.uri }, .position = source.position };
+        for ([_][]const u8{ "textDocument/definition", "textDocument/implementation" }) |method| {
+            const result = try client.request(method, params);
+            const actual = if (result == .object)
+                try a.dupe(anchor.Location, &.{try std.json.parseFromValueLeaky(anchor.Location, a, result, .{})})
+            else
+                try parseLocations(a, result);
+            expectLocations(expected, actual) catch |err| {
+                std.debug.print("FAIL {s}: {s} ({s})\n", .{ origin.path, origin.snippet, method });
+                printLocations("expected", expected);
+                printLocations("actual", actual);
+                return err;
+            };
+        }
+        const hover = try client.request("textDocument/hover", params);
+        const range = try std.json.parseFromValueLeaky(anchor.Range, a, lsp.field(hover, "range") orelse return error.MissingHoverRange, .{});
+        const marked = try resolver.location(m.span(origin.path, origin.snippet));
+        try std.testing.expectEqualDeep(marked.range, range);
+        const contents = lsp.field(hover, "contents") orelse return error.MissingHoverContents;
+        const value = lsp.field(contents, "value") orelse return error.MissingHoverMarkup;
+        try std.testing.expect(value == .string);
+        for (contains) |part| try std.testing.expect(std.mem.indexOf(u8, value.string, part) != null);
+        for (excludes) |part| try std.testing.expect(std.mem.indexOf(u8, value.string, part) == null);
+    }
 }
 
 fn parseLocations(a: Allocator, result: Value) ![]anchor.Location {
