@@ -74,6 +74,16 @@ DEVELOPER_DIR=/nonexistent zig test test/e2e.zig
 - **GREEN:** independent suite 3/3; `make test` passed; semantic suite
   **338 cases, 0 failures**.
 
+## Verification slice 5 — expression contexts
+
+- Added one stdio test with six explicitly enumerated reads: interpolation,
+  single/double-quoted template statement subscripts (including bracket
+  whitespace), bare `when` sequence expressions, and a read in an unrelated
+  Role in the same Workspace. Both modes are requested from every read and key.
+- **GREEN on first run:** independent suite 5/5. Existing paths already support
+  these contexts after slice 1; no speculative production change or fabricated
+  RED was needed.
+
 ## Slice 4 — strings and comments
 
 - Added one test with complete genuine-read/key answers and eleven negative

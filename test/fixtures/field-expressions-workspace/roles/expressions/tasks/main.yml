@@ -37,3 +37,12 @@
       {# comment {{ record.literal_field }} #}
       outside record.literal_field
     # YAML comment {{ record.literal_field }}
+- name: Fields work in bare expressions and template statements
+  ansible.builtin.debug:
+    msg: |-
+      interpolation {{ receiver.context_field }}
+      🛰 {% if receiver['context_field'] %}enabled{% endif %}
+      {% set selected = receiver [ "context_field" ] %}
+  when:
+    - receiver['context_field'] == 'active'
+    - receiver.context_field is defined

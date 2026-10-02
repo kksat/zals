@@ -1,0 +1,4 @@
+---
+- name: The same leaf name is a field read in another Role
+  ansible.builtin.debug:
+    msg: "{{ unrelated['context_field'] }}"

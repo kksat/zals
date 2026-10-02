@@ -139,6 +139,37 @@ test "stdio quoted strings and comments are not field reads" {
     }, literal_reads, literal_with_definitions);
 }
 
+const unrelated_tasks = "roles/unrelated/tasks/main.yml";
+const context_reads: []const m.ExpectedLocation = &.{
+    m.span(tasks, "interpolation {{ receiver.<context_field> }}"),
+    m.span(tasks, "🛰 {% if receiver['<context_field>'] %}"),
+    m.span(tasks, "{% set selected = receiver [ \"<context_field>\" ] %}"),
+    m.span(tasks, "- receiver['<context_field>'] == 'active'"),
+    m.span(tasks, "- receiver.<context_field> is defined"),
+    m.span(unrelated_tasks, "{{ unrelated['<context_field>'] }}"),
+};
+const context_with_definitions: []const m.ExpectedLocation = &.{
+    m.span(tasks, "interpolation {{ receiver.<context_field> }}"),
+    m.span(tasks, "🛰 {% if receiver['<context_field>'] %}"),
+    m.span(tasks, "{% set selected = receiver [ \"<context_field>\" ] %}"),
+    m.span(tasks, "- receiver['<context_field>'] == 'active'"),
+    m.span(tasks, "- receiver.<context_field> is defined"),
+    m.span(unrelated_tasks, "{{ unrelated['<context_field>'] }}"),
+    m.span(defaults, "  <context_field>: active"),
+};
+
+test "stdio bare expressions and template statements share the Workspace field group" {
+    try checkGroup(&.{
+        m.cursor(tasks, "interpolation {{ receiver.<context_field> }}"),
+        m.cursor(tasks, "🛰 {% if receiver['<context_field>'] %}"),
+        m.cursor(tasks, "{% set selected = receiver [ \"<context_field>\" ] %}"),
+        m.cursor(tasks, "- receiver['<context_field>'] == 'active'"),
+        m.cursor(tasks, "- receiver.<context_field> is defined"),
+        m.cursor(unrelated_tasks, "{{ unrelated['<context_field>'] }}"),
+        m.cursor(defaults, "  <context_field>: active"),
+    }, context_reads, context_with_definitions);
+}
+
 /// Both reference modes have separate, complete written answers. Every origin
 /// sees the same Workspace-wide leaf-NAME group, not receiver object identity.
 fn checkGroup(origins: []const m.Anchor, reads: []const m.ExpectedLocation, with_definitions: []const m.ExpectedLocation) !void {
