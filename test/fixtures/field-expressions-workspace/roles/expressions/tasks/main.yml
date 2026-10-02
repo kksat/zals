@@ -79,3 +79,21 @@
       keyword-method {{ data.filter() }}
       conditional-member {{ data | lower if enabled else other.filter }}
   when: data.true
+- name: Quoted delimiters are literal contents, not the end of an expression
+  ansible.builtin.debug:
+    msg: |-
+      🛰 quoted-interpolation {{ '}} {{ phantom.delimiter_field }} {{ ghost_root }}' ~ actual.delimiter_field }}
+      quoted-statement {% set saved_value = "say \"%}\" {% set bogus = phantom.delimiter_field %} {{ ghost_root }}" ~ actual.delimiter_field %}
+      {# literal-comment "{{ phantom.delimiter_field }} {{ ghost_root }} %}" #}
+- name: Single-quoted YAML interpolation keeps Jinja string boundaries
+  ansible.builtin.debug:
+    msg: 'quoted-yaml {{ "}} {{ phantom.delimiter_field }} {{ ghost_root }}" ~ actual.delimiter_field }}'
+- name: Single-quoted YAML statement keeps Jinja string boundaries
+  ansible.builtin.debug:
+    msg: 'statement-yaml {% set saved_value = "%} {% set bogus = phantom.delimiter_field %} {{ ghost_root }}" ~ actual.delimiter_field %}'
+- name: Incomplete interpolation still scans the remaining body
+  ansible.builtin.debug:
+    msg: 'unterminated-interpolation {{ actual.fallback_field'
+- name: Incomplete statement still scans the remaining body
+  ansible.builtin.debug:
+    msg: 'unterminated-statement {% if actual.fallback_field'

@@ -335,6 +335,97 @@ test "stdio keyword-like data members share their dot, subscript, and binding-ke
     try std.testing.expectEqual(@as(usize, 0), failures);
 }
 
+const delimiter_reads: []const m.ExpectedLocation = &.{
+    m.span(tasks, "🛰 quoted-interpolation {{ '}} {{ phantom.delimiter_field }} {{ ghost_root }}' ~ actual.<delimiter_field> }}"),
+    m.span(tasks, "quoted-statement {% set saved_value = \"say \\\"%}\\\" {% set bogus = phantom.delimiter_field %} {{ ghost_root }}\" ~ actual.<delimiter_field> %}"),
+    m.span(tasks, "quoted-yaml {{ \"}} {{ phantom.delimiter_field }} {{ ghost_root }}\" ~ actual.<delimiter_field> }}"),
+    m.span(tasks, "statement-yaml {% set saved_value = \"%} {% set bogus = phantom.delimiter_field %} {{ ghost_root }}\" ~ actual.<delimiter_field> %}"),
+};
+const delimiters_with_definitions: []const m.ExpectedLocation = &.{
+    m.span(tasks, "🛰 quoted-interpolation {{ '}} {{ phantom.delimiter_field }} {{ ghost_root }}' ~ actual.<delimiter_field> }}"),
+    m.span(tasks, "quoted-statement {% set saved_value = \"say \\\"%}\\\" {% set bogus = phantom.delimiter_field %} {{ ghost_root }}\" ~ actual.<delimiter_field> %}"),
+    m.span(tasks, "quoted-yaml {{ \"}} {{ phantom.delimiter_field }} {{ ghost_root }}\" ~ actual.<delimiter_field> }}"),
+    m.span(tasks, "statement-yaml {% set saved_value = \"%} {% set bogus = phantom.delimiter_field %} {{ ghost_root }}\" ~ actual.<delimiter_field> %}"),
+    m.span(defaults, "  <delimiter_field>: present"),
+};
+const fallback_reads: []const m.ExpectedLocation = &.{
+    m.span(tasks, "unterminated-interpolation {{ actual.<fallback_field>"),
+    m.span(tasks, "unterminated-statement {% if actual.<fallback_field>"),
+};
+const fallback_with_definitions: []const m.ExpectedLocation = &.{
+    m.span(tasks, "unterminated-interpolation {{ actual.<fallback_field>"),
+    m.span(tasks, "unterminated-statement {% if actual.<fallback_field>"),
+    m.span(defaults, "  <fallback_field>: still-scanned"),
+};
+const delimiter_root_reads: []const m.ExpectedLocation = &.{
+    m.span(tasks, "🛰 quoted-interpolation {{ '}} {{ phantom.delimiter_field }} {{ ghost_root }}' ~ <actual>.delimiter_field }}"),
+    m.span(tasks, "quoted-statement {% set saved_value = \"say \\\"%}\\\" {% set bogus = phantom.delimiter_field %} {{ ghost_root }}\" ~ <actual>.delimiter_field %}"),
+    m.span(tasks, "quoted-yaml {{ \"}} {{ phantom.delimiter_field }} {{ ghost_root }}\" ~ <actual>.delimiter_field }}"),
+    m.span(tasks, "statement-yaml {% set saved_value = \"%} {% set bogus = phantom.delimiter_field %} {{ ghost_root }}\" ~ <actual>.delimiter_field %}"),
+    m.span(tasks, "unterminated-interpolation {{ <actual>.fallback_field"),
+    m.span(tasks, "unterminated-statement {% if <actual>.fallback_field"),
+};
+const delimiter_roots_with_definitions: []const m.ExpectedLocation = &.{
+    m.span(tasks, "🛰 quoted-interpolation {{ '}} {{ phantom.delimiter_field }} {{ ghost_root }}' ~ <actual>.delimiter_field }}"),
+    m.span(tasks, "quoted-statement {% set saved_value = \"say \\\"%}\\\" {% set bogus = phantom.delimiter_field %} {{ ghost_root }}\" ~ <actual>.delimiter_field %}"),
+    m.span(tasks, "quoted-yaml {{ \"}} {{ phantom.delimiter_field }} {{ ghost_root }}\" ~ <actual>.delimiter_field }}"),
+    m.span(tasks, "statement-yaml {% set saved_value = \"%} {% set bogus = phantom.delimiter_field %} {{ ghost_root }}\" ~ <actual>.delimiter_field %}"),
+    m.span(tasks, "unterminated-interpolation {{ <actual>.fallback_field"),
+    m.span(tasks, "unterminated-statement {% if <actual>.fallback_field"),
+    m.span(defaults, "\n<actual>:"),
+};
+
+test "stdio quoted closing delimiters preserve later fields and exclude literal field/root text" {
+    var failures: usize = 0;
+    checkGroup(&.{
+        m.cursor(tasks, "🛰 quoted-interpolation {{ '}} {{ phantom.delimiter_field }} {{ ghost_root }}' ~ actual.<delimiter_field> }}"),
+        m.cursor(tasks, "quoted-statement {% set saved_value = \"say \\\"%}\\\" {% set bogus = phantom.delimiter_field %} {{ ghost_root }}\" ~ actual.<delimiter_field> %}"),
+        m.cursor(tasks, "quoted-yaml {{ \"}} {{ phantom.delimiter_field }} {{ ghost_root }}\" ~ actual.<delimiter_field> }}"),
+        m.cursor(tasks, "statement-yaml {% set saved_value = \"%} {% set bogus = phantom.delimiter_field %} {{ ghost_root }}\" ~ actual.<delimiter_field> %}"),
+        m.cursor(defaults, "  <delimiter_field>: present"),
+    }, delimiter_reads, delimiters_with_definitions) catch {
+        failures += 1;
+    };
+    checkGroup(&.{
+        m.cursor(tasks, "unterminated-interpolation {{ actual.<fallback_field>"),
+        m.cursor(tasks, "unterminated-statement {% if actual.<fallback_field>"),
+        m.cursor(defaults, "  <fallback_field>: still-scanned"),
+    }, fallback_reads, fallback_with_definitions) catch {
+        failures += 1;
+    };
+    checkGroup(&.{
+        m.cursor(tasks, "🛰 quoted-interpolation {{ '}} {{ phantom.delimiter_field }} {{ ghost_root }}' ~ <actual>.delimiter_field }}"),
+        m.cursor(tasks, "quoted-statement {% set saved_value = \"say \\\"%}\\\" {% set bogus = phantom.delimiter_field %} {{ ghost_root }}\" ~ <actual>.delimiter_field %}"),
+        m.cursor(tasks, "quoted-yaml {{ \"}} {{ phantom.delimiter_field }} {{ ghost_root }}\" ~ <actual>.delimiter_field }}"),
+        m.cursor(tasks, "statement-yaml {% set saved_value = \"%} {% set bogus = phantom.delimiter_field %} {{ ghost_root }}\" ~ <actual>.delimiter_field %}"),
+        m.cursor(tasks, "unterminated-interpolation {{ <actual>.fallback_field"),
+        m.cursor(tasks, "unterminated-statement {% if <actual>.fallback_field"),
+        m.cursor(defaults, "\n<actual>:"),
+    }, delimiter_root_reads, delimiter_roots_with_definitions) catch {
+        failures += 1;
+    };
+    checkGroup(&.{
+        m.cursor(tasks, "🛰 quoted-interpolation {{ '}} {{ phantom.<delimiter_field>"),
+        m.cursor(tasks, "🛰 quoted-interpolation {{ '}} {{ <phantom>.delimiter_field"),
+        m.cursor(tasks, "🛰 quoted-interpolation {{ '}} {{ phantom.delimiter_field }} {{ <ghost_root>"),
+        m.cursor(tasks, "quoted-statement {% set saved_value = \"say \\\"%}\\\" {% set bogus = phantom.<delimiter_field>"),
+        m.cursor(tasks, "quoted-statement {% set saved_value = \"say \\\"%}\\\" {% set bogus = <phantom>.delimiter_field"),
+        m.cursor(tasks, "quoted-statement {% set saved_value = \"say \\\"%}\\\" {% set bogus = phantom.delimiter_field %} {{ <ghost_root>"),
+        m.cursor(tasks, "quoted-yaml {{ \"}} {{ phantom.<delimiter_field>"),
+        m.cursor(tasks, "quoted-yaml {{ \"}} {{ <phantom>.delimiter_field"),
+        m.cursor(tasks, "quoted-yaml {{ \"}} {{ phantom.delimiter_field }} {{ <ghost_root>"),
+        m.cursor(tasks, "statement-yaml {% set saved_value = \"%} {% set bogus = phantom.<delimiter_field>"),
+        m.cursor(tasks, "statement-yaml {% set saved_value = \"%} {% set bogus = <phantom>.delimiter_field"),
+        m.cursor(tasks, "statement-yaml {% set saved_value = \"%} {% set bogus = phantom.delimiter_field %} {{ <ghost_root>"),
+        m.cursor(tasks, "{# literal-comment \"{{ phantom.<delimiter_field>"),
+        m.cursor(tasks, "{# literal-comment \"{{ <phantom>.delimiter_field"),
+        m.cursor(tasks, "{# literal-comment \"{{ phantom.delimiter_field }} {{ <ghost_root>"),
+    }, &.{}, &.{}) catch {
+        failures += 1;
+    };
+    try std.testing.expectEqual(@as(usize, 0), failures);
+}
+
 /// Both reference modes have separate, complete written answers. Every origin
 /// sees the same Workspace-wide leaf-NAME group, not receiver object identity.
 fn checkGroup(origins: []const m.Anchor, reads: []const m.ExpectedLocation, with_definitions: []const m.ExpectedLocation) !void {

@@ -70,7 +70,7 @@ fn scanScalarNames(allocator: Allocator, raw: []const u8, base: usize, names: Na
     while (i < raw.len) {
         if (i + 1 < raw.len and raw[i] == '{' and raw[i + 1] == '{') {
             const body_start = i + 2;
-            const rel = std.mem.indexOf(u8, raw[body_start..], "}}") orelse {
+            const rel = closingDelimiter(raw[body_start..], "}}") orelse {
                 try scanExpressionNames(allocator, raw[body_start..], base + body_start, names, false, out);
                 return;
             };
@@ -78,7 +78,7 @@ fn scanScalarNames(allocator: Allocator, raw: []const u8, base: usize, names: Na
             i = body_start + rel + 2;
         } else if (i + 1 < raw.len and raw[i] == '{' and raw[i + 1] == '%') {
             const body_start = i + 2;
-            const rel = std.mem.indexOf(u8, raw[body_start..], "%}") orelse {
+            const rel = closingDelimiter(raw[body_start..], "%}") orelse {
                 try scanExpressionNames(allocator, raw[body_start..], base + body_start, names, true, out);
                 return;
             };
@@ -183,6 +183,21 @@ fn scanExpressionNames(allocator: Allocator, text: []const u8, base: usize, name
         prev = .other;
         can_subscript = c == ']' or c == ')' or c == '}';
     }
+}
+
+/// Closing tag text inside a Jinja string is literal content, not a boundary.
+/// An incomplete body still returns null so the caller scans its remainder.
+fn closingDelimiter(text: []const u8, delimiter: []const u8) ?usize {
+    var i: usize = 0;
+    while (i < text.len) {
+        if (text[i] == '\'' or text[i] == '"') {
+            i = skipString(text, i);
+            continue;
+        }
+        if (std.mem.startsWith(u8, text[i..], delimiter)) return i;
+        i += 1;
+    }
+    return null;
 }
 
 fn followedByCall(text: []const u8, start: usize) bool {

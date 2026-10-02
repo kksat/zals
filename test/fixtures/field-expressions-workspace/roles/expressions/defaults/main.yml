@@ -23,3 +23,7 @@ keyword_members:
   filter: filter-value
   is: is-value
   "true": true-value
+actual:
+  delimiter_field: present
+  fallback_field: still-scanned
+ghost_root: never-read

@@ -158,7 +158,38 @@ DEVELOPER_DIR=/nonexistent zig test test/e2e.zig
   remains **338 cases, 0 failures**. Parent's separately evolving schema/hover
   cases are not imported into this worktree.
 
-## Known limitations (not broadened in this follow-up)
+## Review follow-up / slice 10 — quoted closing delimiters
+
+- Added one stdio test with four genuine field reads **after** strings containing
+  closing delimiters: `}}` in interpolations and `%}` in statements. The strings
+  contain fake field/root-looking template text which is excluded independently
+  by negative cursor requests. Block YAML and single-quoted YAML scalar forms
+  avoid YAML escape-normalization scope. One block string includes escaped
+  Jinja quotes to exercise the existing string-boundary behavior.
+- The valid YAML and Jinja forms were accepted by installed **PyYAML 6.0.3** and
+  **Jinja 3.1.6**. These are independent syntax checks only; the retained suite
+  still uses public stdio LSP without executing Jinja or Ansible.
+- Both declaration modes have independently enumerated full oracles:
+  the four-read field group and its key; two incomplete-expression fallback
+  field reads and their key; and all six genuine receiver root reads plus only
+  their root binding. Negative cursors cover fake fields and roots inside each
+  of the four literals, plus a comment containing delimiters and quotes.
+- **RED:** prior lexical commit, independent suite 9 passed / 1 failed,
+  **48 failed requests**: 10 field-group, 14 root-group, and 24 literal-negative
+  requests. Genuine-read origins returned nothing; binding-origin results
+  contained phantom reads with incorrect exact spans, even where cardinality
+  matched the written four-read oracle. Incomplete-expression field fallback
+  and comment-negative controls were already green.
+  Log: `/tmp/field-expressions-slice10-red.log`.
+- **Smallest fix:** replace only the interpolation/statement closing-delimiter
+  searches with a quote-aware helper reusing `skipString`. Keep comment scanning
+  and the null-delimiter fallback paths unchanged. No subscript-key escape
+  decoding is implemented.
+- **GREEN:** independent suite **10/10**, **272 exact reference requests**;
+  `make test` passed; isolated baseline semantic suite
+  **338 cases, 0 failures**.
+
+## Known limitations
 
 ### Static-subscript literal escapes
 
@@ -170,23 +201,11 @@ Escaped quotes, backslashes, Unicode escapes, and other decoded-key aliases are
 not claimed as supported. Honoring escapes while skipping string boundaries
 (slice 4) is different from decoding field-key literals.
 
-### Delimiters inside quoted literals — separate concern
-
-By code inspection, `scanScalarNames` finds the next `}}`/`%}` with a plain
-substring search, without skipping quoted literals. Installed Jinja accepted
-both `{{ '}}' ~ data.field }}` and
-`{% set v = '%}' ~ data.field %}{{ v }}`; the current scalar scanner can truncate
-those bodies before the genuine field read. A string containing an apparent
-later opening tag can conversely be scanned as a phantom expression after the
-premature close. This is a separate, pre-existing delimiter-boundary concern;
-it has **not** been repaired or silently added to this lexical change, and the
-existing string-control tests do not claim coverage of it.
-
 ## Final verification
 
 - `make build`: passed.
 - `DEVELOPER_DIR=/nonexistent zig test test/field_expressions_e2e.zig`:
-  **9 tests passed**, **212 reference requests** with exact full-result oracles.
+  **10 tests passed**, **272 reference requests** with exact full-result oracles.
 - `make test`: passed.
 - `DEVELOPER_DIR=/nonexistent zig test test/e2e.zig`:
   **338 semantic cases, 0 failures**.
