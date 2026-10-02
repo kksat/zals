@@ -79,6 +79,38 @@ test "stdio filter and test names are not field reads, including dotted qualifie
     }, &.{}, &.{});
 }
 
+const method_reads: []const m.ExpectedLocation = &.{
+    m.span(tasks, "stored {{ item.<method_field> }}"),
+    m.span(tasks, "spaced-call {{ item.method_field (other.<method_field>) }}"),
+    m.span(tasks, "returned-field {{ item.invoke().<method_field> }}"),
+    m.span(tasks, "method-argument {{ item.invoke(other['<method_field>']) }}"),
+};
+const method_with_definitions: []const m.ExpectedLocation = &.{
+    m.span(tasks, "stored {{ item.<method_field> }}"),
+    m.span(tasks, "spaced-call {{ item.method_field (other.<method_field>) }}"),
+    m.span(tasks, "returned-field {{ item.invoke().<method_field> }}"),
+    m.span(tasks, "method-argument {{ item.invoke(other['<method_field>']) }}"),
+    m.span(defaults, "  <method_field>: stored-value"),
+};
+
+test "stdio called methods are not field reads but their arguments and return-value fields are" {
+    try checkGroup(&.{
+        m.cursor(tasks, "dot-call {{ item.<method_field>() }}"),
+        m.cursor(tasks, "spaced-call {{ item.<method_field> ("),
+        m.cursor(tasks, "bracket-call {{ item['<method_field>']() }}"),
+        m.cursor(tasks, "double-call {{ item[ \"<method_field>\" ] () }}"),
+        m.cursor(tasks, "returned-field {{ item.<invoke>()."),
+        m.cursor(tasks, "method-argument {{ item.<invoke>(other"),
+    }, &.{}, &.{});
+    try checkGroup(&.{
+        m.cursor(tasks, "stored {{ item.<method_field> }}"),
+        m.cursor(tasks, "spaced-call {{ item.method_field (other.<method_field>) }}"),
+        m.cursor(tasks, "returned-field {{ item.invoke().<method_field> }}"),
+        m.cursor(tasks, "method-argument {{ item.invoke(other['<method_field>']) }}"),
+        m.cursor(defaults, "  <method_field>: stored-value"),
+    }, method_reads, method_with_definitions);
+}
+
 /// Both reference modes have separate, complete written answers. Every origin
 /// sees the same Workspace-wide leaf-NAME group, not receiver object identity.
 fn checkGroup(origins: []const m.Anchor, reads: []const m.ExpectedLocation, with_definitions: []const m.ExpectedLocation) !void {

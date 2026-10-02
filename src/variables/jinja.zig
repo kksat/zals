@@ -124,7 +124,7 @@ fn scanExpressionNames(allocator: Allocator, text: []const u8, base: usize, name
                 const end = skipString(text, start);
                 const close = skipWhitespace(text, end);
                 if (end > start + 1 and text[end - 1] == text[start] and close < text.len and text[close] == ']') {
-                    try out.append(.{ .name = text[start + 1 .. end - 1], .start = base + start + 1, .end = base + end - 1 });
+                    if (!followedByCall(text, close + 1)) try out.append(.{ .name = text[start + 1 .. end - 1], .start = base + start + 1, .end = base + end - 1 });
                     i = close + 1;
                     prev = .other;
                     continue;
@@ -159,7 +159,7 @@ fn scanExpressionNames(allocator: Allocator, text: []const u8, base: usize, name
             } else if (isKeyword(word)) {
                 prev = .other;
             } else if (prev == .dot or prev == .pipe or prev == .is_test or prev == .plugin_name) {
-                if (prev == .dot and names == .fields) try out.append(.{ .name = word, .start = base + i, .end = base + j });
+                if (prev == .dot and names == .fields and !followedByCall(text, j)) try out.append(.{ .name = word, .start = base + i, .end = base + j });
                 prev = if (prev == .dot) .other else .plugin_name;
             } else {
                 if (names == .roots) try out.append(.{ .name = word, .start = base + i, .end = base + j });
@@ -172,6 +172,11 @@ fn scanExpressionNames(allocator: Allocator, text: []const u8, base: usize, name
         prev = .other;
         can_subscript = c == ']' or c == ')' or c == '}';
     }
+}
+
+fn followedByCall(text: []const u8, start: usize) bool {
+    const next = skipWhitespace(text, start);
+    return next < text.len and text[next] == '(';
 }
 
 fn skipWhitespace(text: []const u8, start: usize) usize {

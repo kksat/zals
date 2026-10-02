@@ -58,3 +58,18 @@ DEVELOPER_DIR=/nonexistent zig test test/e2e.zig
   `make test` passed; semantic suite **338 cases, 0 failures**.
   The first combined command exceeded its outer 180-second deadline during
   semantic verification; an isolated rerun completed successfully in 24 seconds.
+
+## Slice 3 — called methods
+
+- Added one test with negative cursors on dot and static-subscript callees,
+  including whitespace before calls, plus complete positive oracles for stored
+  values, method arguments, and fields read from a call's result.
+- **RED:** previous lexical commit, independent suite 2 passed / 1 failed;
+  all 12 negative requests failed. Called `method_field` names returned the
+  eight-site field group (nine with its key); `invoke` names returned two
+  false field reads. Log: `/tmp/field-expressions-slice3-red.log`.
+- **Smallest fix:** do not emit a dot/subscript field name immediately followed
+  by a call's opening parenthesis, allowing whitespace. Continue scanning the
+  call's argument and result expressions normally.
+- **GREEN:** independent suite 3/3; `make test` passed; semantic suite
+  **338 cases, 0 failures**.

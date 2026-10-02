@@ -14,3 +14,13 @@
       middle-test {{ record is acme.filter_field.check }}
       filter-argument {{ record | acme.tools.apply(other.filter_field) }}
       test-argument {{ record is acme.tools.check(other['filter_field']) }}
+- name: Distinguish called methods from stored fields
+  ansible.builtin.debug:
+    msg: |-
+      stored {{ item.method_field }}
+      dot-call {{ item.method_field() }}
+      spaced-call {{ item.method_field (other.method_field) }}
+      bracket-call {{ item['method_field']() }}
+      double-call {{ item[ "method_field" ] () }}
+      returned-field {{ item.invoke().method_field }}
+      method-argument {{ item.invoke(other['method_field']) }}
