@@ -82,6 +82,27 @@ test itself neither imports Jinja nor evaluates templates.
   `/tmp/field-lexical-set-existing-semantic.log`,
   `/tmp/field-lexical-set-unit.log`.
 
+## Marker verification follow-up — whitespace preservation
+
+Extended the same two behavioral tracers with valid `+` preservation markers:
+`{%+ raw %}...{%+ endraw +%}` and `{%+ set ns.region = other.region +%}`.
+Their syntax was accepted independently by installed Jinja. An opening raw tag
+with a trailing `+` is invalid and is not newly recognized as a raw opener.
+
+- **RED at 2835e80:** both tests failed. Raw: 160 requests, 34 failed checks;
+  assignment: 130 requests, 28 failed checks. The marker hid the tag's first
+  keyword, reintroducing literal reads and assignment-target reads.
+  Log: `/tmp/field-lexical-preserve-red.log`.
+- **Minimal fix:** recognize valid preservation markers alongside trim markers
+  when identifying raw/endraw tags and a statement's leading keyword.
+- **GREEN:** 2/2 tests, **290 public requests**, zero failures.
+  Log: `/tmp/field-lexical-preserve-green.log`.
+- Final regression checks: **496 semantic cases**, zero failures;
+  **10 lexical tests / 272 exact reference requests** pass; unit tests pass.
+  Logs: `/tmp/field-lexical-final-existing-semantic.log`,
+  `/tmp/field-lexical-final-existing-expressions.log`,
+  `/tmp/field-lexical-final-unit.log`.
+
 ## Boundaries
 
 This work does not normalize YAML scalar escapes or decode static Jinja key

@@ -16,6 +16,7 @@ const raw_reads: []const m.ExpectedLocation = &.{
     m.span(tasks, "resumed {{ data.<boundary_field> }}"),
     m.span(tasks, "}}\" ~ data.<boundary_field> }}"),
     m.span(unrelated, "{{ other.<boundary_field> }}"),
+    m.span(tasks, "kept {{ data['<boundary_field>'] }}"),
 };
 const raw_with_declarations: []const m.ExpectedLocation = &.{
     m.span(tasks, "🛰 before {{ data.<boundary_field> }}"),
@@ -23,6 +24,7 @@ const raw_with_declarations: []const m.ExpectedLocation = &.{
     m.span(tasks, "resumed {{ data.<boundary_field> }}"),
     m.span(tasks, "}}\" ~ data.<boundary_field> }}"),
     m.span(unrelated, "{{ other.<boundary_field> }}"),
+    m.span(tasks, "kept {{ data['<boundary_field>'] }}"),
     m.span(defaults, "  <boundary_field>: boundary-value"),
 };
 const raw_targets: []const m.ExpectedLocation = &.{m.span(defaults, "  <boundary_field>: boundary-value")};
@@ -42,6 +44,7 @@ test "stdio raw blocks exclude literal fields roots and markup while later reads
         m.cursor(tasks, "resumed {{ data.<boundary_field> }}"),
         m.cursor(tasks, "}}\" ~ data.<boundary_field> }}"),
         m.cursor(unrelated, "{{ other.<boundary_field> }}"),
+        m.cursor(tasks, "kept {{ data['<boundary_field>'] }}"),
         m.cursor(defaults, "  <boundary_field>: boundary-value"),
     }, raw_reads, raw_with_declarations, raw_targets, &.{ "**Variable field** `boundary_field`", "`boundary-value`" }, &.{"**Variable**"});
     try session.group(&.{
@@ -67,6 +70,11 @@ test "stdio raw blocks exclude literal fields roots and markup while later reads
         m.cursor(tasks, "ns.boundary_field = <dummy>.boundary_field %}"),
         m.cursor(tasks, "quoted {{ \"{% raw %}{{ dummy.<boundary_field> }}"),
         m.cursor(tasks, "quoted {{ \"{% raw %}{{ <dummy>.boundary_field }}"),
+        m.cursor(tasks, "preserved-raw {%+ <raw> %}"),
+        m.cursor(tasks, "{%+ <endraw> +%} kept"),
+        m.cursor(tasks, "preserved-raw {%+ raw %}{{ dummy.<boundary_field> }}"),
+        m.cursor(tasks, "preserved-raw {%+ raw %}{{ <dummy>.boundary_field }}"),
+        m.cursor(tasks, "boundary_field }} {{ <boundary_root> }}{%+ endraw"),
     });
     try session.finish();
 }
@@ -83,6 +91,7 @@ const assignment_reads: []const m.ExpectedLocation = &.{
     m.span(assignments, "capture {% set ns.region %}{{ other.<region> }}"),
     m.span(assignments, "capture-filter {% set ns.region | acme.tools.apply(other.<region>)"),
     m.span(unrelated_assignments, "{{ unrelated.<region> }}"),
+    m.span(assignments, "preserved-set {%+ set ns.region = other.<region> +%}"),
 };
 const assignments_with_declarations: []const m.ExpectedLocation = &.{
     m.span(assignments, "🛰 same-name {% set ns.region = other.<region> %}"),
@@ -94,6 +103,7 @@ const assignments_with_declarations: []const m.ExpectedLocation = &.{
     m.span(assignments, "capture {% set ns.region %}{{ other.<region> }}"),
     m.span(assignments, "capture-filter {% set ns.region | acme.tools.apply(other.<region>)"),
     m.span(unrelated_assignments, "{{ unrelated.<region> }}"),
+    m.span(assignments, "preserved-set {%+ set ns.region = other.<region> +%}"),
     m.span(defaults, "  <region>: region-value"),
 };
 const assignment_targets: []const m.ExpectedLocation = &.{m.span(defaults, "  <region>: region-value")};
@@ -133,6 +143,7 @@ test "stdio set field targets are not reads while RHS fields and subscript selec
         m.cursor(assignments, "capture {% set ns.region %}{{ other.<region> }}"),
         m.cursor(assignments, "capture-filter {% set ns.region | acme.tools.apply(other.<region>)"),
         m.cursor(unrelated_assignments, "{{ unrelated.<region> }}"),
+        m.cursor(assignments, "preserved-set {%+ set ns.region = other.<region> +%}"),
         m.cursor(defaults, "  <region>: region-value"),
     }, assignment_reads, assignments_with_declarations, assignment_targets, &.{ "**Variable field** `region`", "`region-value`" }, &.{ "**Variable**", "separate-root-region" });
     try session.group(&.{
@@ -156,6 +167,7 @@ test "stdio set field targets are not reads while RHS fields and subscript selec
         m.cursor(assignments, "named-selector {% set ns.<region> = other[chooser.selector]"),
         m.cursor(assignments, "capture {% set ns.<region> %}"),
         m.cursor(assignments, "capture-filter {% set ns.<region> |"),
+        m.cursor(assignments, "preserved-set {%+ set ns.<region> ="),
     });
     try session.finish();
 }

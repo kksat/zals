@@ -6,3 +6,4 @@
       🛰 {%- raw -%}{{ dummy["boundary_field"] }} {{ boundary_root }} {%- endraw -%} resumed {{ data.boundary_field }}
       {% raw %}unclosed ' {# {{ dummy.boundary_field }} {% set ns.boundary_field = dummy.boundary_field %} {% endraw %} tail {{ boundary_root }}
       quoted {{ "{% raw %}{{ dummy.boundary_field }}" ~ data.boundary_field }}
+      preserved-raw {%+ raw %}{{ dummy.boundary_field }} {{ boundary_root }}{%+ endraw +%} kept {{ data['boundary_field'] }}

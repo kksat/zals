@@ -10,3 +10,4 @@
       capture-filter {% set ns.region | acme.tools.apply(other.region) %}literal{% endset %}
       root-read {{ region }}
       root-selector {{ selector }}
+      preserved-set {%+ set ns.region = other.region +%}

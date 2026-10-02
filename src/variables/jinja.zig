@@ -100,8 +100,10 @@ fn scanScalarNames(allocator: Allocator, raw: []const u8, base: usize, names: Na
 }
 
 fn tagIs(body: []const u8, name: []const u8) bool {
-    const start: usize = if (body.len > 0 and body[0] == '-') 1 else 0;
-    const end = if (body.len > 0 and body[body.len - 1] == '-') body.len - 1 else body.len;
+    const start: usize = if (body.len > 0 and (body[0] == '-' or body[0] == '+')) 1 else 0;
+    // Jinja accepts preservation at endraw's closing edge, but not raw's.
+    const preserve_end = std.mem.eql(u8, name, "endraw");
+    const end = if (body.len > 0 and (body[body.len - 1] == '-' or (preserve_end and body[body.len - 1] == '+'))) body.len - 1 else body.len;
     if (end < start) return false;
     return std.mem.eql(u8, std.mem.trim(u8, body[start..end], " \t\r\n"), name);
 }
@@ -133,9 +135,9 @@ pub fn scanExpressionFields(allocator: Allocator, text: []const u8, base: usize,
 
 fn scanExpressionNames(allocator: Allocator, text: []const u8, base: usize, names: Names, is_statement: bool, out: *std.array_list.Managed(Ident)) !void {
     _ = allocator;
-    // Only the tag's first word can introduce a filter block. '-' is Jinja's
-    // optional whitespace-control marker immediately after the opening tag.
-    const statement_start = skipWhitespace(text, if (text.len > 0 and text[0] == '-') 1 else 0);
+    // Only the tag's first word introduces a filter block or set target.
+    // '-' trims whitespace and '+' preserves it at the tag's opening edge.
+    const statement_start = skipWhitespace(text, if (text.len > 0 and (text[0] == '-' or text[0] == '+')) 1 else 0);
     const Prev = enum { other, dot, pipe, is_test, plugin_name, plugin_dot };
     var prev: Prev = .other;
     var can_subscript = false;
