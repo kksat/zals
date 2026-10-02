@@ -9,6 +9,9 @@
   ansible.builtin.debug:
     msg: |-
       🛰 {{ static_item['resourcegroup_name'] }} / {{ static_backup["resourcegroup_name"] }}
+- name: Escaped YAML key spelling still names a field
+  debug:
+    msg: "{{ escaped_item.escaped_key }}"
 - name: Called member names are not data field reads
   ansible.builtin.debug:
     msg: "{{ field_item.resourcegroup_name() }}"

@@ -95,11 +95,27 @@ fn schemaOnlyCases() [schema_only_origins.len * 5]m.Case {
     return out;
 }
 
+fn escapedKeyCases() [10]m.Case {
+    var out: [10]m.Case = undefined;
+    const escaped_origins = [_]struct { name: []const u8, at: m.Anchor }{
+        .{ .name = "read", .at = m.cursor(tasks, "{{ escaped_item.<escaped_key> }}") },
+        .{ .name = "escaped declaration", .at = m.cursor(vars, "  \"<\\u0065scaped_key>\": escaped-value") },
+    };
+    for (escaped_origins, 0..) |origin, i| {
+        out[i * 5] = .{ .name = "field/escaped YAML key from " ++ origin.name ++ ": reads", .method = .references, .from = origin.at, .include_declaration = false, .expected = &.{m.span(tasks, "{{ escaped_item.<escaped_key> }}")} };
+        out[i * 5 + 1] = .{ .name = "field/escaped YAML key from " ++ origin.name ++ ": quote-free declaration", .method = .references, .from = origin.at, .include_declaration = true, .expected = &.{ m.span(tasks, "{{ escaped_item.<escaped_key> }}"), m.span(vars, "  \"<\\u0065scaped_key>\": escaped-value") } };
+        out[i * 5 + 2] = .{ .name = "field/escaped YAML key from " ++ origin.name ++ ": quote-free definition", .method = .definition, .from = origin.at, .expected = &.{m.span(vars, "  \"<\\u0065scaped_key>\": escaped-value")} };
+        out[i * 5 + 3] = .{ .name = "field/escaped YAML key from " ++ origin.name ++ ": quote-free implementation", .method = .implementation, .from = origin.at, .expected = &.{m.span(vars, "  \"<\\u0065scaped_key>\": escaped-value")} };
+        out[i * 5 + 4] = .{ .name = "field/escaped YAML key from " ++ origin.name ++ ": parsed value hover", .method = .hover, .from = origin.at, .expected = &.{m.span(origin.at.path, origin.at.snippet)}, .markdown_contains = &.{ "**Variable field** `escaped_key`", "escaped-value" } };
+    }
+    return out;
+}
+
 const called = m.cursor(tasks, "{{ field_item.<resourcegroup_name>() }}");
 const description = m.cursor(specs, "            <description>: Resource group field contract.");
 const unbound = m.cursor(tasks, "{{ field_item.<unbound_field> }}");
 const root = m.cursor(tasks, "/ {{ <unbound_field> }}");
-pub const all = ordinaryCases() ++ schemaOnlyCases() ++ [_]m.Case{
+pub const all = ordinaryCases() ++ schemaOnlyCases() ++ escapedKeyCases() ++ [_]m.Case{
     .{ .name = "field/called member: no references without declarations", .method = .references, .from = called, .include_declaration = false, .expected = &.{} },
     .{ .name = "field/called member: no references with declarations", .method = .references, .from = called, .include_declaration = true, .expected = &.{} },
     .{ .name = "field/called member: no field definition", .method = .definition, .from = called, .expected = &.{} },

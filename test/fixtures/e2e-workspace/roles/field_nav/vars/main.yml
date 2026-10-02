@@ -1,3 +1,4 @@
 ---
 field_settings:
   "resourcegroup_name": vars-group
+  "\u0065scaped_key": escaped-value

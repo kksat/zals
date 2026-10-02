@@ -217,6 +217,11 @@ pub fn scalarRange(node: *const Node, text: []const u8, name: []const u8) struct
         if (std.mem.indexOf(u8, raw, name)) |off| {
             return .{ .start = node.start + off, .end = node.start + off + name.len };
         }
+        // Escaped spellings need not contain the decoded name verbatim. Their
+        // source span still selects the key contents, never its YAML quotes.
+        if (raw.len >= 2 and (raw[0] == '\'' or raw[0] == '"') and raw[raw.len - 1] == raw[0]) {
+            return .{ .start = node.start + 1, .end = node.end - 1 };
+        }
     }
     return .{ .start = node.start, .end = node.end };
 }
