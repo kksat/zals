@@ -1,0 +1,6 @@
+- hosts: all
+  roles:
+    - fixture.metrics.report
+  tasks:
+    - fixture.metrics.record:
+        name: example

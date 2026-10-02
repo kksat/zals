@@ -1,4 +1,4 @@
-//! `workspace/symbol` (ADR-0032): a flat list of Workspace symbols matching
+//! `workspace/symbol` (ADR-0032, ADR-0038): Workspace symbols matching
 //! the query, each with its nearest parent by file location as
 //! `containerName`.
 
@@ -40,7 +40,7 @@ pub fn workspaceSymbol(self: *Server, a: Allocator, params: Value) !Value {
     return .{ .array = arr };
 }
 
-/// Workspace symbols of `v` whose name matches `query`.
+/// Workspace symbols matching a name or collection-qualified member query.
 pub fn collect(a: Allocator, v: *wv.View, query: []const u8) ![]const Info {
     var out = std.array_list.Managed(Info).init(a);
     const colls = try collections.workspaceCollections(a, v);
@@ -48,6 +48,14 @@ pub fn collect(a: Allocator, v: *wv.View, query: []const u8) ![]const Info {
     for (colls) |c| {
         if (!symbols.matches(c.name, query)) continue;
         try out.append(.{ .name = c.name, .kind = .package, .uri = c.metadata_uri, .whole_file = true });
+    }
+
+    // Collection module/plugin source files are symbols, not YAML facts.
+    for (v.files) |f| {
+        const c = collectionAt(colls, f.path) orelse continue;
+        const name = (try sourceMemberName(a, f.path[c.dir.len + 1 ..])) orelse continue;
+        if (!try memberMatches(a, name, c.name, query)) continue;
+        try out.append(.{ .name = name, .kind = .module, .uri = f.uri, .whole_file = true, .container = c.name });
     }
 
     // Roles, one per directory, pointing at tasks/main.yml when present.
@@ -124,6 +132,36 @@ pub fn collect(a: Allocator, v: *wv.View, query: []const u8) ![]const Info {
     return out.toOwnedSlice();
 }
 
+/// One symbol per module/plugin source, not per Python function or export.
+fn sourceMemberName(a: Allocator, relative_path: []const u8) !?[]const u8 {
+    const prefix = "plugins/";
+    if (!std.mem.startsWith(u8, relative_path, prefix)) return null;
+    const extension_len: usize = if (std.mem.endsWith(u8, relative_path, ".py")) 3 else if (std.mem.endsWith(u8, relative_path, ".ps1")) 4 else return null;
+    const source = relative_path[prefix.len..];
+    const slash = std.mem.indexOfScalar(u8, source, '/') orelse return null;
+    const plugin_type = source[0..slash];
+    if (extension_len == 4 and !std.mem.eql(u8, plugin_type, "modules")) return null;
+    const public_types = [_][]const u8{
+        "modules",  "action",  "become",    "cache",  "callback", "cliconf", "connection",
+        "filter",   "httpapi", "inventory", "lookup", "netconf",  "shell",   "strategy",
+        "terminal", "test",    "vars",
+    };
+    for (public_types) |kind| {
+        if (!std.mem.eql(u8, plugin_type, kind)) continue;
+        const name = source[slash + 1 .. source.len - extension_len];
+        var parts = std.mem.splitScalar(u8, name, '/');
+        while (parts.next()) |part| {
+            if (part.len == 0 or part[0] == '_' or part[0] == '.') return null;
+        }
+        const dotted = try a.dupe(u8, name);
+        for (dotted) |*char| if (char.* == '/') {
+            char.* = '.';
+        };
+        return dotted;
+    }
+    return null;
+}
+
 /// Keep member names short; search also accepts the collection-qualified name.
 fn memberMatches(a: Allocator, name: []const u8, container: []const u8, query: []const u8) !bool {
     if (symbols.matches(name, query)) return true;
@@ -133,12 +171,16 @@ fn memberMatches(a: Allocator, name: []const u8, container: []const u8, query: [
 
 /// FQCN of the Workspace collection that contains `path`, if any.
 fn collectionOf(colls: []const collections.Known, path: []const u8) ?[]const u8 {
+    return if (collectionAt(colls, path)) |c| c.name else null;
+}
+
+fn collectionAt(colls: []const collections.Known, path: []const u8) ?collections.Known {
     var best: ?collections.Known = null;
     for (colls) |c| {
         if (path.len <= c.dir.len or !std.mem.startsWith(u8, path, c.dir) or path[c.dir.len] != '/') continue;
         if (best == null or c.dir.len > best.?.dir.len) best = c;
     }
-    return if (best) |b| b.name else null;
+    return best;
 }
 
 fn relative(root: []const u8, path: []const u8) []const u8 {

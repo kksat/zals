@@ -59,6 +59,9 @@ pub fn extract(a: Allocator, path: []const u8, text: []const u8) !Facts {
 /// Facts for the file at `path` in the Workspace rooted at `root` (used to
 /// resolve file references).
 pub fn extractIn(a: Allocator, root: ?[]const u8, path: []const u8, text: []const u8) !Facts {
+    // Collection source files contribute path-based symbols only. Python
+    // DOCUMENTATION strings are not Ansible plays or variable definitions.
+    if (!@import("discover.zig").isAnsibleFile(std.fs.path.basename(path))) return .{};
     var forest = yaml.parse(a, text) catch return .{};
     defer forest.deinit();
 

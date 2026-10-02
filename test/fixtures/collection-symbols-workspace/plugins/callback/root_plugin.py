@@ -1,0 +1,2 @@
+class CallbackModule:
+    pass

@@ -30,8 +30,8 @@ pub const View = struct {
         var it = server.documents.docs.valueIterator();
         while (it.next()) |doc| {
             const p = paths.uriToPath(a, doc.*.uri) catch continue;
-            if (!under(p, root)) continue;
-            if (!discover.isAnsibleFile(std.fs.path.basename(p))) continue;
+            if (!discover.belongsToWorkspace(root, p, server.settings.root_marker)) continue;
+            if (!discover.isWorkspaceFile(p)) continue;
             try open.put(p, doc.*);
         }
 
@@ -115,10 +115,6 @@ fn roleRefResolvesTo(base: roles.Resolver, file_path: []const u8, ref: facts_mod
         if (std.mem.eql(u8, dir, target)) return true;
     }
     return false;
-}
-
-fn under(path: []const u8, root: []const u8) bool {
-    return path.len > root.len and std.mem.startsWith(u8, path, root) and path[root.len] == '/';
 }
 
 fn readFile(a: Allocator, path: []const u8) ?[]const u8 {

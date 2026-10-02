@@ -1,0 +1,2 @@
+class LookupModule:
+    pass

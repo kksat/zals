@@ -1,7 +1,8 @@
 //! Discover the Ansible files of a Workspace (ADR-0031).
 //!
 //! The walk starts at the Workspace root and keeps `.yml`, `.yaml`, and `.j2`
-//! files. It skips hidden directories, package and virtual-environment
+//! files, plus `.py`/`.ps1` source candidates below `plugins/` (ADR-0038).
+//! It skips hidden directories, package and virtual-environment
 //! directories, and nested Workspaces (directories holding the root marker).
 //! It also records every `roles/` directory and every directory that contains
 //! `ansible_collections/`, for role and collection resolution.
@@ -11,7 +12,7 @@ const Allocator = std.mem.Allocator;
 const roots = @import("roots.zig");
 
 pub const Discovery = struct {
-    /// Absolute paths of Ansible files.
+    /// Absolute paths of navigation files and collection-source candidates.
     files: []const []const u8,
     /// Absolute paths of directories named `roles`.
     roles_dirs: []const []const u8,
@@ -53,6 +54,31 @@ pub fn isAnsibleFile(name: []const u8) bool {
         std.mem.endsWith(u8, name, ".j2");
 }
 
+/// Apply the same walk boundaries to open documents and watched/saved files.
+/// Their paths may not be on disk yet, but excluded ancestor names still count.
+pub fn belongsToWorkspace(root: []const u8, path: []const u8, marker: []const u8) bool {
+    if (path.len <= root.len or !std.mem.startsWith(u8, path, root) or path[root.len] != std.fs.path.sep) return false;
+    var dir_path = std.fs.path.dirname(path) orelse return false;
+    while (!std.mem.eql(u8, dir_path, root)) {
+        if (isExcludedDir(std.fs.path.basename(dir_path))) return false;
+        if (std.fs.cwd().openDir(dir_path, .{})) |opened| {
+            var dir = opened;
+            defer dir.close();
+            if (exists(dir, roots.effectiveMarker(marker)) or exists(dir, "pyvenv.cfg")) return false;
+        } else |_| {}
+        dir_path = std.fs.path.dirname(dir_path) orelse return false;
+    }
+    return true;
+}
+
+/// YAML/Jinja navigation files and Python/PowerShell source candidates.
+/// Providers decide which candidates are public members of a metadata root.
+pub fn isWorkspaceFile(path: []const u8) bool {
+    if (isAnsibleFile(std.fs.path.basename(path))) return true;
+    return (std.mem.endsWith(u8, path, ".py") or std.mem.endsWith(u8, path, ".ps1")) and
+        std.mem.indexOf(u8, path, "/plugins/") != null;
+}
+
 const Walker = struct {
     allocator: Allocator,
     marker: []const u8,
@@ -84,17 +110,15 @@ const Walker = struct {
                     try subdirs.append(try std.fs.path.join(self.allocator, &.{ path, entry.name }));
                 },
                 .file => {
-                    if (isAnsibleFile(entry.name)) {
-                        try self.files.append(try std.fs.path.join(self.allocator, &.{ path, entry.name }));
-                    }
+                    const file_path = try std.fs.path.join(self.allocator, &.{ path, entry.name });
+                    if (isWorkspaceFile(file_path)) try self.files.append(file_path);
                 },
                 .sym_link => {
                     // Follow symlinked files; symlinked directories could loop.
-                    if (!isAnsibleFile(entry.name)) continue;
+                    const file_path = try std.fs.path.join(self.allocator, &.{ path, entry.name });
+                    if (!isWorkspaceFile(file_path)) continue;
                     const st = dir.statFile(entry.name) catch continue;
-                    if (st.kind == .file) {
-                        try self.files.append(try std.fs.path.join(self.allocator, &.{ path, entry.name }));
-                    }
+                    if (st.kind == .file) try self.files.append(file_path);
                 },
                 else => {},
             }

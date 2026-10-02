@@ -1,0 +1,2 @@
+class ModuleDocFragment:
+    pass

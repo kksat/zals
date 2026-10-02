@@ -240,6 +240,8 @@ test "unsaved metadata edits update collection symbols and FQCN role identity" {
     try session.symbols("contract.edit", &.{
         .{ .name = "contract.edit", .kind = 4, .path = "galaxy.yaml" },
         .{ .name = "root_role", .kind = 2, .container = "contract.edit", .path = "roles/root_role/tasks/main.yml" },
+        .{ .name = "root_probe", .kind = 2, .container = "contract.edit", .path = "plugins/modules/root_probe.py" },
+        .{ .name = "root_plugin", .kind = 2, .container = "contract.edit", .path = "plugins/callback/root_plugin.py" },
     });
     const from = m.cursor("site.yml", "- <contract.root.root_role>");
     try session.navigation("textDocument/implementation", from, &.{});
@@ -253,11 +255,157 @@ test "unsaved metadata edits update collection symbols and FQCN role identity" {
     try session.navigationAt("textDocument/implementation", source, &.{"roles/root_role/tasks/main.yml"});
 }
 
+test "Workspace modules have metadata collection containers and real source targets" {
+    var session = try Session.start();
+    defer session.deinit();
+    try session.symbols("_probe", &.{
+        .{ .name = "standard_probe", .kind = 2, .container = "contract.standard", .path = "ansible_collections/contract/standard/plugins/modules/standard_probe.py" },
+        .{ .name = "dotted_probe", .kind = 2, .container = "contract.dotted", .path = "ansible_collections/contract.dotted/plugins/modules/dotted_probe.py" },
+        .{ .name = "arbitrary_probe", .kind = 2, .container = "contract.arbitrary", .path = "ansible_collections/unusual/deep/content/plugins/modules/arbitrary_probe.py" },
+        .{ .name = "root_probe", .kind = 2, .container = "contract.root", .path = "plugins/modules/root_probe.py" },
+    });
+}
+
+test "Workspace plugins have metadata collection containers and real source targets" {
+    var session = try Session.start();
+    defer session.deinit();
+    try session.symbols("_plugin", &.{
+        .{ .name = "standard_plugin", .kind = 2, .container = "contract.standard", .path = "ansible_collections/contract/standard/plugins/lookup/standard_plugin.py" },
+        .{ .name = "dotted_plugin", .kind = 2, .container = "contract.dotted", .path = "ansible_collections/contract.dotted/plugins/filter/dotted_plugin.py" },
+        .{ .name = "arbitrary_plugin", .kind = 2, .container = "contract.arbitrary", .path = "ansible_collections/unusual/deep/content/plugins/inventory/arbitrary_plugin.py" },
+        .{ .name = "root_plugin", .kind = 2, .container = "contract.root", .path = "plugins/callback/root_plugin.py" },
+    });
+}
+
+test "private source paths and helper files are not collection member symbols" {
+    var session = try Session.start();
+    defer session.deinit();
+    try session.symbols("private", &.{});
+    try session.symbols("__init__", &.{});
+    try session.symbols("excluded_", &.{});
+}
+
+test "Windows modules match collection-qualified names" {
+    var session = try Session.start();
+    defer session.deinit();
+    try session.symbols("contract.dotted.windows_member", &.{
+        .{ .name = "windows_member", .kind = 2, .container = "contract.dotted", .path = "ansible_collections/contract.dotted/plugins/modules/windows_member.ps1" },
+    });
+}
+
+test "nested module sources use dotted plugin-relative names" {
+    var session = try Session.start();
+    defer session.deinit();
+    try session.symbols("CONTRACT.DOTTED.NETWORK.NESTED_MEMBER", &.{
+        .{ .name = "network.nested_member", .kind = 2, .container = "contract.dotted", .path = "ansible_collections/contract.dotted/plugins/modules/network/nested_member.py" },
+    });
+}
+
+test "a collection query includes its public roles modules and plugins without renaming" {
+    var session = try Session.start();
+    defer session.deinit();
+    try session.symbols("CoNtRaCt.DoTtEd", &.{
+        .{ .name = "contract.dotted", .kind = 4, .path = "ansible_collections/contract.dotted/galaxy.yml" },
+        .{ .name = "dotted_role", .kind = 2, .container = "contract.dotted", .path = "ansible_collections/contract.dotted/roles/dotted_role/tasks/main.yml" },
+        .{ .name = "dotted_probe", .kind = 2, .container = "contract.dotted", .path = "ansible_collections/contract.dotted/plugins/modules/dotted_probe.py" },
+        .{ .name = "dotted_plugin", .kind = 2, .container = "contract.dotted", .path = "ansible_collections/contract.dotted/plugins/filter/dotted_plugin.py" },
+        .{ .name = "windows_member", .kind = 2, .container = "contract.dotted", .path = "ansible_collections/contract.dotted/plugins/modules/windows_member.ps1" },
+        .{ .name = "network.nested_member", .kind = 2, .container = "contract.dotted", .path = "ansible_collections/contract.dotted/plugins/modules/network/nested_member.py" },
+    });
+    try session.symbols("contract.standard.standard_plugin", &.{
+        .{ .name = "standard_plugin", .kind = 2, .container = "contract.standard", .path = "ansible_collections/contract/standard/plugins/lookup/standard_plugin.py" },
+    });
+}
+
+test "opened or watched venv and nested files never enter Workspace symbols" {
+    var session = try Session.start();
+    defer session.deinit();
+    const excluded = [_][]const u8{
+        "env-custom/ansible_collections/excluded/env/galaxy.yml",
+        "env-custom/ansible_collections/excluded/env/plugins/modules/excluded_venv_source.py",
+        "nested/ansible_collections/excluded/nested/galaxy.yml",
+        "nested/ansible_collections/excluded/nested/plugins/filter/excluded_nested_source.py",
+    };
+    for (excluded) |path| {
+        const location = try session.resolver.location(.{ .file_start = path });
+        try session.client.notify("textDocument/didOpen", .{ .textDocument = .{
+            .uri = location.uri,
+            .languageId = "yaml",
+            .version = @as(u32, 1),
+            .text = try session.resolver.readText(path),
+        } });
+        try session.client.notify("workspace/didChangeWatchedFiles", .{
+            .changes = &.{.{ .uri = location.uri, .type = @as(u32, 2) }},
+        });
+    }
+    try session.symbols("excluded", &.{});
+}
+
+test "Installed role and module sources remain outside Workspace symbols even when opened" {
+    var session = try Session.start();
+    defer session.deinit();
+    try session.navigation("textDocument/implementation", m.cursor("installed-sites.yml", "- <fixture.metrics.report>"), &.{"@deps/ansible_collections/fixture/metrics/roles/report/tasks/main.yml"});
+    const module_path = "@deps/ansible_collections/fixture/metrics/plugins/modules/record.py";
+    const module_source = try session.resolver.location(.{ .file_start = module_path });
+    try session.client.notify("textDocument/didOpen", .{ .textDocument = .{
+        .uri = module_source.uri,
+        .languageId = "python",
+        .version = @as(u32, 1),
+        .text = try session.resolver.readText(module_path),
+    } });
+    try session.symbols("fixture.metrics", &.{});
+    try session.symbols("record", &.{});
+    try session.symbols("report", &.{});
+}
+
+test "Python source buffers never contribute YAML task or variable facts" {
+    var session = try Session.start();
+    defer session.deinit();
+    const path = "ansible_collections/contract.dotted/plugins/modules/dotted_probe.py";
+    const source = try session.resolver.location(.{ .file_start = path });
+    try session.client.notify("textDocument/didOpen", .{ .textDocument = .{
+        .uri = source.uri,
+        .languageId = "python",
+        .version = @as(u32, 1),
+        .text = try session.resolver.readText(path),
+    } });
+    // A pasted documentation example during an unsaved Python edit remains
+    // source text, even if the whole buffer happens to be valid Ansible YAML.
+    try session.client.notify("textDocument/didChange", .{
+        .textDocument = .{ .uri = source.uri, .version = @as(u32, 2) },
+        .contentChanges = &.{.{ .text = "- hosts: all\n  vars:\n    source_only_var: hidden\n  tasks:\n    - name: source_only_task\n      debug: msg=hidden\n" }},
+    });
+    try session.symbols("source_only_", &.{});
+    try session.navigation("textDocument/definition", m.cursor("source-facts.yml", "{{ <source_only_var> }}"), &.{});
+    try session.symbols("contract.dotted.dotted_probe", &.{
+        .{ .name = "dotted_probe", .kind = 2, .container = "contract.dotted", .path = path },
+    });
+}
+
+test "source watcher deletion and creation update collection symbols without disk mutation" {
+    var session = try Session.start();
+    defer session.deinit();
+    const path = "ansible_collections/contract.dotted/plugins/modules/dotted_probe.py";
+    const source = try session.resolver.location(.{ .file_start = path });
+    try session.client.notify("workspace/didChangeWatchedFiles", .{
+        .changes = &.{.{ .uri = source.uri, .type = @as(u32, 3) }},
+    });
+    try session.symbols("contract.dotted.dotted_probe", &.{});
+    try session.client.notify("workspace/didChangeWatchedFiles", .{
+        .changes = &.{.{ .uri = source.uri, .type = @as(u32, 1) }},
+    });
+    try session.symbols("contract.dotted.dotted_probe", &.{
+        .{ .name = "dotted_probe", .kind = 2, .container = "contract.dotted", .path = path },
+    });
+}
+
 test "Workspace root collection symbol targets its actual yaml metadata" {
     var session = try Session.start();
     defer session.deinit();
     try session.symbols("contract.root", &.{
         .{ .name = "contract.root", .kind = 4, .path = "galaxy.yaml" },
         .{ .name = "root_role", .kind = 2, .container = "contract.root", .path = "roles/root_role/tasks/main.yml" },
+        .{ .name = "root_probe", .kind = 2, .container = "contract.root", .path = "plugins/modules/root_probe.py" },
+        .{ .name = "root_plugin", .kind = 2, .container = "contract.root", .path = "plugins/callback/root_plugin.py" },
     });
 }

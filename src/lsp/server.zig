@@ -237,12 +237,12 @@ pub const Server = struct {
         try self.index.syncRoots(self.pool, session, self.settings.root_marker, rescan);
     }
 
-    /// Ask the client to send `workspace/didChangeWatchedFiles` for Ansible
-    /// files, `ansible.cfg`, and `galaxy.yml` (ADR-0031).
+    /// Ask the client to watch navigation and collection source files
+    /// (ADR-0031, ADR-0038), plus configuration and collection metadata.
     pub fn registerFileWatchers(self: *Server, a: Allocator) !void {
         if (!self.can_watch_files) return;
         var watchers = std.json.Array.init(a);
-        for ([_][]const u8{ "**/*.{yml,yaml,j2}", "**/ansible.cfg", "**/galaxy.yml" }) |glob| {
+        for ([_][]const u8{ "**/*.{yml,yaml,j2}", "**/plugins/**/*.{py,ps1}", "**/ansible.cfg", "**/galaxy.{yml,yaml}" }) |glob| {
             var w = json_util.obj(a);
             try w.put("globPattern", json_util.str(glob));
             try watchers.append(.{ .object = w });
@@ -267,7 +267,8 @@ pub const Server = struct {
             self.index.remove(path);
             return;
         };
-        if (!@import("../workspace/discover.zig").isAnsibleFile(std.fs.path.basename(path))) return;
+        const discovery = @import("../workspace/discover.zig");
+        if (!discovery.isWorkspaceFile(path) or !discovery.belongsToWorkspace(root, path, self.settings.root_marker)) return;
         self.index.reindex(root, path);
     }
 
