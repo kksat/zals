@@ -10,6 +10,8 @@ const variables = @import("../variables/root.zig");
 const util = @import("util.zig");
 const vs = @import("variable_source.zig");
 const role_navigation = @import("role_navigation.zig");
+const wv = @import("workspace_view.zig");
+const facts = @import("../workspace/facts.zig");
 
 const Context = struct {
     names: []const []const u8,
@@ -78,7 +80,28 @@ pub fn implementation(self: *Server, a: Allocator, params: Value) !?[]const type
     var source = vs.ServerSource{ .server = self };
     var index = variables.Index.init(a, source.source());
     var out = std.array_list.Managed(types.Location).init(a);
+    const loc = util.cursorAt(self, params) orelse return null;
+    var workspace = try wv.View.forUri(self, a, loc.doc.uri);
     for (context.directories) |dir| {
+        if (workspace) |*view| {
+            if (try wv.view.calleeFiles(a, view.files, dir)) |set| {
+                // Indexed role sources stay immutable facts. A vars load with
+                // no index entry is a bounded dependency fallback, not a
+                // reason to enumerate and reparse the entire role again.
+                var files = std.array_list.Managed(wv.File).init(a);
+                try files.appendSlice(view.files);
+                for (set.loads) |load| {
+                    if (wv.view.find(files.items, load.path) != null) continue;
+                    const uri = try paths.pathToUri(a, load.path);
+                    const text = (try source.source().read(a, uri)) orelse continue;
+                    try files.append(.{ .path = load.path, .uri = uri, .facts = try facts.extractIn(a, view.root, load.path, text) });
+                }
+                for (try wv.view.calleeFieldDefinitions(a, files.items, set, context.names)) |def| {
+                    try out.append(try view.location(def.uri, def.start, def.end));
+                }
+                continue;
+            }
+        }
         const uri = try paths.pathToUri(a, try std.fs.path.join(a, &.{ dir, "tasks", "main.yml" }));
         for (try index.fieldDefinitions(a, uri, context.names[context.names.len - 1])) |def| {
             if (def.site == .argument_specs or !equalPath(def.field_path, context.names)) continue;

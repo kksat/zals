@@ -27,9 +27,19 @@ fall back to ordinary field navigation, explicitly labeled as a Variable field
 rather than asserting a callee contract. Implementation can still return a
 matching concrete callee path without a schema.
 
+Workspace callee implementations reuse persistent `field_defs` and `var_loads`
+facts, replaced by facts extracted from open buffers. The callee file set is
+its conventional sources plus one level of their vars loads, with load-site
+precedence retained. Unindexed dependencies use a bounded source fallback;
+non-Workspace callees retain filesystem discovery. Requests do not re-enumerate
+or reparse an indexed role's disk sources.
+
 The static stdio fixture checks exact positive contracts and negative collisions,
 ordered concrete targets, and both independently authored reference answers from
 all 27 sites of a small group. A separate buffer-edit scenario covers moved,
 quoted schema keys, changed descriptions and concrete values, and complete
-references with stale disk sites excluded. No playbook execution, loop tracing,
+references with stale disk sites excluded. A second buffer scenario changes a
+callee's `include_vars` target and its loaded dictionary, checking the exact
+load/vars/default implementation order. These are preservation oracles for the
+index-reuse refactor, not artificially failing tests. No playbook execution, loop tracing,
 YAML alias expansion, or fixture mutation is involved.

@@ -25,6 +25,8 @@ pub const Occurrence = struct {
     end: usize,
     kind: variables.OccurrenceKind,
     site: ?Site = null,
+    /// Parsed root-and-key path, carried only by field definitions.
+    field_path: []const []const u8 = &.{},
     /// Only set for definitions: whether it can apply at the query site.
     reachable: bool = false,
 };
@@ -90,6 +92,7 @@ pub fn fieldOccurrences(a: Allocator, files: []const File, name: []const u8) ![]
                 .end = def.end,
                 .kind = .definition,
                 .site = def.site,
+                .field_path = def.path,
             });
         }
         for (f.facts.field_refs) |ref| {
@@ -126,6 +129,60 @@ pub fn fieldDefinitions(a: Allocator, files: []const File, name: []const u8, rea
     std.mem.sort(Occurrence, near.items, {}, lessRank);
     try near.appendSlice(far.items);
     return near.toOwnedSlice();
+}
+
+/// An indexed callee's conventional sources and one level of their vars loads.
+/// No invokers join this file set. Null means this callee is not indexed here.
+pub fn calleeFiles(a: Allocator, files: []const File, dir: []const u8) !?Reachability {
+    var base = std.array_list.Managed([]const u8).init(a);
+    for (files) |f| {
+        if (!std.mem.startsWith(u8, f.path, dir) or f.path.len <= dir.len + 1) continue;
+        if (f.path[dir.len] != '/' and f.path[dir.len] != '\\') continue;
+        var components = std.mem.tokenizeAny(u8, f.path[dir.len + 1 ..], "/\\");
+        const first = components.next() orelse continue;
+        for ([_][]const u8{ "defaults", "vars", "tasks", "handlers", "templates", "meta" }) |name| {
+            if (std.mem.eql(u8, first, name)) {
+                try appendUnique(&base, f.path);
+                break;
+            }
+        }
+    }
+    if (base.items.len == 0) return null;
+    const conventional = try a.dupe([]const u8, base.items);
+    var loads = std.array_list.Managed(variables.scope.VarFileLoad).init(a);
+    for (conventional) |path| {
+        const f = find(files, path) orelse continue;
+        for (f.facts.var_loads) |load| {
+            try loads.append(load);
+            try appendUnique(&base, load.path);
+        }
+    }
+    return .{ .paths = try base.toOwnedSlice(), .loads = try loads.toOwnedSlice() };
+}
+
+/// Concrete full-path field bindings from the selected callee file set.
+/// Read stored facts instead of reparsing every role file per request.
+pub fn calleeFieldDefinitions(a: Allocator, files: []const File, set: Reachability, names: []const []const u8) ![]Occurrence {
+    var out = std.array_list.Managed(Occurrence).init(a);
+    for (files) |f| {
+        if (!contains(set.paths, f.path)) continue;
+        for (f.facts.field_defs) |def| {
+            if (def.site == .argument_specs or def.path.len != names.len) continue;
+            var equal = true;
+            for (def.path, names) |x, y| if (!std.mem.eql(u8, x, y)) {
+                equal = false;
+                break;
+            };
+            if (!equal) continue;
+            var site = def.site;
+            if (set.loadSite(f.path)) |load| if (load.rank() < site.rank()) {
+                site = load;
+            };
+            try out.append(.{ .uri = f.uri, .path = f.path, .start = def.start, .end = def.end, .kind = .definition, .site = site, .field_path = def.path, .reachable = true });
+        }
+    }
+    std.mem.sort(Occurrence, out.items, {}, lessRank);
+    return try out.toOwnedSlice();
 }
 
 /// Paths whose definitions can apply in the file at `path` (the Reachable
