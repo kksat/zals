@@ -399,6 +399,14 @@ test "source watcher deletion and creation update collection symbols without dis
     });
 }
 
+test "collection role symbols prefer main yaml tasks over earlier defaults files" {
+    var session = try Session.start();
+    defer session.deinit();
+    try session.symbols("contract.arbitrary.arbitrary_role", &.{
+        .{ .name = "arbitrary_role", .kind = 2, .container = "contract.arbitrary", .path = "ansible_collections/unusual/deep/content/roles/arbitrary_role/tasks/main.yaml" },
+    });
+}
+
 test "Workspace root collection symbol targets its actual yaml metadata" {
     var session = try Session.start();
     defer session.deinit();

@@ -58,13 +58,15 @@ pub fn collect(a: Allocator, v: *wv.View, query: []const u8) ![]const Info {
         try out.append(.{ .name = name, .kind = .module, .uri = f.uri, .whole_file = true, .container = c.name });
     }
 
-    // Roles, one per directory, pointing at tasks/main.yml when present.
-    var role_targets = std.StringArrayHashMap([]const u8).init(a);
+    // Roles prefer their main task source, accepting both YAML extensions.
+    const RoleTarget = struct { uri: []const u8, priority: u8 };
+    var role_targets = std.StringArrayHashMap(RoleTarget).init(a);
     for (v.files) |f| {
         const dir = resolve.enclosingRole(f.path) orelse continue;
-        const main = try std.fs.path.join(a, &.{ dir, "tasks", "main.yml" });
+        const role_path = f.path[dir.len..];
+        const priority: u8 = if (std.mem.eql(u8, role_path, "/tasks/main.yml")) 2 else if (std.mem.eql(u8, role_path, "/tasks/main.yaml")) 1 else 0;
         const gop = try role_targets.getOrPut(dir);
-        if (!gop.found_existing or std.mem.eql(u8, f.path, main)) gop.value_ptr.* = f.uri;
+        if (!gop.found_existing or priority > gop.value_ptr.priority) gop.value_ptr.* = .{ .uri = f.uri, .priority = priority };
     }
     var rit = role_targets.iterator();
     while (rit.next()) |e| {
@@ -74,7 +76,7 @@ pub fn collect(a: Allocator, v: *wv.View, query: []const u8) ![]const Info {
         try out.append(.{
             .name = name,
             .kind = .module,
-            .uri = e.value_ptr.*,
+            .uri = e.value_ptr.uri,
             .whole_file = true,
             .container = container,
         });

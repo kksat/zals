@@ -17,7 +17,8 @@ the Workspace symbol set.
 
 Collections have LSP Package kind and point to the actual metadata file.
 Roles have Module kind and point to their role source (normally
-`tasks/main.yml` or `tasks/main.yaml`). Modules and plugins also have
+`tasks/main.yml`, then `tasks/main.yaml`, then another discovered role file
+when neither main exists). Modules and plugins also have
 Module kind and point directly to their source files. All targets are absolute
 file URIs with zero-width ranges at file start. Member `containerName` is the
 nearest enclosing collection's metadata FQCN.
@@ -104,9 +105,10 @@ TDD evidence (each RED used the same command with `--test-filter`):
 | `nested and Windows` (split into separate tests before GREEN) | expected 1 PowerShell module symbol, got 0 | `Windows modules`: 1 test passed; existing `.ps1` target |
 | `nested module sources` | expected 1 qualified-query result, got 0 | 1 test passed; dotted plugin-relative name |
 | `opened or watched` | expected 0, got 4 venv/nested collection and source symbols | 1 test passed; discovery boundaries preserved |
+| `collection role symbols prefer` | expected main `.yaml` task target, got earlier defaults file | 1 test passed; main task target preferred |
 
 Regression checks: `make test` passed; `make e2e` passed
-265 semantic cases with 0 failures. All 17 collection-member tests passed.
+265 semantic cases with 0 failures. All 18 collection-member tests passed.
 The expanded collection-member suite also covers
 standard/arbitrary/root role targets, short roles in declared collections,
 both metadata extensions, an available Installed role and opened Installed
