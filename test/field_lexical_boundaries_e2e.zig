@@ -71,6 +71,95 @@ test "stdio raw blocks exclude literal fields roots and markup while later reads
     try session.finish();
 }
 
+const assignments = "roles/boundaries/tasks/assignments.yml";
+const unrelated_assignments = "roles/unrelated/tasks/assignments.yml";
+const assignment_reads: []const m.ExpectedLocation = &.{
+    m.span(assignments, "🛰 same-name {% set ns.region = other.<region> %}"),
+    m.span(assignments, "single-subscript {% set ns.region = other['<region>'] %}"),
+    m.span(assignments, "trimmed {%- set ns.region = other[\"<region>\"] -%}"),
+    m.span(assignments, "selector {% set ns.region = other[chooser.<region>].region %}"),
+    m.span(assignments, "selector {% set ns.region = other[chooser.region].<region> %}"),
+    m.span(assignments, "named-selector {% set ns.region = other[chooser.selector].<region> %}"),
+    m.span(assignments, "capture {% set ns.region %}{{ other.<region> }}"),
+    m.span(assignments, "capture-filter {% set ns.region | acme.tools.apply(other.<region>)"),
+    m.span(unrelated_assignments, "{{ unrelated.<region> }}"),
+};
+const assignments_with_declarations: []const m.ExpectedLocation = &.{
+    m.span(assignments, "🛰 same-name {% set ns.region = other.<region> %}"),
+    m.span(assignments, "single-subscript {% set ns.region = other['<region>'] %}"),
+    m.span(assignments, "trimmed {%- set ns.region = other[\"<region>\"] -%}"),
+    m.span(assignments, "selector {% set ns.region = other[chooser.<region>].region %}"),
+    m.span(assignments, "selector {% set ns.region = other[chooser.region].<region> %}"),
+    m.span(assignments, "named-selector {% set ns.region = other[chooser.selector].<region> %}"),
+    m.span(assignments, "capture {% set ns.region %}{{ other.<region> }}"),
+    m.span(assignments, "capture-filter {% set ns.region | acme.tools.apply(other.<region>)"),
+    m.span(unrelated_assignments, "{{ unrelated.<region> }}"),
+    m.span(defaults, "  <region>: region-value"),
+};
+const assignment_targets: []const m.ExpectedLocation = &.{m.span(defaults, "  <region>: region-value")};
+const selector_reads: []const m.ExpectedLocation = &.{
+    m.span(assignments, "other[chooser.<selector>].region"),
+    m.span(unrelated_assignments, "{{ unrelated.<selector> }}"),
+};
+const selectors_with_declarations: []const m.ExpectedLocation = &.{
+    m.span(assignments, "other[chooser.<selector>].region"),
+    m.span(unrelated_assignments, "{{ unrelated.<selector> }}"),
+    m.span(defaults, "  <selector>: selector-value"),
+};
+const selector_targets: []const m.ExpectedLocation = &.{m.span(defaults, "  <selector>: selector-value")};
+const region_root_reads: []const m.ExpectedLocation = &.{m.span(assignments, "root-read {{ <region> }}")};
+const region_roots_with_declarations: []const m.ExpectedLocation = &.{
+    m.span(assignments, "root-read {{ <region> }}"),
+    m.span(defaults, "\n<region>: separate-root-region"),
+};
+const region_root_targets: []const m.ExpectedLocation = &.{m.span(defaults, "\n<region>: separate-root-region")};
+const selector_root_reads: []const m.ExpectedLocation = &.{m.span(assignments, "root-selector {{ <selector> }}")};
+const selector_roots_with_declarations: []const m.ExpectedLocation = &.{
+    m.span(assignments, "root-selector {{ <selector> }}"),
+    m.span(defaults, "\n<selector>: separate-root-selector"),
+};
+const selector_root_targets: []const m.ExpectedLocation = &.{m.span(defaults, "\n<selector>: separate-root-selector")};
+
+test "stdio set field targets are not reads while RHS fields and subscript selectors join their ordinary groups" {
+    var session = try Session.start();
+    defer session.deinit();
+    try session.group(&.{
+        m.cursor(assignments, "🛰 same-name {% set ns.region = other.<region> %}"),
+        m.cursor(assignments, "single-subscript {% set ns.region = other['<region>'] %}"),
+        m.cursor(assignments, "trimmed {%- set ns.region = other[\"<region>\"] -%}"),
+        m.cursor(assignments, "selector {% set ns.region = other[chooser.<region>].region %}"),
+        m.cursor(assignments, "selector {% set ns.region = other[chooser.region].<region> %}"),
+        m.cursor(assignments, "named-selector {% set ns.region = other[chooser.selector].<region> %}"),
+        m.cursor(assignments, "capture {% set ns.region %}{{ other.<region> }}"),
+        m.cursor(assignments, "capture-filter {% set ns.region | acme.tools.apply(other.<region>)"),
+        m.cursor(unrelated_assignments, "{{ unrelated.<region> }}"),
+        m.cursor(defaults, "  <region>: region-value"),
+    }, assignment_reads, assignments_with_declarations, assignment_targets, &.{ "**Variable field** `region`", "`region-value`" }, &.{ "**Variable**", "separate-root-region" });
+    try session.group(&.{
+        m.cursor(assignments, "other[chooser.<selector>].region"),
+        m.cursor(unrelated_assignments, "{{ unrelated.<selector> }}"),
+        m.cursor(defaults, "  <selector>: selector-value"),
+    }, selector_reads, selectors_with_declarations, selector_targets, &.{ "**Variable field** `selector`", "`selector-value`" }, &.{ "**Variable**", "separate-root-selector" });
+    try session.group(&.{
+        m.cursor(assignments, "root-read {{ <region> }}"),
+        m.cursor(defaults, "\n<region>: separate-root-region"),
+    }, region_root_reads, region_roots_with_declarations, region_root_targets, &.{ "**Variable** `region`", "`separate-root-region`" }, &.{ "**Variable field**", "region-value" });
+    try session.group(&.{
+        m.cursor(assignments, "root-selector {{ <selector> }}"),
+        m.cursor(defaults, "\n<selector>: separate-root-selector"),
+    }, selector_root_reads, selector_roots_with_declarations, selector_root_targets, &.{ "**Variable** `selector`", "`separate-root-selector`" }, &.{ "**Variable field**", "selector-value" });
+    try session.negatives(&.{
+        m.cursor(assignments, "🛰 same-name {% set ns.<region> ="),
+        m.cursor(assignments, "single-subscript {% set ns.<region> ="),
+        m.cursor(assignments, "trimmed {%- set ns.<region> ="),
+        m.cursor(assignments, "selector {% set ns.<region> = other[chooser.region]"),
+        m.cursor(assignments, "named-selector {% set ns.<region> = other[chooser.selector]"),
+        m.cursor(assignments, "capture {% set ns.<region> %}"),
+        m.cursor(assignments, "capture-filter {% set ns.<region> |"),
+    });
+    try session.finish();
+}
+
 const Session = struct {
     arena: *std.heap.ArenaAllocator,
     client: lsp.Client,

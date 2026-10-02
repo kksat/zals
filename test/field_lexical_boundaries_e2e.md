@@ -53,6 +53,35 @@ oracle excludes the same root spelling inside raw contents.
   `/tmp/field-lexical-raw-existing-semantic.log`,
   `/tmp/field-lexical-raw-unit.log`.
 
+## Slice 2 — set field-assignment targets
+
+One behavioral tracer distinguishes `{% set ns.region = other.region %}`'s
+write target from its genuine RHS read. The complete ordinary field group also
+includes single/double-quoted subscripts, whitespace-trimmed statements, field
+reads within a dynamic RHS subscript selector, capture-body reads, capture-filter
+arguments, and an unrelated Role. A separately authored selector-field group
+and two same-named root Variable groups prevent target suppression from hiding
+selector reads or conflating field names with roots. Every left target is an
+all-action negative cursor; every genuine read/key is an all-action positive.
+Installed Jinja accepted the authored statement syntax independently; the LSP
+test itself neither imports Jinja nor evaluates templates.
+
+- **RED at 84d637f:** raw-block test remained green; assignment test failed
+  with 120 requests and 62 failed checks. Seven write targets polluted all
+  positive reference answers and themselves exposed field navigation/hover.
+  Log: `/tmp/field-lexical-set-red.log`.
+- **Minimal fix:** in the field scanner only, suppress members in the leading
+  `set` target portion until `=` or a capture-filter pipe. Scan RHS selectors,
+  values, capture-filter arguments, and subsequent template bodies normally.
+  Root scanning retains its prior behavior; no lexical binding inference added.
+- **GREEN:** 2/2 tests, 250 requests total, zero failures.
+  Log: `/tmp/field-lexical-set-green.log`.
+- Existing contracts: 10/10 field-expression tests (272 exact reference
+  requests), 496 semantic cases with zero failures, and `zig build test` pass.
+  Logs: `/tmp/field-lexical-set-existing-expressions.log`,
+  `/tmp/field-lexical-set-existing-semantic.log`,
+  `/tmp/field-lexical-set-unit.log`.
+
 ## Boundaries
 
 This work does not normalize YAML scalar escapes or decode static Jinja key

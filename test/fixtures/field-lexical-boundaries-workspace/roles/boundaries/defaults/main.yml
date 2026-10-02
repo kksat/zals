@@ -1,3 +1,8 @@
 data:
   boundary_field: boundary-value
 boundary_root: root-value
+assignment_data:
+  region: region-value
+  selector: selector-value
+region: separate-root-region
+selector: separate-root-selector

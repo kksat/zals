@@ -139,6 +139,10 @@ fn scanExpressionNames(allocator: Allocator, text: []const u8, base: usize, name
     const Prev = enum { other, dot, pipe, is_test, plugin_name, plugin_dot };
     var prev: Prev = .other;
     var can_subscript = false;
+    // A set statement's namespace field target is a write. Only its RHS
+    // (or capture-filter arguments) contributes field reads; root scanning
+    // deliberately retains its existing behavior, without binding-flow inference.
+    var assignment_target = false;
     var i: usize = 0;
     while (i < text.len) {
         const c = text[i];
@@ -153,7 +157,7 @@ fn scanExpressionNames(allocator: Allocator, text: []const u8, base: usize, name
                 const close = skipWhitespace(text, end);
                 if (end > start + 1 and text[end - 1] == text[start] and close < text.len and text[close] == ']') {
                     // Names preserve raw literal contents; escapes are not decoded.
-                    if (!followedByCall(text, close + 1)) try out.append(.{ .name = text[start + 1 .. end - 1], .start = base + start + 1, .end = base + end - 1 });
+                    if (!assignment_target and !followedByCall(text, close + 1)) try out.append(.{ .name = text[start + 1 .. end - 1], .start = base + start + 1, .end = base + end - 1 });
                     i = close + 1;
                     prev = .other;
                     continue;
@@ -173,6 +177,7 @@ fn scanExpressionNames(allocator: Allocator, text: []const u8, base: usize, name
         }
         if (c == '|') {
             i += 1;
+            assignment_target = false;
             prev = .pipe;
             continue;
         }
@@ -184,7 +189,7 @@ fn scanExpressionNames(allocator: Allocator, text: []const u8, base: usize, name
             // Member/plugin context wins over keyword spelling: data.is is a
             // field, while acme.is.filter after a pipe is a qualified filter.
             if (prev == .dot) {
-                if (names == .fields and !followedByCall(text, j)) try out.append(.{ .name = word, .start = base + i, .end = base + j });
+                if (names == .fields and !assignment_target and !followedByCall(text, j)) try out.append(.{ .name = word, .start = base + i, .end = base + j });
                 prev = .other;
             } else if (prev == .is_test and std.mem.eql(u8, word, "not")) {
                 prev = .is_test;
@@ -194,6 +199,9 @@ fn scanExpressionNames(allocator: Allocator, text: []const u8, base: usize, name
                 prev = .is_test;
             } else if (is_statement and i == statement_start and std.mem.eql(u8, word, "filter")) {
                 prev = .pipe;
+            } else if (is_statement and i == statement_start and std.mem.eql(u8, word, "set")) {
+                assignment_target = names == .fields;
+                prev = .other;
             } else if (isKeyword(word)) {
                 prev = .other;
             } else {
@@ -204,6 +212,7 @@ fn scanExpressionNames(allocator: Allocator, text: []const u8, base: usize, name
             continue;
         }
         i += 1;
+        if (c == '=') assignment_target = false;
         prev = .other;
         can_subscript = c == ']' or c == ')' or c == '}';
     }

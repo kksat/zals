@@ -1,0 +1,12 @@
+- name: Set field targets are writes, not field reads
+  debug:
+    msg: |-
+      🛰 same-name {% set ns.region = other.region %}
+      single-subscript {% set ns.region = other['region'] %}
+      trimmed {%- set ns.region = other["region"] -%}
+      selector {% set ns.region = other[chooser.region].region %}
+      named-selector {% set ns.region = other[chooser.selector].region %}
+      capture {% set ns.region %}{{ other.region }}{% endset %}
+      capture-filter {% set ns.region | acme.tools.apply(other.region) %}literal{% endset %}
+      root-read {{ region }}
+      root-selector {{ selector }}
