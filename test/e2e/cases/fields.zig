@@ -111,11 +111,76 @@ fn escapedKeyCases() [10]m.Case {
     return out;
 }
 
+fn reservedDataCases() [40]m.Case {
+    const groups = [_]struct { name: []const u8, read: m.Anchor, key: m.Anchor, value: []const u8 }{
+        .{ .name = "task vars", .read = m.cursor(tasks, "{{ record.<reserved_leaf> }}"), .key = m.cursor(tasks, "          <reserved_leaf>: present-once"), .value = "present-once" },
+        .{ .name = "vars file", .read = m.cursor(tasks, "{{ record.<loaded_reserved_leaf> }}"), .key = m.cursor("playbooks/vars/reserved.yml", "      <loaded_reserved_leaf>: loaded-once"), .value = "loaded-once" },
+        .{ .name = "set_fact", .read = m.cursor(tasks, "{{ record.<set_fact_reserved_leaf> }}"), .key = m.cursor(tasks, "          <set_fact_reserved_leaf>: fact-once"), .value = "fact-once" },
+        .{ .name = "role parameter", .read = m.cursor("playbooks/field-inputs.yml", "{{ record.<call_reserved_leaf> }}"), .key = m.cursor("playbooks/field-inputs.yml", "            <call_reserved_leaf>: role-data-once"), .value = "role-data-once" },
+    };
+    var out: [40]m.Case = undefined;
+    for (groups, 0..) |group, g| {
+        const from = [_]m.Anchor{ group.read, group.key };
+        for (from, 0..) |origin, n| {
+            const i = g * 10 + n * 5;
+            out[i] = .{ .name = "field/reserved data under " ++ group.name ++ ": symmetric reads", .method = .references, .from = origin, .include_declaration = false, .expected = &.{m.span(group.read.path, group.read.snippet)} };
+            out[i + 1] = .{ .name = "field/reserved data under " ++ group.name ++ ": exactly one declaration", .method = .references, .from = origin, .include_declaration = true, .expected = &.{ m.span(group.read.path, group.read.snippet), m.span(group.key.path, group.key.snippet) } };
+            out[i + 2] = .{ .name = "field/reserved data under " ++ group.name ++ ": exactly one definition", .method = .definition, .from = origin, .expected = &.{m.span(group.key.path, group.key.snippet)} };
+            out[i + 3] = .{ .name = "field/reserved data under " ++ group.name ++ ": concrete implementation respects binding context", .method = .implementation, .from = origin, .expected = if (g == 3 and n == 1) &.{} else &.{m.span(group.key.path, group.key.snippet)} };
+            out[i + 4] = .{ .name = "field/reserved data under " ++ group.name ++ ": one candidate hover", .method = .hover, .from = origin, .expected = &.{m.span(origin.path, origin.snippet)}, .markdown_contains = &.{group.value}, .markdown_excludes = &.{"**Shadowed:**"} };
+        }
+    }
+    return out;
+}
+
 const called = m.cursor(tasks, "{{ field_item.<resourcegroup_name>() }}");
 const description = m.cursor(specs, "            <description>: Resource group field contract.");
 const unbound = m.cursor(tasks, "{{ field_item.<unbound_field> }}");
 const root = m.cursor(tasks, "/ {{ <unbound_field> }}");
-pub const all = ordinaryCases() ++ schemaOnlyCases() ++ escapedKeyCases() ++ [_]m.Case{
+pub const all = ordinaryCases() ++ schemaOnlyCases() ++ escapedKeyCases() ++ reservedDataCases() ++ [_]m.Case{
+    .{ .name = "field/module argument control: no definition", .method = .definition, .from = m.cursor("negative/field-module-options.yml", "{{ record.<module_data_leaf> }}"), .expected = &.{} },
+    .{ .name = "field/module argument control: no implementation", .method = .implementation, .from = m.cursor("negative/field-module-options.yml", "{{ record.<module_data_leaf> }}"), .expected = &.{} },
+    .{ .name = "field/module argument control: hover cannot use nonbinding data", .method = .hover, .from = m.cursor("negative/field-module-options.yml", "{{ record.<module_data_leaf> }}"), .expected = &.{m.span("negative/field-module-options.yml", "{{ record.<module_data_leaf> }}")}, .markdown_contains = &.{"No definition found"}, .markdown_excludes = &.{"module-option-not-binding"} },
+    .{ .name = "field/module argument key: no reads", .method = .references, .from = m.cursor("negative/field-module-options.yml", "          <module_data_leaf>: module-option-not-binding"), .include_declaration = false, .expected = &.{} },
+    .{ .name = "field/module argument key: no declarations", .method = .references, .from = m.cursor("negative/field-module-options.yml", "          <module_data_leaf>: module-option-not-binding"), .include_declaration = true, .expected = &.{} },
+    .{ .name = "field/module argument key: no definition", .method = .definition, .from = m.cursor("negative/field-module-options.yml", "          <module_data_leaf>: module-option-not-binding"), .expected = &.{} },
+    .{ .name = "field/module argument key: no implementation", .method = .implementation, .from = m.cursor("negative/field-module-options.yml", "          <module_data_leaf>: module-option-not-binding"), .expected = &.{} },
+    .{ .name = "field/module argument key: no field hover", .method = .hover, .from = m.cursor("negative/field-module-options.yml", "          <module_data_leaf>: module-option-not-binding"), .expected = &.{} },
+    .{
+        .name = "field/module argument reserved key: not a variable-value binding",
+        .method = .references,
+        .from = m.cursor("negative/field-module-options.yml", "{{ record.<module_data_leaf> }}"),
+        .include_declaration = true,
+        .expected = &.{m.span("negative/field-module-options.yml", "{{ record.<module_data_leaf> }}")},
+    },
+    .{
+        .name = "field/role parameter reserved data key: a value is not role entry directives",
+        .method = .references,
+        .from = m.cursor("playbooks/field-inputs.yml", "{{ record.<call_reserved_leaf> }}"),
+        .include_declaration = true,
+        .expected = &.{ m.span("playbooks/field-inputs.yml", "{{ record.<call_reserved_leaf> }}"), m.span("playbooks/field-inputs.yml", "            <call_reserved_leaf>: role-data-once") },
+    },
+    .{
+        .name = "field/set_fact reserved data key: structured fact value is not directives",
+        .method = .references,
+        .from = m.cursor(tasks, "{{ record.<set_fact_reserved_leaf> }}"),
+        .include_declaration = true,
+        .expected = &.{ m.span(tasks, "{{ record.<set_fact_reserved_leaf> }}"), m.span(tasks, "          <set_fact_reserved_leaf>: fact-once") },
+    },
+    .{
+        .name = "field/vars-file reserved data key: top-level variables are not directives",
+        .method = .references,
+        .from = m.cursor(tasks, "{{ record.<loaded_reserved_leaf> }}"),
+        .include_declaration = true,
+        .expected = &.{ m.span(tasks, "{{ record.<loaded_reserved_leaf> }}"), m.span("playbooks/vars/reserved.yml", "      <loaded_reserved_leaf>: loaded-once") },
+    },
+    .{
+        .name = "field/reserved data key: one parsed declaration not a repeated binding map",
+        .method = .references,
+        .from = m.cursor(tasks, "{{ record.<reserved_leaf> }}"),
+        .include_declaration = true,
+        .expected = &.{ m.span(tasks, "{{ record.<reserved_leaf> }}"), m.span(tasks, "          <reserved_leaf>: present-once") },
+    },
     .{ .name = "field/called member: no references without declarations", .method = .references, .from = called, .include_declaration = false, .expected = &.{} },
     .{ .name = "field/called member: no references with declarations", .method = .references, .from = called, .include_declaration = true, .expected = &.{} },
     .{ .name = "field/called member: no field definition", .method = .definition, .from = called, .expected = &.{} },

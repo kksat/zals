@@ -3,6 +3,11 @@
   gather_facts: false
   roles:
     - role: fixture.inputs.receiver
+      reserved_config:
+        vars:
+          inner_record:
+            call_reserved_leaf: role-data-once
+    - role: fixture.inputs.receiver
       input_config:
         endpoint:
           region_name: passed-role-map-region
@@ -85,7 +90,7 @@
             region_name: wrong-path-region
     - name: Ordinary task vars are not passed role parameters
       debug:
-        msg: "{{ local.region_name }}"
+        msg: "{{ local.region_name }} / {{ record.call_reserved_leaf }}"
       vars:
         input_config:
           endpoint:

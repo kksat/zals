@@ -72,8 +72,11 @@ pub fn collect(
                 // A map-rooted file outside the conventional dirs is a
                 // `vars_files`/`include_vars` target: its top-level keys are
                 // variables. Playbooks and task files are seq-rooted.
-                if (root.isMap()) try topLevelKeys(root, .vars_files, out);
-                try walk(allocator, root, text, out);
+                if (root.isMap()) {
+                    try topLevelKeys(root, .vars_files, out);
+                } else {
+                    try walk(allocator, root, text, out);
+                }
             },
         }
     }
@@ -124,8 +127,12 @@ fn walk(
 
                 if (std.mem.eql(u8, key, "vars") and val.isMap()) {
                     try addMapKeys(val, varsSite(node), out);
+                    // Structured variable values are data, not nested Ansible
+                    // directives that introduce another `vars:` binding map.
+                    continue;
                 } else if (isModuleKey(key, "set_fact") and val.isMap()) {
                     try addMapKeys(val, .set_fact, out);
+                    continue;
                 } else if (std.mem.eql(u8, key, "register") and val.isScalar()) {
                     try addScalar(val, text, .register, out);
                 } else if (std.mem.eql(u8, key, "loop_control") and val.isMap()) {
@@ -141,13 +148,23 @@ fn walk(
                     }
                 } else if (std.mem.eql(u8, key, "roles") and val.isSeq()) {
                     try roleParams(val, out);
+                    continue;
                 }
-                try walk(allocator, val, text, out);
+                // Recurse only through Ansible play/task containers. Module
+                // arguments and other keyword values are data, not directives.
+                if (isTaskContainer(key)) try walk(allocator, val, text, out);
             }
         },
         .seq => for (node.items) |item| try walk(allocator, item, text, out),
         else => {},
     }
+}
+
+fn isTaskContainer(key: []const u8) bool {
+    for ([_][]const u8{ "tasks", "handlers", "pre_tasks", "post_tasks", "block", "rescue", "always" }) |container| {
+        if (std.mem.eql(u8, key, container)) return true;
+    }
+    return false;
 }
 
 fn roleParams(
@@ -159,6 +176,10 @@ fn roleParams(
         for (item.items) |pair| {
             const key_node = pair.key orelse continue;
             const name = key_node.stringValue() orelse continue;
+            if (std.mem.eql(u8, name, "vars")) {
+                if (pair.val) |value| if (value.isMap()) try addMapKeys(value, varsSite(item), out);
+                continue;
+            }
             if (std.mem.eql(u8, name, "role")) continue;
             if (keywords.isRoleKeyword(name)) continue;
             try out.append(.{ .name = name, .start = key_node.start, .end = key_node.end, .site = .role_param });

@@ -12,6 +12,23 @@
 - name: Escaped YAML key spelling still names a field
   debug:
     msg: "{{ escaped_item.escaped_key }}"
+- name: Reserved names within structured vars are data not new binding maps
+  debug:
+    msg: "{{ record.reserved_leaf }} / {{ record.loaded_reserved_leaf }}"
+  vars:
+    outer_record:
+      vars:
+        inner_record:
+          reserved_leaf: present-once
+- name: Reserved names inside set_fact values are data too
+  set_fact:
+    set_fact_record:
+      vars:
+        inner_record:
+          set_fact_reserved_leaf: fact-once
+- name: Read the nested fact field
+  debug:
+    msg: "{{ record.set_fact_reserved_leaf }}"
 - name: Called member names are not data field reads
   ansible.builtin.debug:
     msg: "{{ field_item.resourcegroup_name() }}"

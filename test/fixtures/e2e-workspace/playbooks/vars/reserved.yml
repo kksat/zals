@@ -1,0 +1,5 @@
+---
+loaded_record:
+  vars:
+    inner_record:
+      loaded_reserved_leaf: loaded-once

@@ -1,0 +1,10 @@
+---
+- name: Module argument data does not introduce variable binding maps
+  ansible.builtin.debug:
+    msg:
+      vars:
+        fake_record:
+          module_data_leaf: module-option-not-binding
+- name: Read an unbound field with the same spelling
+  debug:
+    msg: "{{ record.module_data_leaf }}"
