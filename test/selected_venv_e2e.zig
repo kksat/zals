@@ -11,6 +11,7 @@ const Session = struct {
     home: std.testing.TmpDir,
     client: lsp.Client,
     resolver: anchor.Resolver,
+    method_token: i64,
 
     fn start(venv: []const u8, options: lsp.Client.StartOptions) !Session {
         const arena = try std.testing.allocator.create(std.heap.ArenaAllocator);
@@ -24,7 +25,7 @@ const Session = struct {
         errdefer home.cleanup();
         var client = try lsp.Client.startWithOptions(a, binary, fixture, fixture, try home.dir.realpathAlloc(a, "."), options);
         errdefer client.deinit();
-        _ = try client.request("initialize", .{
+        const initialized = try client.request("initialize", .{
             .processId = @as(?i64, null),
             .rootUri = try std.fmt.allocPrint(a, "file://{s}", .{fixture}),
             .capabilities = .{},
@@ -36,7 +37,15 @@ const Session = struct {
         });
         try client.notify("initialized", .{});
         try client.waitForIndex();
-        return .{ .arena = arena, .home = home, .client = client, .resolver = .{ .allocator = a, .fixture = fixture, .deps = fixture } };
+        const caps = lsp.field(initialized, "capabilities") orelse return error.MissingCapabilities;
+        const semantic = lsp.field(caps, "semanticTokensProvider") orelse return error.MissingSemanticTokens;
+        const legend = lsp.field(semantic, "legend") orelse return error.MissingLegend;
+        const token_types = lsp.field(legend, "tokenTypes") orelse return error.MissingTokenTypes;
+        var method_token: ?i64 = null;
+        for (token_types.array.items, 0..) |token, i| {
+            if (std.mem.eql(u8, token.string, "method")) method_token = @intCast(i);
+        }
+        return .{ .arena = arena, .home = home, .client = client, .resolver = .{ .allocator = a, .fixture = fixture, .deps = fixture }, .method_token = method_token orelse return error.MissingMethodToken };
     }
 
     fn deinit(self: *Session) void {
@@ -44,6 +53,14 @@ const Session = struct {
         self.home.cleanup();
         self.arena.deinit();
         std.testing.allocator.destroy(self.arena);
+    }
+
+    fn selectVenv(self: *Session, venv: []const u8) !void {
+        try self.client.notify("workspace/didChangeConfiguration", .{ .settings = .{ .ansible = .{
+            .workspace = .{ .rootMarker = "fixture-workspace-root" },
+            .python = .{ .venvPath = venv },
+            .validation = .{ .enabled = false, .lint = .{ .enabled = false } },
+        } } });
     }
 
     fn at(self: *Session, method: []const u8, from: model.Anchor) !Value {
@@ -111,6 +128,120 @@ test "selected venv root collection definition and hover" {
     try session.definition(from, ".venv/ansible_collections/fixture/root/galaxy.yml");
     try session.hover(from, "# Selected root collection");
     try session.missing(model.cursor("selection.yml", "    - <fixture.unselected>"));
+}
+
+test "selected venv root module definition and hover use the file's collections paths" {
+    var session = try Session.start(".venv", .{});
+    defer session.deinit();
+    const from = model.cursor("site.yml", "      fixture.root.<probe>:");
+    try session.definition(from, ".venv/ansible_collections/fixture/root/plugins/modules/probe.py");
+    try session.hover(from, "Selected root module documentation");
+}
+
+test "module completion discovers modules on the effective selected venv paths" {
+    var session = try Session.start(".venv", .{});
+    defer session.deinit();
+    const result = try session.at("textDocument/completion", model.cursor("completion.yml", "      <module_choice>:"));
+    const items = lsp.field(result, "items") orelse return error.MissingCompletions;
+    var found = false;
+    for (items.array.items) |item| {
+        const label = lsp.field(item, "label") orelse return error.MissingCompletionLabel;
+        if (std.mem.eql(u8, label.string, "fixture.root.probe")) found = true;
+    }
+    if (!found) return error.MissingSelectedVenvModuleCompletion;
+}
+
+test "completion resolve retains the originating file's selected venv paths" {
+    var session = try Session.start(".venv", .{});
+    defer session.deinit();
+    const result = try session.at("textDocument/completion", model.cursor("completion.yml", "      <module_choice>:"));
+    const items = lsp.field(result, "items") orelse return error.MissingCompletions;
+    for (items.array.items) |item| {
+        const label = lsp.field(item, "label") orelse return error.MissingCompletionLabel;
+        if (!std.mem.eql(u8, label.string, "fixture.root.probe")) continue;
+        const resolved = try session.client.request("completionItem/resolve", item);
+        const documentation = lsp.field(resolved, "documentation") orelse return error.MissingResolvedDocumentation;
+        try std.testing.expectEqualStrings("Selected root module documentation", (lsp.field(documentation, "value") orelse return error.MissingResolvedText).string);
+        return;
+    }
+    return error.MissingSelectedVenvModuleCompletion;
+}
+
+test "selected venv module options receive schema-aware semantic tokens" {
+    var session = try Session.start(".venv", .{});
+    defer session.deinit();
+    const option = model.cursor("site.yml", "        <message>: root");
+    const expected = try session.resolver.location(model.span(option.path, option.snippet));
+    const result = try session.at("textDocument/semanticTokens/full", option);
+    const data = lsp.field(result, "data") orelse return error.MissingTokenData;
+    var line: i64 = 0;
+    var character: i64 = 0;
+    var i: usize = 0;
+    while (i + 4 < data.array.items.len) : (i += 5) {
+        const delta_line = data.array.items[i].integer;
+        line += delta_line;
+        character = if (delta_line == 0) character + data.array.items[i + 1].integer else data.array.items[i + 1].integer;
+        if (line == expected.range.start.line and character == expected.range.start.character) {
+            try std.testing.expectEqual(@as(i64, 7), data.array.items[i + 2].integer);
+            try std.testing.expectEqual(session.method_token, data.array.items[i + 3].integer);
+            return;
+        }
+    }
+    return error.MissingOptionToken;
+}
+
+test "relative environment collections paths keep server cwd meaning in doc subprocesses" {
+    var session = try Session.start("", .{ .collections_path = "test/fixtures/selected-venv/.venv", .use_fixture_config = false });
+    defer session.deinit();
+    const from = model.cursor("configs/b/site.yml", "    - fixture.root.<probe>:");
+    try session.definition(from, ".venv/ansible_collections/fixture/root/plugins/modules/probe.py");
+    try session.hover(from, "Selected root module documentation");
+}
+
+test "module docs stay isolated across Workspaces and changes of selected environment" {
+    var session = try Session.start(".venv", .{});
+    defer session.deinit();
+    const parent = model.cursor("site.yml", "      fixture.root.<probe>:");
+    try session.definition(parent, ".venv/ansible_collections/fixture/root/plugins/modules/probe.py");
+    try session.hover(parent, "Selected root module documentation");
+
+    const nested_uri = try std.fmt.allocPrint(session.arena.allocator(), "file://{s}/nested", .{session.resolver.fixture});
+    session.client.index_ready = false;
+    try session.client.notify("workspace/didChangeWorkspaceFolders", .{ .event = .{
+        .added = &.{.{ .uri = nested_uri, .name = "nested" }},
+        .removed = &.{},
+    } });
+    try session.client.waitForIndex();
+    const nested = model.cursor("nested/site.yml", "    - fixture.root.<probe>:");
+    try session.definition(nested, "nested/.venv/ansible_collections/fixture/root/plugins/modules/probe.py");
+    try session.hover(nested, "Nested Workspace module documentation");
+    try session.definition(parent, ".venv/ansible_collections/fixture/root/plugins/modules/probe.py");
+
+    try session.selectVenv("other-env");
+    try session.definition(parent, "other-env/ansible_collections/fixture/root/plugins/modules/probe.py");
+    try session.hover(parent, "Other environment module documentation");
+    try session.selectVenv("");
+    // Workspace fallback's adjacent collection has no probe module. With the
+    // venv disabled the selected dependency must not remain in the docs cache.
+    try session.missing(parent);
+    try session.selectVenv(".venv");
+    try session.definition(parent, ".venv/ansible_collections/fixture/root/plugins/modules/probe.py");
+    try session.hover(parent, "Selected root module documentation");
+}
+
+test "module docs use nearest per-file ansible.cfg without cross-file cache contamination" {
+    var session = try Session.start("", .{ .collections_path = "", .use_fixture_config = false });
+    defer session.deinit();
+    const configured = model.cursor("site.yml", "      fixture.root.<probe>:");
+    try session.definition(configured, "configured/ansible_collections/fixture/root/plugins/modules/probe.py");
+    try session.hover(configured, "Configured path module documentation");
+    const first = model.cursor("configs/a/site.yml", "    - fixture.root.<probe>:");
+    const second = model.cursor("configs/b/site.yml", "    - fixture.root.<probe>:");
+    try session.definition(first, ".venv/ansible_collections/fixture/root/plugins/modules/probe.py");
+    try session.hover(first, "Selected root module documentation");
+    try session.definition(second, "other-env/ansible_collections/fixture/root/plugins/modules/probe.py");
+    try session.hover(second, "Other environment module documentation");
+    try session.definition(first, ".venv/ansible_collections/fixture/root/plugins/modules/probe.py");
 }
 
 // These characterize preserved selection/precedence contracts (already green),

@@ -67,7 +67,8 @@ fn moduleDefinition(self: *Server, a: Allocator, params: std.json.Value) !Result
     const name = util.currentKey(cur.path) orelse return .none;
     const arena = cur.forest.allocator();
     const collections = yaml.collections.getDeclaredCollections(arena, cur.path) catch &.{};
-    const mod = self.docs.findModuleInContext(arena, name, collections) orelse return .none;
+    const lib = try self.docsForUri(a, cur.doc.uri);
+    const mod = lib.findModuleInContext(arena, name, collections) orelse return .none;
     if (mod.filename.len == 0) return .none;
     return .{ .location = try util.fileLocation(a, mod.filename) };
 }

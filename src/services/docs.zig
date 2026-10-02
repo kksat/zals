@@ -41,6 +41,8 @@ pub const DocsLibrary = struct {
     allocator: Allocator,
     runner: exec.Runner,
     ansible_doc: []const u8,
+    /// Immutable per-file subprocess snapshot; owned by the server context.
+    execution: exec.Options = .{},
     /// Short-name / FQCN → catalog description. Keys and values owned by `arena`.
     catalog: std.StringHashMap(CatalogEntry),
     modules: std.StringHashMap(Module),
@@ -78,9 +80,14 @@ pub const DocsLibrary = struct {
 
     /// Scan installed collections and redirect routes for module FQCNs.
     pub fn scanModuleIndex(self: *DocsLibrary, config: *AnsibleConfig) void {
+        self.scanModulePaths(config.collectionsPaths());
+    }
+
+    pub fn scanModulePaths(self: *DocsLibrary, collection_paths: []const []const u8) void {
         var index = @import("module_index.zig").Index.init(self.allocator, self.runner);
         defer index.deinit();
-        index.scan(config);
+        index.execution = self.execution;
+        index.scan(collection_paths);
         const a = self.arena.allocator();
         self.mutex.lock();
         defer self.mutex.unlock();
@@ -93,7 +100,7 @@ pub const DocsLibrary = struct {
 
     pub fn loadCatalog(self: *DocsLibrary) !void {
         const argv = [_][]const u8{ self.ansible_doc, "-l", "--json", "-t", "module" };
-        const result = self.runner.run(self.allocator, &argv) catch return;
+        const result = self.runner.runWithOptions(self.allocator, &argv, self.execution) catch return;
         defer result.deinit(self.allocator);
         if (result.stdout.len == 0) return;
 
@@ -178,7 +185,7 @@ pub const DocsLibrary = struct {
 
     fn fetchOne(self: *DocsLibrary, name: []const u8) !void {
         const argv = [_][]const u8{ self.ansible_doc, "--json", "-t", "module", name };
-        const result = try self.runner.run(self.allocator, &argv);
+        const result = try self.runner.runWithOptions(self.allocator, &argv, self.execution);
         defer result.deinit(self.allocator);
         if (result.stdout.len == 0) return;
         const parsed = std.json.parseFromSlice(Value, self.allocator, result.stdout, .{}) catch return;
@@ -193,7 +200,7 @@ pub const DocsLibrary = struct {
         defer argv.deinit(self.allocator);
         try argv.appendSlice(self.allocator, &.{ self.ansible_doc, "--json", "-t", "module" });
         try argv.appendSlice(self.allocator, names);
-        const result = try self.runner.run(self.allocator, argv.items);
+        const result = try self.runner.runWithOptions(self.allocator, argv.items, self.execution);
         defer result.deinit(self.allocator);
         if (result.stdout.len == 0) return;
         const parsed = std.json.parseFromSlice(Value, self.allocator, result.stdout, .{}) catch return;

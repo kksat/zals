@@ -21,6 +21,11 @@ pub const Result = struct {
     }
 };
 
+pub const Options = struct {
+    env_map: ?*const std.process.EnvMap = null,
+    cwd: ?[]const u8 = null,
+};
+
 /// Interface: a vtable so tests can inject fakes and a future pure-Zig backend
 /// can replace process spawning without touching consumers.
 pub const Runner = struct {
@@ -29,24 +34,37 @@ pub const Runner = struct {
 
     pub const VTable = struct {
         run: *const fn (ptr: *anyopaque, allocator: Allocator, argv: []const []const u8) anyerror!Result,
+        run_with_options: ?*const fn (ptr: *anyopaque, allocator: Allocator, argv: []const []const u8, options: Options) anyerror!Result = null,
     };
 
     pub fn run(self: Runner, allocator: Allocator, argv: []const []const u8) anyerror!Result {
         return self.vtable.run(self.ptr, allocator, argv);
     }
+
+    pub fn runWithOptions(self: Runner, allocator: Allocator, argv: []const []const u8, options: Options) anyerror!Result {
+        if (self.vtable.run_with_options) |run_options| return run_options(self.ptr, allocator, argv, options);
+        if (options.env_map != null or options.cwd != null) return error.UnsupportedExecutionOptions;
+        return self.run(allocator, argv);
+    }
 };
 
 pub const Posix = struct {
-    const vtable = Runner.VTable{ .run = run };
+    const vtable = Runner.VTable{ .run = run, .run_with_options = runWithOptions };
 
     pub fn posixRunner() Runner {
         return .{ .ptr = undefined, .vtable = &vtable };
     }
 
-    fn run(_: *anyopaque, allocator: Allocator, argv: []const []const u8) anyerror!Result {
+    fn run(ptr: *anyopaque, allocator: Allocator, argv: []const []const u8) anyerror!Result {
+        return runWithOptions(ptr, allocator, argv, .{});
+    }
+
+    fn runWithOptions(_: *anyopaque, allocator: Allocator, argv: []const []const u8, options: Options) anyerror!Result {
         const spawned = try std.process.Child.run(.{
             .allocator = allocator,
             .argv = argv,
+            .env_map = options.env_map,
+            .cwd = options.cwd,
             .max_output_bytes = 16 * 1024 * 1024,
         });
         return .{

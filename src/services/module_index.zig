@@ -9,12 +9,12 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const exec = @import("../exec/root.zig");
 const yaml = @import("../yaml/root.zig");
-const AnsibleConfig = @import("ansible_config.zig").AnsibleConfig;
 const parsePythonArray = @import("ansible_config.zig").parsePythonArray;
 
 pub const Index = struct {
     allocator: Allocator,
     runner: exec.Runner,
+    execution: exec.Options = .{},
     /// FQCN → void. Keys are owned by `arena`.
     fqcns: std.StringHashMap(void),
     arena: std.heap.ArenaAllocator,
@@ -33,10 +33,12 @@ pub const Index = struct {
         self.arena.deinit();
     }
 
-    pub fn scan(self: *Index, config: *AnsibleConfig) void {
+    pub fn scan(self: *Index, collections_paths: []const []const u8) void {
         const a = self.arena.allocator();
+        // Collection discovery is filesystem-only, even without ansible on PATH.
+        for (collections_paths) |p| self.scanCollections(a, p);
 
-        const ver = self.runner.run(self.allocator, &.{ "ansible", "--version" }) catch return;
+        const ver = self.runner.runWithOptions(self.allocator, &.{ "ansible", "--version" }, self.execution) catch return;
         defer ver.deinit(self.allocator);
         const module_search = versionField(ver.stdout, "configured module search path");
         const ansible_location = versionField(ver.stdout, "ansible python module location");
@@ -51,7 +53,6 @@ pub const Index = struct {
             const paths = parsePythonArray(a, ms) catch &.{};
             for (paths) |p| self.scanBuiltin(a, p);
         }
-        for (config.collectionsPaths()) |p| self.scanCollections(a, p);
     }
 
     fn add(self: *Index, a: Allocator, fqcn: []const u8) void {

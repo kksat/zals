@@ -37,6 +37,7 @@ pub const Server = struct {
     ansible_config: AnsibleConfig,
     pool: *concurrency.ThreadPool,
     docs_service: DocsService,
+    contextual_docs: docs_service.ContextLibraries,
     cache_path: ?[]const u8 = null,
     encoding: PositionEncoding = .utf16,
     initialized: bool = false,
@@ -82,6 +83,7 @@ pub const Server = struct {
             .ansible_config = AnsibleConfig.init(allocator, runner),
             .pool = pool,
             .docs_service = DocsService.init(allocator, null),
+            .contextual_docs = docs_service.ContextLibraries.init(allocator, runner),
             .opened_uris = std.array_list.Managed([]const u8).init(allocator),
             .root_uris = std.array_list.Managed([]const u8).init(allocator),
             .index = index,
@@ -107,6 +109,7 @@ pub const Server = struct {
         self.documents.deinit();
         self.settings.deinit();
         self.docs.deinit();
+        self.contextual_docs.deinit();
         self.schemas.deinit();
         self.ansible_config.deinit();
         if (self.cache_path) |p| self.allocator.free(p);
@@ -309,6 +312,21 @@ pub const Server = struct {
         self.index.drain();
         const info = self.index.info(r) orelse return &.{};
         return info.collection_paths;
+    }
+
+    /// Module lookup shares navigation's effective per-file collection paths,
+    /// without mutating the process environment or sharing FQCN-only caches.
+    pub fn docsForUri(self: *Server, a: Allocator, uri: []const u8) !*DocsLibrary {
+        const path = try paths.uriToPath(a, uri);
+        const collection_paths = try project_config.collectionsPaths(a, self.projectContext(a, path), path);
+        // Navigation interprets relative environment/dump entries against the
+        // server cwd. Keep that meaning when the child runs beside the file.
+        const server_cwd = try std.process.getCwdAlloc(a);
+        const absolute_paths = try a.alloc([]const u8, collection_paths.len);
+        for (collection_paths, 0..) |p, i| {
+            absolute_paths[i] = if (std.fs.path.isAbsolute(p)) p else try std.fs.path.join(a, &.{ server_cwd, p });
+        }
+        return self.contextual_docs.forPaths(absolute_paths, std.fs.path.dirname(path) orelse ".");
     }
 
     /// Search-path inputs for `file_path` (ADR-0032).

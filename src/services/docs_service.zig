@@ -106,6 +106,74 @@ pub const DocsService = struct {
     }
 };
 
+/// Per-file module libraries. Each ordered path/cwd identity owns an immutable
+/// subprocess environment and its own in-memory docs. Never load/save these
+/// libraries through the process-wide, version-only disk cache: identical FQCNs
+/// may resolve to different files in different Workspaces or configurations.
+/// Created/read on the main thread; no background task borrows these snapshots.
+pub const ContextLibraries = struct {
+    const ContextLibrary = struct {
+        lib: DocsLibrary,
+        env: std.process.EnvMap,
+        cwd: []const u8,
+    };
+
+    allocator: Allocator,
+    runner: exec.Runner,
+    libraries: std.StringHashMap(*ContextLibrary),
+
+    pub fn init(a: Allocator, runner: exec.Runner) ContextLibraries {
+        return .{ .allocator = a, .runner = runner, .libraries = std.StringHashMap(*ContextLibrary).init(a) };
+    }
+
+    pub fn deinit(self: *ContextLibraries) void {
+        var it = self.libraries.iterator();
+        while (it.next()) |e| {
+            const context = e.value_ptr.*;
+            context.lib.deinit();
+            context.env.deinit();
+            self.allocator.free(context.cwd);
+            self.allocator.destroy(context);
+            self.allocator.free(e.key_ptr.*);
+        }
+        self.libraries.deinit();
+    }
+
+    pub fn forPaths(self: *ContextLibraries, paths: []const []const u8, cwd: []const u8) !*DocsLibrary {
+        const a = self.allocator;
+        // JSON preserves ordering and component boundaries, unlike a bare hash
+        // or delimiter-concatenated cache key.
+        const key = try std.json.Stringify.valueAlloc(a, .{ .cwd = cwd, .collections_paths = paths }, .{});
+        errdefer a.free(key);
+        if (self.libraries.get(key)) |context| {
+            a.free(key);
+            return &context.lib;
+        }
+        const context = try a.create(ContextLibrary);
+        errdefer a.destroy(context);
+        const owned_cwd = try a.dupe(u8, cwd);
+        errdefer a.free(owned_cwd);
+        context.* = .{
+            .lib = DocsLibrary.init(a, self.runner, "ansible-doc"),
+            .env = try std.process.getEnvMap(a),
+            .cwd = owned_cwd,
+        };
+        errdefer context.lib.deinit();
+        errdefer context.env.deinit();
+        const joined = try std.mem.join(a, &.{std.fs.path.delimiter}, paths);
+        defer a.free(joined);
+        try context.env.put("ANSIBLE_COLLECTIONS_PATH", joined);
+        context.env.remove("ANSIBLE_COLLECTIONS_PATHS");
+        // Do not let Python's unrelated sys.path reintroduce unselected venvs.
+        try context.env.put("ANSIBLE_COLLECTIONS_SCAN_SYS_PATH", "false");
+        context.lib.execution = .{ .env_map = &context.env, .cwd = context.cwd };
+        context.lib.loadCatalog() catch {};
+        context.lib.scanModulePaths(paths);
+        try self.libraries.put(key, context);
+        return &context.lib;
+    }
+};
+
 /// Derive a cache fingerprint from the installed Ansible version. Returns null
 /// when the version cannot be determined (caching is then disabled).
 pub const Fingerprint = struct {

@@ -1,0 +1,4 @@
+- hosts: all
+  tasks:
+    - name: Choose a module
+      module_choice: {}

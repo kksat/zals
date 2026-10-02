@@ -37,3 +37,38 @@ Commands were run with `DEVELOPER_DIR=/nonexistent` on macOS.
    site-packages, adjacent before configured, configured before selected, and
    environment before config → exit 0, `3/3 tests passed` before the fixture
    portability split, `4/4 tests passed` afterward.
+4. **Root-installed module definition and hover**
+   - RED: `zig build selected-venv-e2e` → exit 1, `4/5 passed`,
+     `Expected definition .venv/ansible_collections/fixture/root/plugins/modules/probe.py, got null`.
+   - GREEN: same command with `--summary all` → exit 0, `5/5 tests passed`.
+5. **Module discovery for completion**
+   - RED: `zig build selected-venv-e2e` → exit 1, `5/6 passed`,
+     `MissingSelectedVenvModuleCompletion`.
+   - GREEN: same command with `--summary all` → exit 0, `6/6 tests passed`.
+6. **Schema-aware module option semantic tokens**
+   - RED: `zig build selected-venv-e2e` → exit 1, `6/7 passed`,
+     expected the advertised `method` token index 0, found `property` index 3.
+   - GREEN: same command with `--summary all` → exit 0, `7/7 tests passed`.
+7. **Completion resolve preserves per-file context**
+   - RED: `zig build selected-venv-e2e` → exit 1, `7/8 passed`,
+     `MissingResolvedDocumentation`.
+   - GREEN: same command with `--summary all` → exit 0, `8/8 tests passed`.
+8. **Safety checks**, already green after contextual isolation: two opened
+   Workspaces with the same FQCN and different module files/docs; change selection,
+   disable it, and change back without reusing stale docs; two nearest config
+   files with distinct paths plus explicit config precedence. The final suite
+   passes `10/10` tests over LSP at this stage.
+9. **Relative environment path meaning survives child cwd changes**
+   - RED: `zig build selected-venv-e2e` → exit 1, `10/11 passed`,
+     root module definition returned `null` from a nested source directory.
+   - GREEN: same command with `--summary all` → exit 0, `11/11 tests passed`.
+
+Module tests execute the host's `ansible-doc` using only checked-in Python
+`DOCUMENTATION` strings; they do not install dependencies, activate a venv, or
+execute the fixture modules. Ansible is a prerequisite, as for the server.
+The existing navigation-only E2E runner still requires no Ansible execution.
+
+Final broader checks: `DEVELOPER_DIR=/nonexistent zig build test e2e --summary all`
+passed 211 unit tests, the existing navigation suite's 265 cases, and this suite;
+`make smoke` passed the references, code actions, role navigation, and Workspace
+smoke tests. `git diff --check` and formatting checks passed.

@@ -114,14 +114,25 @@ fn completionResult(self: *Server, a: Allocator, params: Value) !Value {
     }
     var opened = cursor.Doc.open(a, loc.doc.bytes()) catch return emptyCompletion(a);
     defer opened.deinit();
-    const lookup = cursor.fromLibrary(&self.docs);
+    const lib = try self.docsForUri(a, loc.doc.uri);
+    const lookup = cursor.fromLibrary(lib);
     const cur = try opened.at(loc.doc.uri, loc.offset, lookup);
-    return encode.completionList(a, try providers.completion.list(a, cur, lookup));
+    var result = try encode.completionList(a, try providers.completion.list(a, cur, lookup));
+    // LSP returns this opaque data unchanged to completionItem/resolve.
+    // Preserve document context instead of resolving against a global library.
+    var data = json_util.obj(a);
+    try data.put("uri", json_util.str(loc.doc.uri));
+    if (result.object.getPtr("items")) |items| {
+        for (items.array.items) |*item| try item.object.put("data", .{ .object = data });
+    }
+    return result;
 }
 
 fn resolveResult(self: *Server, a: Allocator, params: Value) !Value {
     const label = json_util.string(params, "label") orelse return params;
-    const extra = providers.completion.resolve(a, label, cursor.fromLibrary(&self.docs));
+    const data = json_util.field(params, "data") orelse Value.null;
+    const lib = if (json_util.string(data, "uri")) |uri| try self.docsForUri(a, uri) else &self.docs;
+    const extra = providers.completion.resolve(a, label, cursor.fromLibrary(lib));
     var obj = switch (params) {
         .object => |o| o,
         else => return params,
@@ -135,7 +146,8 @@ fn hoverResult(self: *Server, a: Allocator, params: Value) !Value {
     const loc = documentOffset(self, params) orelse return Value.null;
     var opened = cursor.Doc.open(a, loc.doc.bytes()) catch return Value.null;
     defer opened.deinit();
-    const cur = try opened.at(loc.doc.uri, loc.offset, cursor.fromLibrary(&self.docs));
+    const lib = try self.docsForUri(a, loc.doc.uri);
+    const cur = try opened.at(loc.doc.uri, loc.offset, cursor.fromLibrary(lib));
     if (try providers.collections.hover(self, a, params)) |h| return encode.hover(a, h);
     if (cur) |c| switch (c) {
         .role_reference => return encode.hover(a, try providers.role_navigation.hover(self, a, params)),
@@ -170,7 +182,8 @@ fn referencesResult(self: *Server, a: Allocator, params: Value) !Value {
 
 fn semanticResult(self: *Server, a: Allocator, params: Value) !Value {
     const doc = documentByUri(self, params) orelse return encode.semanticTokens(a, &.{});
-    const tokens = try providers.semantic_tokens.collect(a, doc, cursor.fromLibrary(&self.docs));
+    const lib = try self.docsForUri(a, doc.uri);
+    const tokens = try providers.semantic_tokens.collect(a, doc, cursor.fromLibrary(lib));
     return encode.semanticTokens(a, tokens);
 }
 
