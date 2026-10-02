@@ -66,6 +66,13 @@ pub fn extractIn(a: Allocator, root: ?[]const u8, path: []const u8, text: []cons
     // Collection source files contribute path-based symbols only. Python
     // DOCUMENTATION strings are not Ansible plays or variable definitions.
     if (!@import("discover.zig").isAnsibleFile(std.fs.path.basename(path))) return .{};
+    return extractDependencyIn(a, root, path, text);
+}
+
+/// Explicit vars-file loads are Ansible data regardless of their extension.
+/// Keep this separate from Workspace discovery so Python DOCUMENTATION and
+/// unrelated JSON files still cannot introduce navigation facts.
+pub fn extractDependencyIn(a: Allocator, root: ?[]const u8, path: []const u8, text: []const u8) !Facts {
     var forest = yaml.parse(a, text) catch return .{};
     defer forest.deinit();
 

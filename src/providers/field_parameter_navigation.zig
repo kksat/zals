@@ -12,6 +12,7 @@ const vs = @import("variable_source.zig");
 const role_navigation = @import("role_navigation.zig");
 const wv = @import("workspace_view.zig");
 const facts = @import("../workspace/facts.zig");
+const discover = @import("../workspace/discover.zig");
 
 const Context = struct {
     names: []const []const u8,
@@ -91,10 +92,20 @@ pub fn implementation(self: *Server, a: Allocator, params: Value) !?[]const type
                 var files = std.array_list.Managed(wv.File).init(a);
                 try files.appendSlice(view.files);
                 for (set.loads) |load| {
-                    if (wv.view.find(files.items, load.path) != null) continue;
+                    const existing = wv.view.find(files.items, load.path);
+                    if (existing != null and discover.isAnsibleFile(std.fs.path.basename(load.path))) continue;
                     const uri = try paths.pathToUri(a, load.path);
                     const text = (try source.source().read(a, uri)) orelse continue;
-                    try files.append(.{ .path = load.path, .uri = uri, .facts = try facts.extractIn(a, view.root, load.path, text) });
+                    const dependency = try facts.extractDependencyIn(a, view.root, load.path, text);
+                    if (existing != null) {
+                        // Non-Ansible source candidates have deliberately
+                        // empty facts; an explicit vars load supplies context.
+                        for (files.items) |*file| {
+                            if (std.mem.eql(u8, file.path, load.path)) file.facts = dependency;
+                        }
+                    } else {
+                        try files.append(.{ .path = load.path, .uri = uri, .facts = dependency });
+                    }
                 }
                 for (try wv.view.calleeFieldDefinitions(a, files.items, set, context.names)) |def| {
                     try out.append(try view.location(def.uri, def.start, def.end));

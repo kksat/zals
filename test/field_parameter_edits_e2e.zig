@@ -143,6 +143,29 @@ test "passed field actions and Workspace references prefer changed schema and va
 }
 
 test "passed field implementations use callee vars-load facts from unsaved task and value buffers" {
+    try calleeLoadScenario("playbooks/vars/reserved.yml",
+        \\# Unsaved loaded dictionary
+        \\input_config:
+        \\  endpoint:
+        \\    "region_name": loaded-callee-region
+        \\
+    , .{ .start = .{ .line = 3, .character = 5 }, .end = .{ .line = 3, .character = 16 } });
+}
+
+test "passed field implementations retain explicit JSON vars loads and their unsaved buffers" {
+    try calleeLoadScenario("playbooks/vars/receiver-field-values.json",
+        \\{
+        \\  "input_config": {
+        \\    "endpoint": {
+        \\      "region_name": "loaded-json-buffer"
+        \\    }
+        \\  }
+        \\}
+        \\
+    , .{ .start = .{ .line = 3, .character = 7 }, .end = .{ .line = 3, .character = 18 } });
+}
+
+fn calleeLoadScenario(load_path: []const u8, buffer: []const u8, expected_range: anchor.Range) !void {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
@@ -166,24 +189,14 @@ test "passed field implementations use callee vars-load facts from unsaved task 
     const caller = try resolver.cursor(m.cursor(play, "            <region_name>: passed-main-region"));
     try open(&client, caller.uri, try resolver.readText(play));
     const tasks_uri = try std.fmt.allocPrint(a, "file://{s}/{s}tasks/main.yml", .{ fixture, receiver });
-    const loaded_uri = try std.fmt.allocPrint(a, "file://{s}/playbooks/vars/reserved.yml", .{fixture});
+    const loaded_uri = try std.fmt.allocPrint(a, "file://{s}/{s}", .{ fixture, load_path });
     try open(&client, tasks_uri, try resolver.readText(receiver ++ "tasks/main.yml"));
-    try open(&client, loaded_uri, try resolver.readText("playbooks/vars/reserved.yml"));
-    try change(&client, tasks_uri,
-        \\- name: Unsaved callee load outside its conventional directories
-        \\  include_vars: ../../../../../../playbooks/vars/reserved.yml
-        \\
-    );
-    try change(&client, loaded_uri,
-        \\# Unsaved loaded dictionary
-        \\input_config:
-        \\  endpoint:
-        \\    "region_name": loaded-callee-region
-        \\
-    );
+    try open(&client, loaded_uri, try resolver.readText(load_path));
+    try change(&client, tasks_uri, try std.fmt.allocPrint(a, "- name: Unsaved callee load outside its conventional directories\n  include_vars: ../../../../../../{s}\n", .{load_path}));
+    try change(&client, loaded_uri, buffer);
     // Independently authored original-buffer UTF-16 coordinates, not learned
     // from the response. Include-vars precedence precedes role vars/defaults.
-    const loaded: anchor.Location = .{ .uri = loaded_uri, .range = .{ .start = .{ .line = 3, .character = 5 }, .end = .{ .line = 3, .character = 16 } } };
+    const loaded: anchor.Location = .{ .uri = loaded_uri, .range = expected_range };
     const variable = try resolver.location(m.span(vars_path, "    <region_name>: receiver-region-vars"));
     const default = try resolver.location(m.span(receiver ++ "defaults/main.yml", "    <region_name>: receiver-region-default"));
     const response = try client.request("textDocument/implementation", .{ .textDocument = .{ .uri = caller.uri }, .position = caller.position });
