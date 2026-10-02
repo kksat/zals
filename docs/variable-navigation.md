@@ -49,6 +49,14 @@ Concrete keys are collected below recognized variable bindings: dictionaries,
 including those inside lists, in defaults, vars, and other supported binding
 sites. Quoted keys have unquoted navigation ranges and show their parsed values.
 A schema-only field has a definition and description, but no implementation.
+Dot access and static single/double-quoted subscripts (`record['region']`) share
+the same group, with quote/bracket-free ranges. Template statements and bare
+expressions are included. Strings/comments, filter/test plugin names (including
+qualified names), called methods, and numeric/computed subscripts are not field
+reads; a dynamic subscript such as `record[key]` reads the root variable `key`.
+Keyword-spelled data members such as `record.filter` remain real fields.
+Static key literals retain their raw contents: Jinja escape-decoded aliases
+(such as `record['\\u0072egion']`) are not normalized into the `region` group.
 A field without a declaration still finds its reads; its hover reports that no
 definition was found rather than showing a same-named root variable's value.
 

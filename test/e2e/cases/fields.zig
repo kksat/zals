@@ -10,6 +10,8 @@ const vars = "roles/field_nav/vars/main.yml";
 const reads: []const m.ExpectedLocation = &.{
     m.span(tasks, "🛰 {{ field_item.<resourcegroup_name> }} /"),
     m.span(tasks, "/ {{ field_backup.<resourcegroup_name> }}"),
+    m.span(tasks, "🛰 {{ static_item['<resourcegroup_name>'] }} /"),
+    m.span(tasks, "/ {{ static_backup[\"<resourcegroup_name>\"] }}"),
 };
 const reads_and_declarations: []const m.ExpectedLocation = &.{
     m.span(tasks, "🛰 {{ field_item.<resourcegroup_name> }} /"),
@@ -17,6 +19,8 @@ const reads_and_declarations: []const m.ExpectedLocation = &.{
     m.span(defaults, "  - <resourcegroup_name>: default-group"),
     m.span(specs, "          <resourcegroup_name>:"),
     m.span(vars, "  \"<resourcegroup_name>\": vars-group"),
+    m.span(tasks, "🛰 {{ static_item['<resourcegroup_name>'] }} /"),
+    m.span(tasks, "/ {{ static_backup[\"<resourcegroup_name>\"] }}"),
 };
 const definitions: []const m.ExpectedLocation = &.{
     m.span(vars, "  \"<resourcegroup_name>\": vars-group"),
@@ -33,6 +37,8 @@ const origins = [_]struct { name: []const u8, at: m.Anchor }{
     .{ .name = "default list key", .at = m.cursor(defaults, "  - <resourcegroup_name>: default-group") },
     .{ .name = "quoted vars key", .at = m.cursor(vars, "  \"<resourcegroup_name>\": vars-group") },
     .{ .name = "nested argument-spec option", .at = m.cursor(specs, "          <resourcegroup_name>:") },
+    .{ .name = "single-quoted subscript", .at = m.cursor(tasks, "🛰 {{ static_item['<resourcegroup_name>'] }} /") },
+    .{ .name = "double-quoted subscript", .at = m.cursor(tasks, "/ {{ static_backup[\"<resourcegroup_name>\"] }}") },
 };
 
 fn ordinaryCases() [origins.len * 5]m.Case {
@@ -89,10 +95,16 @@ fn schemaOnlyCases() [schema_only_origins.len * 5]m.Case {
     return out;
 }
 
+const called = m.cursor(tasks, "{{ field_item.<resourcegroup_name>() }}");
 const description = m.cursor(specs, "            <description>: Resource group field contract.");
 const unbound = m.cursor(tasks, "{{ field_item.<unbound_field> }}");
 const root = m.cursor(tasks, "/ {{ <unbound_field> }}");
 pub const all = ordinaryCases() ++ schemaOnlyCases() ++ [_]m.Case{
+    .{ .name = "field/called member: no references without declarations", .method = .references, .from = called, .include_declaration = false, .expected = &.{} },
+    .{ .name = "field/called member: no references with declarations", .method = .references, .from = called, .include_declaration = true, .expected = &.{} },
+    .{ .name = "field/called member: no field definition", .method = .definition, .from = called, .expected = &.{} },
+    .{ .name = "field/called member: no field implementation", .method = .implementation, .from = called, .expected = &.{} },
+    .{ .name = "field/called member: no field hover", .method = .hover, .from = called, .expected = &.{} },
     .{ .name = "field/metadata description: no reads", .method = .references, .from = description, .include_declaration = false, .expected = &.{} },
     .{ .name = "field/metadata description: not a field declaration", .method = .references, .from = description, .include_declaration = true, .expected = &.{} },
     .{ .name = "field/metadata description: no field definition", .method = .definition, .from = description, .expected = &.{} },

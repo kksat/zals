@@ -30,7 +30,9 @@ contracts and implementations stay specific to the called Role.
 under an unrelated vars root, and a nested argument-spec option. Two differently
 named receivers deliberately join that field-name group without loop tracing.
 Schema-only and unbound members, a same-named root variable, and metadata keys
-exercise the separate field/root groups and all four navigation actions.
+exercise the separate field/root groups and all four navigation actions. Static
+quoted subscripts share the dot-read group; a called same-named member is a
+non-match for every action.
 
 Files under `negative/` contain intentional non-matches or missing targets;
 positive playbooks remain structurally valid Ansible. The marker file is

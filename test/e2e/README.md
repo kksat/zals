@@ -40,10 +40,14 @@ files on disk.
 | Build target | Test root | Contract |
 | --- | --- | --- |
 | `navigation-e2e` | `test/e2e.zig` | Read-only semantic navigation with complete written location oracles |
+| `field-expressions-e2e` | `test/field_expressions_e2e.zig` | Dot/static-subscript reads, expression contexts, literal/plugin/method negatives |
 | `role-parameter-edits-e2e` | `test/role_parameter_edits_e2e.zig` | Unsaved argument-spec ranges and hover |
 | `collection-symbols-e2e` | `test/collection_symbols_e2e.zig` | Collection layouts, member symbols, open buffers, and watcher boundaries |
 | `navigation-uris-e2e` | `test/navigation_uris_e2e.zig` | Absolute and escaped targets from relative/absolute search paths |
 | `selected-venv-e2e` | `test/selected_venv_e2e.zig` | Selected installations, per-file module docs, discovery, and cache isolation |
+
+Field-expression RED/GREEN evidence and literal-escape limitations are recorded
+in [`test/field_expressions_e2e.md`](../field_expressions_e2e.md).
 
 The last suite requires `ansible` and `ansible-doc` on PATH (see
 [`test/selected_venv_e2e.md`](../selected_venv_e2e.md)); the other suites do not

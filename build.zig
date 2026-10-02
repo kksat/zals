@@ -100,6 +100,12 @@ pub fn build(b: *std.Build) void {
             .inputs = &.{ "test/fixtures/e2e-workspace", "test/dependencies" },
         },
         .{
+            .name = "field-expressions-e2e",
+            .source = "test/field_expressions_e2e.zig",
+            .description = "Run field-expression syntax and non-match navigation tests",
+            .inputs = &.{"test/fixtures/field-expressions-workspace"},
+        },
+        .{
             .name = "selected-venv-e2e",
             .source = "test/selected_venv_e2e.zig",
             .description = "Run selected virtual environment and module docs tests",

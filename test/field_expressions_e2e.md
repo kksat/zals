@@ -209,5 +209,6 @@ not claimed as supported. Honoring escapes while skipping string boundaries
 - `make test`: passed.
 - `DEVELOPER_DIR=/nonexistent zig test test/e2e.zig`:
   **338 semantic cases, 0 failures**.
-- No shared build/test registry changes are included; this independent suite
-  remains directly invocable until the parent registers it.
+- The parent registers this independent suite as `zig build field-expressions-e2e`
+  and includes it in `make e2e` / CI, tracking the server and checked-in fixture
+  inputs. Direct `zig test` invocation also remains available.

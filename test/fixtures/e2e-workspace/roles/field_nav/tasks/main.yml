@@ -5,3 +5,10 @@
 - name: Schema-only and unbound field names stay separate from roots
   ansible.builtin.debug:
     msg: "{{ field_item.declared_only_field }} / {{ field_item.unbound_field }} / {{ unbound_field }}"
+- name: Static field aliases use exact unquoted key spans
+  ansible.builtin.debug:
+    msg: |-
+      🛰 {{ static_item['resourcegroup_name'] }} / {{ static_backup["resourcegroup_name"] }}
+- name: Called member names are not data field reads
+  ansible.builtin.debug:
+    msg: "{{ field_item.resourcegroup_name() }}"
