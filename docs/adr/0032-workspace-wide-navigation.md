@@ -9,6 +9,13 @@
   [ADR-0027](0027-document-symbols.md)
 - **Superseded by:** in part by
   [ADR-0034](0034-resolved-role-reference-identity.md) (Role find-references matching)
+- **Extended by:** [ADR-0036](0036-variable-navigation-from-bindings.md)
+  (binding entry points and concrete implementations),
+  [ADR-0037](0037-selected-venv-collections.md) (selected installations and
+  contextual module services), [ADR-0038](0038-workspace-collection-members.md)
+  (metadata-defined collection roots and public source symbols), and
+  [ADR-0039](0039-role-parameter-navigation.md) (callee parameter navigation).
+  [ADR-0040](0040-navigation-file-uris.md) defines file-URI serialization.
 
 ## Context
 

@@ -30,9 +30,14 @@ Tier 1 — the client-agnostic language server surface:
 
 Workspace-wide navigation (post-parity): find-references, definition, and
 hover for variables, roles, role parameters, task and vars files, and
-collections across the Workspace, plus `workspace/symbol`. See
-[ADR-0031](docs/adr/0031-workspace-index.md) and
-[ADR-0032](docs/adr/0032-workspace-wide-navigation.md).
+collections across the Workspace, plus `workspace/symbol`. Workspace collection
+symbols include roles, modules, and plugins, with metadata-defined collection
+names across standard, dotted, and nested source layouts. Installed dependencies
+remain outside the Workspace symbol set. See
+[ADR-0031](docs/adr/0031-workspace-index.md),
+[ADR-0032](docs/adr/0032-workspace-wide-navigation.md), and the
+[collection member scope guide](docs/workspace-collection-members.md)
+([ADR-0038](docs/adr/0038-workspace-collection-members.md)).
 
 Variable navigation (find-references, definition, and implementation) is a
 post-parity extension; upstream has no counterpart. Reads and binding keys are
@@ -53,7 +58,10 @@ debug task the cursor is inside. See
 Role navigation is a fourth post-parity extension: go-to-definition on a role
 reference opens its argument specs, metadata, or main task file, and
 go-to-implementation (`textDocument/implementation`) opens its main task file.
-See [ADR-0029](docs/adr/0029-role-navigation.md).
+See [ADR-0029](docs/adr/0029-role-navigation.md). Passed parameter keys navigate
+to the called role's selected argument-spec option and concrete bindings, using
+the same role context as hover
+([ADR-0039](docs/adr/0039-role-parameter-navigation.md)).
 
 Extract-tasks code actions are a fifth post-parity extension: move the task(s)
 under the cursor or selection into a new sibling `taskN.yml` and replace them
@@ -139,6 +147,13 @@ zals --stdio
 ```
 
 Point your LSP client at the binary and attach it to Ansible source buffers.
+Collections installed directly under the selected venv root or in its
+site-packages are supported by navigation, module docs, and discovery; see the
+[selected environment guide](docs/selected-venv-collections.md)
+([ADR-0037](docs/adr/0037-selected-venv-collections.md)). Navigation uses absolute,
+escaped file URIs, anchored to the server process's working directory for
+relative filesystem targets
+([ADR-0040](docs/adr/0040-navigation-file-uris.md)).
 For Neovim, see the [filetype and LSP setup](docs/neovim.md), including
 `requirements.yml`, collection metadata, and Jinja templates.
 

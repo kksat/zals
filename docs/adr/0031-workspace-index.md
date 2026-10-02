@@ -4,6 +4,8 @@
 - **Date:** 2026-09-28
 - **Supersedes:** the parse cache described in [ADR-0024](0024-variable-go-to-definition.md)
 - **Superseded by:** —
+- **Extended by:** [ADR-0038](0038-workspace-collection-members.md) (metadata
+  identity, public collection source symbols, and uniform open/watch exclusions)
 
 ## Context
 

@@ -25,18 +25,21 @@ _Avoid_: package, module
 
 **Collection**:
 An Ansible distribution unit named `namespace.collection`, holding roles,
-modules, plugins, and playbooks, and described by its `galaxy.yml`.
+modules, plugins, and playbooks, and described by its `galaxy.yml` or
+`galaxy.yaml` metadata.
 _Avoid_: package, bundle
 
 **Workspace collection**:
-A Collection that is part of the project: one under any `ansible_collections/`
-directory in the Workspace, or the Workspace itself when it contains
-`galaxy.yml`.
+A Collection that belongs to the project's sources: the Workspace itself,
+or a directory at any depth below an `ansible_collections/` directory in that
+Workspace, carrying Collection metadata. Its name comes from the metadata,
+not the spelling or depth of the directory.
 _Avoid_: local collection, project collection
 
 **Installed collection**:
-A Collection the project depends on: one in the selected Python virtual
-environment or on the configured collections paths.
+A Collection available as a dependency rather than as Workspace source,
+including one installed in the selected Python virtual environment or found
+on configured collections paths.
 _Avoid_: external collection, vendored collection
 
 **Collection reference**:
@@ -45,8 +48,8 @@ task, or role metadata), a `requirements.yml` or inline execution-environment
 collection entry, a `galaxy.yml` `dependencies:` key, or the collection part of
 an FQCN (module key, role name, role dependency, runtime redirect, action
 group). A requirements entry that names a git, url, file, or dir source is not
-one. Go-to-definition opens the Collection's `galaxy.yml`; hover shows its
-`README.md`, falling back to its unrendered `galaxy.yml`; find-references
+one. Go-to-definition opens the Collection's metadata; hover shows its
+`README.md`, falling back to its unrendered metadata; find-references
 returns every site in the Workspace that names it.
 _Avoid_: collection usage, collection mention
 
@@ -105,8 +108,18 @@ unresolved reference finds only itself; hover shows the role's `README.md`,
 falling back to its argument specs, metadata, or resolved path.
 _Avoid_: role usage, role mention
 
+**Module**:
+An Ansible unit invoked by a Task to perform work, such as managing a resource
+or producing facts.
+_Avoid_: role, package
+
+**Plugin**:
+An Ansible extension of a particular kind, such as a lookup, filter, callback,
+or connection.
+_Avoid_: module, helper
+
 **Module key**:
-The key of a task map that names the module the task invokes.
+The key of a task map that names the Module the task invokes.
 _Avoid_: action key, module name
 
 **Document symbol**:
@@ -114,10 +127,11 @@ An entity shown in a client's outline for a single document.
 _Avoid_: outline entry, breadcrumb
 
 **Workspace symbol**:
-An entity found by project-wide symbol search: a Workspace collection, role,
-playbook, task file, named play, or named task or handler. Each carries its
-nearest parent by file location. Installed collections and variables are not
-workspace symbols.
+An entity found by project-wide symbol search: a Workspace collection, Role,
+Module, Plugin, playbook, task file, named play, or named task or handler. Each
+carries its nearest parent by file location. Collection members carry their
+Collection as parent and can be found by short or Collection-qualified name.
+Installed collections and variables are not Workspace symbols.
 _Avoid_: global symbol, project symbol
 
 **Variable**:

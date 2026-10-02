@@ -41,7 +41,10 @@ Each ADR captures one decision, its context, and its consequences. Statuses are
 | [0034](0034-resolved-role-reference-identity.md) | Match role references by resolved identity | Accepted |
 | [0035](0035-isolated-navigation-fixture.md) | Isolate the navigation E2E fixture and dependency | Accepted |
 | [0036](0036-variable-navigation-from-bindings.md) | Variable navigation from bindings | Accepted |
+| [0037](0037-selected-venv-collections.md) | Search collections in the selected virtual environment root | Accepted |
+| [0038](0038-workspace-collection-members.md) | Workspace collection identity and members | Accepted |
 | [0039](0039-role-parameter-navigation.md) | Role parameter navigation | Accepted |
+| [0040](0040-navigation-file-uris.md) | Absolute, escaped navigation file URIs | Accepted |
 
 ## Template
 
