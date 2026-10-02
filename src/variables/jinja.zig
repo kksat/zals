@@ -82,6 +82,12 @@ fn scanScalarNames(allocator: Allocator, raw: []const u8, base: usize, names: Na
                 try scanExpressionNames(allocator, raw[body_start..], base + body_start, names, true, out);
                 return;
             };
+            if (tagIs(raw[body_start .. body_start + rel], "raw")) {
+                // Raw contents are literal, including quotes, comments and
+                // template-looking text. Resume only after a real endraw tag.
+                i = rawBlockEnd(raw, body_start + rel + 2) orelse return;
+                continue;
+            }
             try scanExpressionNames(allocator, raw[body_start .. body_start + rel], base + body_start, names, true, out);
             i = body_start + rel + 2;
         } else if (i + 1 < raw.len and raw[i] == '{' and raw[i + 1] == '#') {
@@ -91,6 +97,24 @@ fn scanScalarNames(allocator: Allocator, raw: []const u8, base: usize, names: Na
             i += 1;
         }
     }
+}
+
+fn tagIs(body: []const u8, name: []const u8) bool {
+    const start: usize = if (body.len > 0 and body[0] == '-') 1 else 0;
+    const end = if (body.len > 0 and body[body.len - 1] == '-') body.len - 1 else body.len;
+    if (end < start) return false;
+    return std.mem.eql(u8, std.mem.trim(u8, body[start..end], " \t\r\n"), name);
+}
+
+fn rawBlockEnd(raw: []const u8, start: usize) ?usize {
+    var i = start;
+    while (std.mem.indexOfPos(u8, raw, i, "{%")) |open| {
+        const body_start = open + 2;
+        const rel = std.mem.indexOf(u8, raw[body_start..], "%}") orelse return null;
+        if (tagIs(raw[body_start .. body_start + rel], "endraw")) return body_start + rel + 2;
+        i = body_start;
+    }
+    return null;
 }
 
 /// Scan a bare expression body (no `{{ }}` delimiters) for root identifiers.

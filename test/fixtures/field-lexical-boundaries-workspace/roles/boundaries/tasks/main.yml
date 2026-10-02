@@ -1,0 +1,8 @@
+- name: Raw blocks are literal, not expressions
+  debug:
+    msg: |-
+      🛰 before {{ data.boundary_field }}
+      {% raw %}{{ dummy.boundary_field }} {{ boundary_root }}{% endraw %} after {{ data['boundary_field'] }}
+      🛰 {%- raw -%}{{ dummy["boundary_field"] }} {{ boundary_root }} {%- endraw -%} resumed {{ data.boundary_field }}
+      {% raw %}unclosed ' {# {{ dummy.boundary_field }} {% set ns.boundary_field = dummy.boundary_field %} {% endraw %} tail {{ boundary_root }}
+      quoted {{ "{% raw %}{{ dummy.boundary_field }}" ~ data.boundary_field }}
