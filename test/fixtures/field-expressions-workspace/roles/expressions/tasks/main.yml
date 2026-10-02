@@ -3,3 +3,14 @@
   ansible.builtin.debug:
     msg: |-
       🛰 {{ record.field_name }} / {{ other['field_name'] }} / {{ spare["field_name"] }}
+- name: Distinguish field reads from unqualified and qualified plugin names
+  ansible.builtin.debug:
+    msg: |-
+      plain-filter {{ record.filter_field | filter_field }}
+      plain-test {{ record.filter_field is filter_field }}
+      qualified-filter {{ record.filter_field | acme.tools.filter_field }}
+      qualified-test {{ record.filter_field is not acme.tools.filter_field }}
+      middle-filter {{ record | acme.filter_field.apply }}
+      middle-test {{ record is acme.filter_field.check }}
+      filter-argument {{ record | acme.tools.apply(other.filter_field) }}
+      test-argument {{ record is acme.tools.check(other['filter_field']) }}

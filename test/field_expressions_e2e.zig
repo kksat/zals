@@ -33,6 +33,52 @@ test "stdio static quoted subscripts share the dot-read and binding-key field gr
     }, quoted_reads, quoted_with_definitions);
 }
 
+const filter_reads: []const m.ExpectedLocation = &.{
+    m.span(tasks, "plain-filter {{ record.<filter_field> |"),
+    m.span(tasks, "plain-test {{ record.<filter_field> is"),
+    m.span(tasks, "qualified-filter {{ record.<filter_field> |"),
+    m.span(tasks, "qualified-test {{ record.<filter_field> is"),
+    m.span(tasks, "apply(other.<filter_field>)"),
+    m.span(tasks, "check(other['<filter_field>'])"),
+};
+const filter_with_definitions: []const m.ExpectedLocation = &.{
+    m.span(tasks, "plain-filter {{ record.<filter_field> |"),
+    m.span(tasks, "plain-test {{ record.<filter_field> is"),
+    m.span(tasks, "qualified-filter {{ record.<filter_field> |"),
+    m.span(tasks, "qualified-test {{ record.<filter_field> is"),
+    m.span(tasks, "apply(other.<filter_field>)"),
+    m.span(tasks, "check(other['<filter_field>'])"),
+    m.span(defaults, "  <filter_field>: value"),
+};
+
+test "stdio filter and test names are not field reads, including dotted qualified names" {
+    try checkGroup(&.{
+        m.cursor(tasks, "plain-filter {{ record.<filter_field> |"),
+        m.cursor(tasks, "plain-test {{ record.<filter_field> is"),
+        m.cursor(tasks, "qualified-filter {{ record.<filter_field> |"),
+        m.cursor(tasks, "qualified-test {{ record.<filter_field> is"),
+        m.cursor(tasks, "apply(other.<filter_field>)"),
+        m.cursor(tasks, "check(other['<filter_field>'])"),
+        m.cursor(defaults, "  <filter_field>: value"),
+    }, filter_reads, filter_with_definitions);
+    try checkGroup(&.{
+        m.cursor(tasks, "plain-filter {{ record.filter_field | <filter_field> }}"),
+        m.cursor(tasks, "plain-test {{ record.filter_field is <filter_field> }}"),
+        m.cursor(tasks, "| <acme>.tools.filter_field"),
+        m.cursor(tasks, "| acme.<tools>.filter_field"),
+        m.cursor(tasks, "| acme.tools.<filter_field>"),
+        m.cursor(tasks, "is not <acme>.tools.filter_field"),
+        m.cursor(tasks, "is not acme.<tools>.filter_field"),
+        m.cursor(tasks, "is not acme.tools.<filter_field>"),
+        m.cursor(tasks, "| acme.<filter_field>.apply"),
+        m.cursor(tasks, "| acme.filter_field.<apply>"),
+        m.cursor(tasks, "is acme.<filter_field>.check"),
+        m.cursor(tasks, "is acme.filter_field.<check>"),
+        m.cursor(tasks, "| acme.tools.<apply>(other"),
+        m.cursor(tasks, "is acme.tools.<check>(other"),
+    }, &.{}, &.{});
+}
+
 /// Both reference modes have separate, complete written answers. Every origin
 /// sees the same Workspace-wide leaf-NAME group, not receiver object identity.
 fn checkGroup(origins: []const m.Anchor, reads: []const m.ExpectedLocation, with_definitions: []const m.ExpectedLocation) !void {

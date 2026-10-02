@@ -108,7 +108,7 @@ pub fn scanExpressionFields(allocator: Allocator, text: []const u8, base: usize,
 
 fn scanExpressionNames(allocator: Allocator, text: []const u8, base: usize, names: Names, out: *std.array_list.Managed(Ident)) !void {
     _ = allocator;
-    const Prev = enum { other, dot, pipe, is_test };
+    const Prev = enum { other, dot, pipe, is_test, plugin_name };
     var prev: Prev = .other;
     var can_subscript = false;
     var i: usize = 0;
@@ -139,7 +139,7 @@ fn scanExpressionNames(allocator: Allocator, text: []const u8, base: usize, name
         }
         if (c == '.') {
             i += 1;
-            prev = .dot;
+            if (prev != .plugin_name) prev = .dot;
             continue;
         }
         if (c == '|') {
@@ -151,16 +151,16 @@ fn scanExpressionNames(allocator: Allocator, text: []const u8, base: usize, name
             var j = i;
             while (j < text.len and isIdentChar(text[j])) j += 1;
             const word = text[i..j];
-            can_subscript = !isKeyword(word) and prev != .pipe and prev != .is_test;
+            can_subscript = !isKeyword(word) and prev != .pipe and prev != .is_test and prev != .plugin_name;
             if (std.mem.eql(u8, word, "is")) {
                 prev = .is_test;
             } else if (prev == .is_test and std.mem.eql(u8, word, "not")) {
                 prev = .is_test;
             } else if (isKeyword(word)) {
                 prev = .other;
-            } else if (prev == .dot or prev == .pipe or prev == .is_test) {
+            } else if (prev == .dot or prev == .pipe or prev == .is_test or prev == .plugin_name) {
                 if (prev == .dot and names == .fields) try out.append(.{ .name = word, .start = base + i, .end = base + j });
-                prev = .other;
+                prev = if (prev == .dot) .other else .plugin_name;
             } else {
                 if (names == .roots) try out.append(.{ .name = word, .start = base + i, .end = base + j });
                 prev = .other;

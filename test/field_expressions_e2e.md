@@ -40,3 +40,21 @@ DEVELOPER_DIR=/nonexistent zig test test/e2e.zig
   Dynamic root-name scanning is untouched.
 - **GREEN:** independent test 1/1; `make test` passed; existing semantic
   stdio suite **338 cases, 0 failures**.
+
+## Slice 2 — qualified filter/test names
+
+- Added one test separating six genuine field reads (including filter/test
+  arguments) from plain and dotted plugin names. Both modes are requested
+  from every positive read/key and fourteen negative plugin-name cursors.
+- **RED:** prior lexical commit, independent suite 1 passed / 1 failed.
+  Every positive origin incorrectly returned 10 reads rather than 6
+  (11 rather than 7 including the concrete key): four qualified-name
+  components falsely joined the field group.
+  Log: `/tmp/field-expressions-slice2-red.log`.
+- **Smallest fix:** retain plugin-name state across its dotted components,
+  clearing it when normal expression punctuation/keywords resume. Field
+  arguments remain real reads.
+- **GREEN:** independent suite 2/2, including all negative cursors;
+  `make test` passed; semantic suite **338 cases, 0 failures**.
+  The first combined command exceeded its outer 180-second deadline during
+  semantic verification; an isolated rerun completed successfully in 24 seconds.

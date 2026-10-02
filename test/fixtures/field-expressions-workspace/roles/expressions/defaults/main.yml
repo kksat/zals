@@ -4,3 +4,6 @@ records:
 other:
   field_name: second
 field_name: root-only
+filters:
+  filter_field: value
+filter_field: root-filter
