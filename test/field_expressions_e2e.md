@@ -110,3 +110,28 @@ DEVELOPER_DIR=/nonexistent zig test test/e2e.zig
   spelling do not turn into static field reads.
 - **GREEN on first run:** independent suite 7/7. No production change needed;
   these are deliberate verification controls, not fabricated failing tests.
+
+## Slice 8 — template filter-block names
+
+- Added one test extending the filter-name non-match to `{% filter ... %}`
+  statements, with explicit positive stored-field/argument oracles and negative
+  cursors on plain and qualified block filter names.
+- **RED:** previous lexical commit, independent suite 7 passed / 1 failed;
+  8 negative requests failed because plain plugin names became roots and
+  qualified components became fields.
+  Log: `/tmp/field-expressions-slice8-red.log`.
+- **Smallest fix:** let the `filter` statement keyword introduce the same
+  plugin-name state as a pipe expression; ordinary field arguments still scan.
+- **GREEN:** independent suite **8/8**; `make test` passed; semantic suite
+  **338 cases, 0 failures**.
+
+## Final verification
+
+- `make build`: passed.
+- `DEVELOPER_DIR=/nonexistent zig test test/field_expressions_e2e.zig`:
+  **8 tests passed**, **150 reference requests** with exact full-result oracles.
+- `make test`: passed.
+- `DEVELOPER_DIR=/nonexistent zig test test/e2e.zig`:
+  **338 semantic cases, 0 failures**.
+- No shared build/test registry changes are included; this independent suite
+  remains directly invocable until the parent registers it.

@@ -55,3 +55,10 @@
       computed-single {{ record['field_name' ~ suffix] }}
       computed-double {{ record["field_name" + suffix] }}
   when: record[field_name] is defined
+- name: Template filter blocks also distinguish plugin names from field reads
+  ansible.builtin.debug:
+    msg: |-
+      genuine-block {{ receiver.block_field }}
+      plain-block {% filter block_field %}text{% endfilter %}
+      qualified-block {% filter acme.tools.block_field %}text{% endfilter %}
+      argument-block {% filter acme.tools.apply(other['block_field']) %}text{% endfilter %}

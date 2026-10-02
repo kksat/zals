@@ -1,11 +1,10 @@
 //! Jinja expression scanner.
 //!
-//! Extracts **root identifiers** from Jinja expressions (`{{ … }}`, `{% … %}`)
-//! and from bare-expression bodies (the value of `when`, `loop`, and friends).
-//! Only identifiers that name a variable are returned: attribute names
-//! (`name` in `user.name`), filter names (`default` in `x | default(y)`), and
-//! test names (`defined` in `x is defined`) are skipped, as are Jinja keywords
-//! and string literals.
+//! Extracts root identifiers and, through separate entry points, field names
+//! from Jinja expressions (`{{ … }}`, `{% … %}`) and bare-expression bodies
+//! (the value of `when`, `loop`, and friends). Dot reads and static quoted
+//! subscripts are fields, not root variables. Filter/test names, called methods,
+//! Jinja keywords, and ordinary string literals are not field reads.
 //!
 //! Offsets are absolute byte offsets into the document, so callers can map them
 //! back to LSP positions without re-scanning.
@@ -57,7 +56,8 @@ pub fn scanScalar(
     return scanScalarNames(allocator, raw, base, .roots, out);
 }
 
-/// Field names read through member access, separately from root identifiers.
+/// Field names read through dot access or static quoted subscripts, separately
+/// from root identifiers. Quotes and brackets are not part of the emitted span.
 pub fn scanScalarFields(allocator: Allocator, raw: []const u8, base: usize, out: *std.array_list.Managed(Ident)) !void {
     return scanScalarNames(allocator, raw, base, .fields, out);
 }
@@ -154,6 +154,8 @@ fn scanExpressionNames(allocator: Allocator, text: []const u8, base: usize, name
             can_subscript = !isKeyword(word) and prev != .pipe and prev != .is_test and prev != .plugin_name;
             if (std.mem.eql(u8, word, "is")) {
                 prev = .is_test;
+            } else if (std.mem.eql(u8, word, "filter")) {
+                prev = .pipe;
             } else if (prev == .is_test and std.mem.eql(u8, word, "not")) {
                 prev = .is_test;
             } else if (isKeyword(word)) {

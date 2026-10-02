@@ -202,6 +202,31 @@ test "stdio numeric and computed-string subscripts are not named field reads" {
     }, &.{}, &.{});
 }
 
+const block_reads: []const m.ExpectedLocation = &.{
+    m.span(tasks, "genuine-block {{ receiver.<block_field> }}"),
+    m.span(tasks, "argument-block {% filter acme.tools.apply(other['<block_field>'])"),
+};
+const blocks_with_definitions: []const m.ExpectedLocation = &.{
+    m.span(tasks, "genuine-block {{ receiver.<block_field> }}"),
+    m.span(tasks, "argument-block {% filter acme.tools.apply(other['<block_field>'])"),
+    m.span(defaults, "  <block_field>: stored-block"),
+};
+
+test "stdio template filter-block names are not root or field reads" {
+    try checkGroup(&.{
+        m.cursor(tasks, "plain-block {% filter <block_field> %}"),
+        m.cursor(tasks, "qualified-block {% filter <acme>.tools.block_field"),
+        m.cursor(tasks, "qualified-block {% filter acme.<tools>.block_field"),
+        m.cursor(tasks, "qualified-block {% filter acme.tools.<block_field>"),
+        m.cursor(tasks, "argument-block {% filter acme.tools.<apply>(other"),
+    }, &.{}, &.{});
+    try checkGroup(&.{
+        m.cursor(tasks, "genuine-block {{ receiver.<block_field> }}"),
+        m.cursor(tasks, "argument-block {% filter acme.tools.apply(other['<block_field>'])"),
+        m.cursor(defaults, "  <block_field>: stored-block"),
+    }, block_reads, blocks_with_definitions);
+}
+
 /// Both reference modes have separate, complete written answers. Every origin
 /// sees the same Workspace-wide leaf-NAME group, not receiver object identity.
 fn checkGroup(origins: []const m.Anchor, reads: []const m.ExpectedLocation, with_definitions: []const m.ExpectedLocation) !void {
