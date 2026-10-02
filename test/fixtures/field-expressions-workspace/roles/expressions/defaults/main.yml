@@ -1,0 +1,6 @@
+---
+records:
+  - field_name: first
+other:
+  field_name: second
+field_name: root-only

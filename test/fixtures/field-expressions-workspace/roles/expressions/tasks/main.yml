@@ -1,0 +1,5 @@
+---
+- name: Read a field by leaf name across unrelated receivers
+  ansible.builtin.debug:
+    msg: |-
+      🛰 {{ record.field_name }} / {{ other['field_name'] }} / {{ spare["field_name"] }}

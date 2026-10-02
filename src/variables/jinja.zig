@@ -110,6 +110,7 @@ fn scanExpressionNames(allocator: Allocator, text: []const u8, base: usize, name
     _ = allocator;
     const Prev = enum { other, dot, pipe, is_test };
     var prev: Prev = .other;
+    var can_subscript = false;
     var i: usize = 0;
     while (i < text.len) {
         const c = text[i];
@@ -117,9 +118,23 @@ fn scanExpressionNames(allocator: Allocator, text: []const u8, base: usize, name
             i += 1;
             continue;
         }
+        if (c == '[' and can_subscript and names == .fields) {
+            const start = skipWhitespace(text, i + 1);
+            if (start < text.len and (text[start] == '\'' or text[start] == '"')) {
+                const end = skipString(text, start);
+                const close = skipWhitespace(text, end);
+                if (end > start + 1 and text[end - 1] == text[start] and close < text.len and text[close] == ']') {
+                    try out.append(.{ .name = text[start + 1 .. end - 1], .start = base + start + 1, .end = base + end - 1 });
+                    i = close + 1;
+                    prev = .other;
+                    continue;
+                }
+            }
+        }
         if (c == '\'' or c == '"') {
             i = skipString(text, i);
             prev = .other;
+            can_subscript = true;
             continue;
         }
         if (c == '.') {
@@ -136,6 +151,7 @@ fn scanExpressionNames(allocator: Allocator, text: []const u8, base: usize, name
             var j = i;
             while (j < text.len and isIdentChar(text[j])) j += 1;
             const word = text[i..j];
+            can_subscript = !isKeyword(word) and prev != .pipe and prev != .is_test;
             if (std.mem.eql(u8, word, "is")) {
                 prev = .is_test;
             } else if (prev == .is_test and std.mem.eql(u8, word, "not")) {
@@ -154,7 +170,14 @@ fn scanExpressionNames(allocator: Allocator, text: []const u8, base: usize, name
         }
         i += 1;
         prev = .other;
+        can_subscript = c == ']' or c == ')' or c == '}';
     }
+}
+
+fn skipWhitespace(text: []const u8, start: usize) usize {
+    var i = start;
+    while (i < text.len and std.ascii.isWhitespace(text[i])) : (i += 1) {}
+    return i;
 }
 
 fn skipString(text: []const u8, start: usize) usize {
