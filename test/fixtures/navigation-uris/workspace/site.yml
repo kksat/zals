@@ -1,0 +1,6 @@
+- name: Navigate to dependencies outside the Workspace
+  hosts: all
+  gather_facts: false
+  roles:
+    - role: uri_demo
+    - role: uri_paths.dependency.collection_demo

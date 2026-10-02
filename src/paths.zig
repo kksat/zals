@@ -26,9 +26,17 @@ pub fn uriToPath(allocator: Allocator, uri: []const u8) ![]const u8 {
     return buf.toOwnedSlice();
 }
 
+/// LSP file URIs must be absolute. Anchor relative filesystem paths to the
+/// same process directory used for their lookup; do not require the file to
+/// exist (code actions also use this helper for new files).
 pub fn pathToUri(allocator: Allocator, path: []const u8) ![]const u8 {
     if (std.mem.startsWith(u8, path, "file:")) return path;
-    return std.fmt.allocPrint(allocator, "file://{s}", .{path});
+    if (std.fs.path.isAbsolute(path)) return std.fmt.allocPrint(allocator, "file://{s}", .{path});
+    const cwd = try std.process.getCwdAlloc(allocator);
+    defer allocator.free(cwd);
+    const absolute = try std.fs.path.join(allocator, &.{ cwd, path });
+    defer allocator.free(absolute);
+    return std.fmt.allocPrint(allocator, "file://{s}", .{absolute});
 }
 
 const testing = std.testing;

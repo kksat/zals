@@ -1,0 +1,3 @@
+- name: Relative collections-path implementation
+  ansible.builtin.debug:
+    msg: collection_demo
