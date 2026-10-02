@@ -1,0 +1,8 @@
+- hosts: all
+  collections:
+    - fixture.root
+  roles:
+    - role: fixture.root.probe
+  tasks:
+    - fixture.root.probe:
+        message: configured

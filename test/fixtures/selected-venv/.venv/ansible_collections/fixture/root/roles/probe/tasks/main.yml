@@ -1,0 +1,3 @@
+- name: Root collection role
+  ansible.builtin.debug:
+    msg: Direct collections path role

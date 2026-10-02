@@ -22,6 +22,29 @@ root and site-packages, then Workspace collection directories. An explicit
 configured path still wins over the selected environment. Collections installed
 in an environment are dependencies, not Workspace symbols.
 
+## Configuring a collection directory directly
+
+Like Ansible, zals accepts either the directory **containing**
+`ansible_collections/` or the `ansible_collections/` directory itself:
+
+```ini
+[defaults]
+collections_path = ./.venv/ansible_collections
+```
+
+`collections_path = ./ansible_collections` is also supported. Relative config
+entries resolve against the config file's directory; relative
+`ANSIBLE_COLLECTIONS_PATH` entries keep their server working-directory meaning.
+A direct entry normalizes to its parent before deduplication, preserving the
+first occurrence and original path order. A trailing separator is accepted.
+You do not need to enable automatic venv selection for an explicit config or
+environment path to a venv's collections to work.
+
+This matches [Ansible core's collection finder](https://github.com/ansible/ansible/blob/v2.17.1/lib/ansible/utils/collection_loader/_collection_finder.py#L257-L266),
+and applies uniformly to Collection/Role navigation and module docs/discovery.
+
+## Module documentation
+
 Module documentation is read using the `ansible-doc` on the server's PATH, with
 the effective per-file collections paths and the source directory supplied to
 that child process. Selecting a venv controls collection discovery; it does not

@@ -36,7 +36,7 @@ pub const Index = struct {
     pub fn scan(self: *Index, collections_paths: []const []const u8) void {
         const a = self.arena.allocator();
         // Collection discovery is filesystem-only, even without ansible on PATH.
-        for (collections_paths) |p| self.scanCollections(a, p);
+        for (collections_paths) |p| self.scanCollections(a, @import("project_config.zig").collectionPathRoot(p));
 
         const ver = self.runner.runWithOptions(self.allocator, &.{ "ansible", "--version" }, self.execution) catch return;
         defer ver.deinit(self.allocator);

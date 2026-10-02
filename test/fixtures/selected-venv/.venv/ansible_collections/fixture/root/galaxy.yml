@@ -1,3 +1,6 @@
 namespace: fixture
 name: root
 version: 1.0.0
+authors:
+  - Fixture Author
+readme: README.md

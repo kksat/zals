@@ -63,6 +63,47 @@ Commands were run with `DEVELOPER_DIR=/nonexistent` on macOS.
      root module definition returned `null` from a nested source directory.
    - GREEN: same command with `--summary all` → exit 0, `11/11 tests passed`.
 
+## Direct `ansible_collections` path normalization follow-up
+
+10. **Absolute direct environment path, automatic venv selection disabled**
+    - RED: `DEVELOPER_DIR=/nonexistent zig build selected-venv-e2e` → exit 1,
+      `11/12 passed`. Expected
+      `.venv/ansible_collections/fixture/root/galaxy.yml`; zals incorrectly
+      returned `adjacent/collections/ansible_collections/fixture/root/galaxy.yml`
+      from Workspace fallback.
+    - Minimal common-boundary normalization, then GREEN: same command with
+      `--summary all` → exit 0, `12/12 tests passed`. Hover compares the complete
+      authored root Collection README, not a generic Collection header.
+11. **Relative direct environment path preserves cwd meaning**
+    - RED: same command → exit 1, `12/13 passed`. Navigation found the intended
+      metadata but returned the invalid relative URI
+      `file://test/fixtures/selected-venv/.venv/ansible_collections/fixture/root/galaxy.yml`
+      instead of its absolute file URI.
+    - Make effective roots absolute against the server cwd, then GREEN:
+      same command with `--summary all` → exit 0, `13/13 tests passed`.
+      The same black-box test also verifies the Collection role definition and
+      module definition/hover from a nested source directory.
+12. **Characterizations**, already green: a nearest config path naming
+    `../../.venv/ansible_collections`, complete Collection hover, role and module
+    definitions; mixed direct/parent aliases preserve first-path precedence
+    when reversed and do not duplicate module completion entries. An intentionally
+    unresolved runtime redirect verifies filesystem discovery independently of
+    the ansible-doc catalog. Result: `15/15 tests passed`.
+
+The direct-config fixture is `test/fixtures/selected-venv/configs/direct/`, with
+an explicit Collection role under `.venv/ansible_collections/fixture/root/roles/probe/`
+and redirect routes in that Collection's `meta/runtime.yml`. The root Collection
+metadata includes Ansible's mandatory `authors` and `readme` fields. A direct
+host `ansible-doc -l --json -t module` check with only the root fixture path
+confirmed `fixture.root.probe` is in the catalog and `fixture.root.unresolved_probe`
+is not. Expected locations and documentation are authored in the test; no
+answers are harvested from zals.
+
+Follow-up verification: `DEVELOPER_DIR=/nonexistent zig build test e2e --summary all`
+passed `227/227` tests on the child branch (211 unit, existing navigation's 265
+cases, and all 15 selected-venv LSP tests). `make smoke` and `git diff --check`
+also passed.
+
 Module tests execute the host's `ansible-doc` using only checked-in Python
 `DOCUMENTATION` strings; they do not install dependencies, activate a venv, or
 execute the fixture modules. Ansible is a prerequisite, as for the server.

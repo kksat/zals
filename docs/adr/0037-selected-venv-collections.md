@@ -29,6 +29,34 @@ selection disables environment lookup. Never infer an environment from
 Workspace collections (ADRs [0031](0031-workspace-index.md) and
 [0035](0035-isolated-navigation-fixture.md)).
 
+## Direct collection-directory inputs
+
+Accept a configured path ending in the literal directory component
+`ansible_collections` as an alias for its parent collections root. Normalize at
+the common effective collection-path boundary, before ordered deduplication,
+not independently in navigation providers. The module filesystem scanner also
+uses the same normalization when scanning raw startup dump paths. Collection,
+Role, module docs, and module discovery therefore append `ansible_collections`
+exactly once. Accept a trailing directory separator as well.
+
+This follows the primary implementation in Ansible core 2.17.1:
+[`_AnsibleCollectionFinder.__init__`, lines 257–266](https://github.com/ansible/ansible/blob/v2.17.1/lib/ansible/utils/collection_loader/_collection_finder.py#L257-L266).
+The installed source was read directly during implementation: it checks
+`os.path.basename(p) == 'ansible_collections'`, replaces such an entry with
+`os.path.dirname(p)`, and appends only the first occurrence of each root to
+`good_paths`. zals must not append another `ansible_collections` to the already
+qualified directory and accidentally fall back to a different Workspace
+Collection.
+
+A direct entry and its parent share the first entry's precedence; normalization
+does not sort paths or realpath-resolve symlinks. Config-relative entries still
+resolve against their `ansible.cfg` directory. Relative environment-variable
+and dump entries keep their **server cwd** meaning, and the effective boundary
+makes them absolute so Collection/Role locations are valid file URIs and agree
+with module subprocess paths. A bare `ansible_collections` entry denotes the
+server cwd's collection directory. Explicitly configured paths can name a venv's
+collection directory even when automatic venv selection is disabled.
+
 ## Module services and cache isolation
 
 Module definition, hover, option lookup, completion, completion resolve, and

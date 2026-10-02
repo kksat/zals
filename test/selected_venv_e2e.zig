@@ -96,6 +96,13 @@ const Session = struct {
         try std.testing.expect(result == .null or (result == .array and result.array.items.len == 0));
     }
 
+    fn hoverExact(self: *Session, from: model.Anchor, expected: []const u8) !void {
+        const result = try self.at("textDocument/hover", from);
+        const contents = lsp.field(result, "contents") orelse return error.MissingHover;
+        const value = lsp.field(contents, "value") orelse return error.MissingHoverText;
+        try std.testing.expectEqualStrings(expected, value.string);
+    }
+
     fn hover(self: *Session, from: model.Anchor, expected: []const u8) !void {
         const result = try self.at("textDocument/hover", from);
         const contents = lsp.field(result, "contents") orelse return error.MissingHover;
@@ -106,6 +113,89 @@ const Session = struct {
         }
     }
 };
+
+test "direct ansible_collections environment path resolves the dependency with venv disabled" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const direct = try std.fs.cwd().realpathAlloc(arena.allocator(), "test/fixtures/selected-venv/.venv/ansible_collections");
+    var session = try Session.start("", .{ .collections_path = direct });
+    defer session.deinit();
+    const from = model.cursor("site.yml", "    - <fixture.root>");
+    try session.definition(from, ".venv/ansible_collections/fixture/root/galaxy.yml");
+    try session.hoverExact(from, "# Selected root collection\n\nCollection installed directly into the selected environment root.\n");
+}
+
+test "relative direct collection paths retain server cwd meaning for navigation and modules" {
+    var session = try Session.start("", .{ .collections_path = "test/fixtures/selected-venv/.venv/ansible_collections", .use_fixture_config = false });
+    defer session.deinit();
+    const collection = model.cursor("configs/direct/site.yml", "    - <fixture.root>\n");
+    try session.definition(collection, ".venv/ansible_collections/fixture/root/galaxy.yml");
+    try session.hoverExact(collection, "# Selected root collection\n\nCollection installed directly into the selected environment root.\n");
+    try session.definition(model.cursor("configs/direct/site.yml", "    - role: fixture.root.<probe>"), ".venv/ansible_collections/fixture/root/roles/probe/tasks/main.yml");
+    const module = model.cursor("configs/direct/site.yml", "    - fixture.root.<probe>:");
+    try session.definition(module, ".venv/ansible_collections/fixture/root/plugins/modules/probe.py");
+    try session.hover(module, "Selected root module documentation");
+}
+
+test "nearest config can name ansible_collections directly with venv disabled" {
+    var session = try Session.start("", .{ .collections_path = "", .use_fixture_config = false });
+    defer session.deinit();
+    const collection = model.cursor("configs/direct/site.yml", "    - <fixture.root>\n");
+    try session.definition(collection, ".venv/ansible_collections/fixture/root/galaxy.yml");
+    try session.hoverExact(collection, "# Selected root collection\n\nCollection installed directly into the selected environment root.\n");
+    try session.definition(model.cursor("configs/direct/site.yml", "    - role: fixture.root.<probe>"), ".venv/ansible_collections/fixture/root/roles/probe/tasks/main.yml");
+    const module = model.cursor("configs/direct/site.yml", "    - fixture.root.<probe>:");
+    try session.definition(module, ".venv/ansible_collections/fixture/root/plugins/modules/probe.py");
+    try session.hover(module, "Selected root module documentation");
+}
+
+test "direct collection aliases preserve path order and do not duplicate module completions" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const root = try std.fs.cwd().realpathAlloc(a, "test/fixtures/selected-venv/.venv");
+    const other = try std.fs.cwd().realpathAlloc(a, "test/fixtures/selected-venv/other-env");
+    {
+        // The direct entry must remain first when deduplicated with its parent,
+        // rather than letting the intervening dependency take precedence.
+        const paths = try std.fmt.allocPrint(a, "{s}/ansible_collections{c}{s}{c}{s}{c}{s}/ansible_collections", .{
+            root, std.fs.path.delimiter, other, std.fs.path.delimiter, root, std.fs.path.delimiter, root,
+        });
+        var session = try Session.start("", .{ .collections_path = paths, .use_fixture_config = false });
+        defer session.deinit();
+        const collection = model.cursor("site.yml", "    - <fixture.root>");
+        try session.definition(collection, ".venv/ansible_collections/fixture/root/galaxy.yml");
+        try session.hoverExact(collection, "# Selected root collection\n\nCollection installed directly into the selected environment root.\n");
+        const module = model.cursor("site.yml", "      fixture.root.<probe>:");
+        try session.definition(module, ".venv/ansible_collections/fixture/root/plugins/modules/probe.py");
+        try session.hover(module, "Selected root module documentation");
+        const result = try session.at("textDocument/completion", model.cursor("completion.yml", "      <module_choice>:"));
+        const items = lsp.field(result, "items") orelse return error.MissingCompletions;
+        // The unresolved redirect is intentionally absent from ansible-doc's
+        // catalog: it exercises filesystem module discovery, not just docs.
+        for ([_][]const u8{ "fixture.root.probe", "fixture.root.unresolved_probe" }) |expected| {
+            var count: usize = 0;
+            for (items.array.items) |item| {
+                const label = lsp.field(item, "label") orelse return error.MissingCompletionLabel;
+                if (std.mem.eql(u8, label.string, expected)) count += 1;
+            }
+            try std.testing.expectEqual(@as(usize, 1), count);
+        }
+    }
+    {
+        const paths = try std.fmt.allocPrint(a, "{s}/ansible_collections/{c}{s}{c}{s}", .{
+            other, std.fs.path.delimiter, root, std.fs.path.delimiter, other,
+        });
+        var session = try Session.start("", .{ .collections_path = paths, .use_fixture_config = false });
+        defer session.deinit();
+        const collection = model.cursor("configs/direct/site.yml", "    - <fixture.root>\n");
+        try session.definition(collection, "other-env/ansible_collections/fixture/root/galaxy.yml");
+        try session.hoverExact(collection, "# Other selected root collection\n");
+        const module = model.cursor("configs/direct/site.yml", "    - fixture.root.<probe>:");
+        try session.definition(module, "other-env/ansible_collections/fixture/root/plugins/modules/probe.py");
+        try session.hover(module, "Other environment module documentation");
+    }
+}
 
 test "selected venv includes every POSIX site-packages alongside its root" {
     var session = try Session.start(".venv", .{});

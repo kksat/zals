@@ -1,0 +1,4 @@
+plugin_routing:
+  modules:
+    unresolved_probe:
+      redirect: fixture.root.absent_probe

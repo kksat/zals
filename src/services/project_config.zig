@@ -113,9 +113,11 @@ pub fn rolesPaths(a: Allocator, ctx: Context, file_path: []const u8) ![]const []
 /// `collections/` directory, the configured paths, the selected virtual
 /// environment's root and `site-packages`, then the Workspace's collection directories.
 /// Each entry is a directory that contains (or may contain)
-/// `ansible_collections/`.
+/// `ansible_collections/`. Direct `ansible_collections` entries normalize to
+/// their parent, as in Ansible's collection loader, before ordered deduplication.
 pub fn collectionsPaths(a: Allocator, ctx: Context, file_path: []const u8) ![]const []const u8 {
     var out = std.array_list.Managed([]const u8).init(a);
+    defer out.deinit();
     if (std.fs.path.dirname(file_path)) |dir| {
         const adjacent = try std.fs.path.join(a, &.{ dir, "collections" });
         if (isDir(adjacent)) try appendUnique(&out, adjacent);
@@ -134,7 +136,27 @@ pub fn collectionsPaths(a: Allocator, ctx: Context, file_path: []const u8) ![]co
     }
     try appendAll(&out, try venvSitePackagesPaths(a, ctx));
     for (ctx.workspace_collections) |p| try appendUnique(&out, p);
-    return out.toOwnedSlice();
+    var normalized = std.array_list.Managed([]const u8).init(a);
+    errdefer normalized.deinit();
+    var cwd: ?[]const u8 = null;
+    for (out.items) |p| {
+        const root = collectionPathRoot(p);
+        const absolute = if (std.fs.path.isAbsolute(root)) root else blk: {
+            if (cwd == null) cwd = try std.process.getCwdAlloc(a);
+            break :blk if (std.mem.eql(u8, root, ".")) cwd.? else try std.fs.path.join(a, &.{ cwd.?, root });
+        };
+        try appendUnique(&normalized, absolute);
+    }
+    return normalized.toOwnedSlice();
+}
+
+/// Ansible accepts either a collections root or its `ansible_collections/`
+/// directory. Keep relative parents relative: callers retain their own cwd.
+pub fn collectionPathRoot(path: []const u8) []const u8 {
+    const separators = if (@import("builtin").os.tag == .windows) "/\\" else "/";
+    const trimmed = std.mem.trimEnd(u8, path, separators);
+    if (!std.mem.eql(u8, std.fs.path.basename(trimmed), "ansible_collections")) return path;
+    return std.fs.path.dirname(trimmed) orelse ".";
 }
 
 fn venvRoot(a: Allocator, ctx: Context) !?[]const u8 {
