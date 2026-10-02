@@ -12,6 +12,7 @@ const yaml = @import("../yaml/root.zig");
 const dom = @import("../yaml/dom.zig");
 const Node = dom.Node;
 const jinja = @import("jinja.zig");
+const scalar_expression = @import("scalar_expression.zig");
 const definitions_mod = @import("definitions.zig");
 const scope = @import("scope.zig");
 const source_mod = @import("source.zig");
@@ -128,8 +129,8 @@ pub const Index = struct {
 
     /// The variable occurrence under `offset` in an already-parsed `forest`.
     ///
-    /// The returned name points into `forest`'s arena, so it is valid only
-    /// while the forest is alive. Used by providers that parse the document
+    /// Names borrow `forest` or normalization storage owned by `a`; keep both
+    /// alive while using the cursor. Used by providers that parse the document
     /// once and need both the variable and its YAML context.
     pub fn occurrenceInForest(
         a: Allocator,
@@ -332,7 +333,7 @@ pub fn collectFieldReferences(a: Allocator, forest: *const dom.Forest, out: *std
     for (forest.roots) |root| try walkRefs(a, root, forest.text, out, false, .fields);
 }
 
-const RefNames = enum { roots, fields };
+const RefNames = scalar_expression.Names;
 
 fn walkRefs(
     a: Allocator,
@@ -353,10 +354,7 @@ fn walkRefs(
             }
         },
         .seq => for (node.items) |item| try walkRefs(a, item, text, out, bare, names),
-        .scalar => if (!bare) {
-            const st = scalarText(node, text);
-            if (names == .fields) try jinja.scanScalarFields(a, st.s, st.base, out) else try jinja.scanScalar(a, st.s, st.base, out);
-        },
+        .scalar => if (!bare) try scalar_expression.scan(a, node, text, names, false, out),
         else => {},
     }
 }
@@ -369,25 +367,13 @@ fn scanBare(
     names: RefNames,
 ) !void {
     if (node.isScalar()) {
-        const st = scalarText(node, text);
-        if (names == .fields) try jinja.scanExpressionFields(a, st.s, st.base, out) else try jinja.scanExpression(a, st.s, st.base, out);
+        try scalar_expression.scan(a, node, text, names, true, out);
     } else if (node.isSeq()) {
         for (node.items) |item| {
             if (!item.isScalar()) continue;
-            const st = scalarText(item, text);
-            if (names == .fields) try jinja.scanExpressionFields(a, st.s, st.base, out) else try jinja.scanExpression(a, st.s, st.base, out);
+            try scalar_expression.scan(a, item, text, names, true, out);
         }
     }
-}
-
-/// The unquoted text of a scalar and its absolute base offset.
-fn scalarText(node: *const Node, text: []const u8) struct { s: []const u8, base: usize } {
-    if (node.end > text.len or node.start > node.end) return .{ .s = "", .base = node.start };
-    const raw = text[node.start..node.end];
-    if (raw.len >= 2 and (raw[0] == '"' or raw[0] == '\'') and raw[raw.len - 1] == raw[0]) {
-        return .{ .s = raw[1 .. raw.len - 1], .base = node.start + 1 };
-    }
-    return .{ .s = raw, .base = node.start };
 }
 
 const testing = std.testing;

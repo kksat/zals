@@ -97,3 +97,34 @@
 - name: Incomplete statement still scans the remaining body
   ansible.builtin.debug:
     msg: 'unterminated-statement {% if actual.fallback_field'
+- name: YAML single-quoted scalars decode doubled quotes before Jinja scanning
+  ansible.builtin.debug:
+    msg: '🛰 yaml-single {{ object[''yaml_field''] }}'
+  when: 'object[''yaml_field''] == ''single-active'''
+- name: YAML double-quoted scalars decode escapes before Jinja scanning
+  ansible.builtin.debug:
+    msg: "🛰 yaml-double {{ object[\"yaml_field\"] }}"
+  when: "object[\"yaml_field\"] == \"double-active\""
+- name: Quoted YAML template statements also decode their field literals
+  ansible.builtin.debug:
+    single: 'yaml-single-statement {% if object[''yaml_field''] %}yes{% endif %}'
+    double: "yaml-double-statement {% if object[\"yaml_field\"] %}yes{% endif %}"
+- name: YAML escapes preserve their original source coordinates
+  ansible.builtin.debug:
+    msg: "🛰 \U0001F6F0 yaml-unicode {{ object[\"\u0079aml_field\"] }}"
+- name: Existing unquoted and block scalar forms keep original coordinates
+  ansible.builtin.debug:
+    plain: yaml-plain {{ object.yaml_field }}
+    literal: |-
+      🛰 yaml-literal {{ object['yaml_field'] }}
+    folded: >-
+      yaml-folded {{ object["yaml_field"] }}
+- name: Quoted YAML dynamic subscripts stay in the root Variable group
+  ansible.builtin.debug:
+    single: '🛰 yaml-dynamic-single {{ object[yaml_field] }}'
+    double: "🛰 yaml-dynamic-double {{ object[yaml_field] }}"
+    escaped: "yaml-root-escape {{ \u0079aml_field }}"
+  when: "object[yaml_field] == \"dynamic-active\""
+- name: YAML normalization does not decode Jinja literal-key escapes
+  ansible.builtin.debug:
+    msg: "yaml-jinja-escape {{ object['\\u0079aml_field'] }}"

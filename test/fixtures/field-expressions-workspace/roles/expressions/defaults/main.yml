@@ -27,3 +27,6 @@ actual:
   delimiter_field: present
   fallback_field: still-scanned
 ghost_root: never-read
+yaml_object:
+  yaml_field: quoted-value
+yaml_field: root-quoted-value

@@ -33,6 +33,53 @@ test "stdio static quoted subscripts share the dot-read and binding-key field gr
     }, quoted_reads, quoted_with_definitions);
 }
 
+const yaml_template = "roles/expressions/templates/yaml-quotes.j2";
+const yaml_reads: []const m.ExpectedLocation = &.{
+    m.span(tasks, "🛰 yaml-single {{ object[''<yaml_field>''] }}"),
+    m.span(tasks, "when: 'object[''<yaml_field>''] == ''single-active'''"),
+    m.span(tasks, "🛰 yaml-double {{ object[\\\"<yaml_field>\\\"] }}"),
+    m.span(tasks, "when: \"object[\\\"<yaml_field>\\\"] == \\\"double-active\\\"\""),
+    m.span(tasks, "yaml-single-statement {% if object[''<yaml_field>''] %}"),
+    m.span(tasks, "yaml-double-statement {% if object[\\\"<yaml_field>\\\"] %}"),
+    m.span(tasks, "🛰 \\U0001F6F0 yaml-unicode {{ object[\\\"<\\u0079aml_field>\\\"] }}"),
+    m.span(tasks, "yaml-plain {{ object.<yaml_field> }}"),
+    m.span(tasks, "🛰 yaml-literal {{ object['<yaml_field>'] }}"),
+    m.span(tasks, "yaml-folded {{ object[\"<yaml_field>\"] }}"),
+    m.span(yaml_template, "🛰 yaml-template {{ object['<yaml_field>'] }}"),
+};
+const yaml_with_definitions: []const m.ExpectedLocation = &.{
+    m.span(tasks, "🛰 yaml-single {{ object[''<yaml_field>''] }}"),
+    m.span(tasks, "when: 'object[''<yaml_field>''] == ''single-active'''"),
+    m.span(tasks, "🛰 yaml-double {{ object[\\\"<yaml_field>\\\"] }}"),
+    m.span(tasks, "when: \"object[\\\"<yaml_field>\\\"] == \\\"double-active\\\"\""),
+    m.span(tasks, "yaml-single-statement {% if object[''<yaml_field>''] %}"),
+    m.span(tasks, "yaml-double-statement {% if object[\\\"<yaml_field>\\\"] %}"),
+    m.span(tasks, "🛰 \\U0001F6F0 yaml-unicode {{ object[\\\"<\\u0079aml_field>\\\"] }}"),
+    m.span(tasks, "yaml-plain {{ object.<yaml_field> }}"),
+    m.span(tasks, "🛰 yaml-literal {{ object['<yaml_field>'] }}"),
+    m.span(tasks, "yaml-folded {{ object[\"<yaml_field>\"] }}"),
+    m.span(yaml_template, "🛰 yaml-template {{ object['<yaml_field>'] }}"),
+    m.span(defaults, "  <yaml_field>: quoted-value"),
+};
+const yaml_origins: []const m.Anchor = &.{
+    m.cursor(tasks, "🛰 yaml-single {{ object[''<yaml_field>''] }}"),
+    m.cursor(tasks, "when: 'object[''<yaml_field>''] == ''single-active'''"),
+    m.cursor(tasks, "🛰 yaml-double {{ object[\\\"<yaml_field>\\\"] }}"),
+    m.cursor(tasks, "when: \"object[\\\"<yaml_field>\\\"] == \\\"double-active\\\"\""),
+    m.cursor(tasks, "yaml-single-statement {% if object[''<yaml_field>''] %}"),
+    m.cursor(tasks, "yaml-double-statement {% if object[\\\"<yaml_field>\\\"] %}"),
+    m.cursor(tasks, "🛰 \\U0001F6F0 yaml-unicode {{ object[\\\"<\\u0079aml_field>\\\"] }}"),
+    m.cursor(tasks, "yaml-plain {{ object.<yaml_field> }}"),
+    m.cursor(tasks, "🛰 yaml-literal {{ object['<yaml_field>'] }}"),
+    m.cursor(tasks, "yaml-folded {{ object[\"<yaml_field>\"] }}"),
+    m.cursor(yaml_template, "🛰 yaml-template {{ object['<yaml_field>'] }}"),
+    m.cursor(defaults, "  <yaml_field>: quoted-value"),
+};
+
+test "stdio YAML scalar quoting preserves the complete field group and original UTF-16 spans" {
+    try checkGroup(yaml_origins, yaml_reads, yaml_with_definitions);
+}
+
 const filter_reads: []const m.ExpectedLocation = &.{
     m.span(tasks, "plain-filter {{ record.<filter_field> |"),
     m.span(tasks, "plain-test {{ record.<filter_field> is"),

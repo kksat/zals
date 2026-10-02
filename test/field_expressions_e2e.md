@@ -189,9 +189,42 @@ DEVELOPER_DIR=/nonexistent zig test test/e2e.zig
   `make test` passed; isolated baseline semantic suite
   **338 cases, 0 failures**.
 
+## Review follow-up / slice 11 — YAML scalar quote normalization
+
+- Added one real-stdio RED test with two separately authored, complete reference
+  answers: eleven field reads and the single concrete field key. All twelve
+  origins request both declaration modes. The reads include YAML single-quote
+  doubling, double-quote escapes, quoted bare expressions and statements, and
+  unchanged plain, literal/folded block, and `.j2` template forms.
+- A YAML Unicode-escaped key (`\u0079aml_field`) joins the ordinary field name,
+  but its expected range covers the original encoded source, not decoded text.
+  Literal non-BMP and YAML-escaped non-BMP prefixes precede the reads so UTF-16
+  expectations cannot accidentally agree with normalized byte offsets.
+- **RED:** current `448adf3` binary, **24 failed reference requests**: seven
+  normalized forms were missing or classified as roots, while the unchanged
+  forms retained their exact original spans.
+  Log: `/tmp/zals-yaml-scalar-red.log`.
+- **Smallest fix:** normalize enclosing YAML scalar quotes at the index/scanner
+  boundary, recording the original source span of every resulting byte. Scan
+  Jinja with normalized offsets, then map all root/field results back together;
+  scanner-side root-context checks never mix normalized and source coordinates.
+  Normalized names are copied before temporary buffers are released. Plain,
+  block, and template text keep their existing direct-source path. This does
+  **not** decode Jinja literal-key escapes.
+- **GREEN:** focused test **1/1**; independent lexical suite **11/11**, **296
+  reference requests**; `make test` passed; semantic suite **496 cases,
+  0 failures**. Logs: `/tmp/zals-yaml-scalar-green.log`,
+  `/tmp/zals-yaml-scalar-lexical-green.log`,
+  `/tmp/zals-yaml-scalar-unit-green.log`,
+  `/tmp/zals-yaml-scalar-navigation-green.log`.
+
 ## Known limitations
 
 ### Static-subscript literal escapes
+
+YAML scalar quoting is normalized before scanning (slice 11), including doubled
+single quotes and double-quoted escapes. This YAML layer is distinct from Jinja's
+own key-literal escape decoding, which remains unsupported.
 
 The scanner preserves the raw source contents of a literal key; it does **not**
 decode Jinja string escapes when assigning the field name. For example, installed
