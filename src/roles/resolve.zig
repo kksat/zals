@@ -19,6 +19,9 @@ const Allocator = std.mem.Allocator;
 /// Conventional role subdirectories.
 pub const role_subdirs = [_][]const u8{ "tasks", "handlers", "defaults", "vars", "meta", "templates", "files", "library" };
 
+/// Metadata-defined collection directories belonging to the referencing Workspace.
+pub const WorkspaceCollection = struct { name: []const u8, dir: []const u8, metadata_uri: []const u8 };
+
 pub const Resolver = struct {
     allocator: Allocator,
     /// Role search paths for the referencing file, already expanded
@@ -27,6 +30,8 @@ pub const Resolver = struct {
     /// Collection search paths for the referencing file
     /// (`project_config.collectionsPaths`).
     collections_paths: []const []const u8 = &.{},
+    /// Workspace collection identities read from metadata (including open edits).
+    workspace_collections: []const WorkspaceCollection = &.{},
     /// Root of the Workspace that owns the referencing file. The adjacent
     /// `roles/` walk stops there.
     workspace_root: ?[]const u8 = null,
@@ -90,10 +95,7 @@ pub const Resolver = struct {
         const role = rest[second + 1 ..];
         if (ns.len == 0 or coll.len == 0 or role.len == 0) return null;
         if (std.mem.indexOfScalar(u8, role, '.') != null) return null;
-        for (self.collections_paths) |cp| {
-            if (self.tryDir(&.{ cp, "ansible_collections", ns, coll, "roles", role })) |dir| return dir;
-        }
-        return null;
+        return self.resolveCollection(name[0 .. first + 1 + second], role);
     }
 
     fn resolveCollection(self: Resolver, collection: []const u8, name: []const u8) ?[]const u8 {
@@ -103,6 +105,11 @@ pub const Resolver = struct {
         if (ns.len == 0 or coll.len == 0) return null;
         for (self.collections_paths) |cp| {
             if (self.tryDir(&.{ cp, "ansible_collections", ns, coll, "roles", name })) |dir| return dir;
+        }
+        // Editor source checkouts may use dotted or arbitrary directory names.
+        for (self.workspace_collections) |c| {
+            if (!std.mem.eql(u8, c.name, collection)) continue;
+            if (self.tryDir(&.{ c.dir, "roles", name })) |dir| return dir;
         }
         return null;
     }

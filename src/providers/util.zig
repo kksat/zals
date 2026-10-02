@@ -100,10 +100,15 @@ pub fn roleResolver(
     declared_collections: []const []const u8,
 ) roles.Resolver {
     const ctx = self.projectContext(a, referencing_path);
+    const workspace_collections = if (ctx.workspace_root) |root| blk: {
+        var v = @import("workspace_view.zig").View.init(self, a, root) catch break :blk &.{};
+        break :blk @import("collections.zig").workspaceCollections(a, &v) catch &.{};
+    } else &.{};
     return .{
         .allocator = a,
         .roles_paths = project_config.rolesPaths(a, ctx, referencing_path) catch &.{},
         .collections_paths = project_config.collectionsPaths(a, ctx, referencing_path) catch &.{},
+        .workspace_collections = workspace_collections,
         .workspace_root = ctx.workspace_root,
         .workspace_roles_dirs = self.workspaceRolesDirs(ctx.workspace_root),
         .declared_collections = declared_collections,

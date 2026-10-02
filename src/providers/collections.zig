@@ -53,19 +53,32 @@ pub fn resolve(self: *Server, a: Allocator, name: []const u8, file_path: []const
     return null;
 }
 
-pub const Known = struct { name: []const u8, dir: []const u8 };
+pub const Known = @import("../roles/resolve.zig").WorkspaceCollection;
 
-/// Collections declared by a `galaxy.yml` in the Workspace.
+/// Metadata-defined collections: the Workspace root, or any directory below
+/// `ansible_collections/` within the Workspace's discovered file set.
 pub fn workspaceCollections(a: Allocator, v: *wv.View) ![]const Known {
     var out = std.array_list.Managed(Known).init(a);
     for (v.files) |f| {
         const base = std.fs.path.basename(f.path);
         if (!std.mem.eql(u8, base, "galaxy.yml") and !std.mem.eql(u8, base, "galaxy.yaml")) continue;
+        const dir = std.fs.path.dirname(f.path) orelse continue;
+        if (!isWorkspaceCollectionRoot(v.root, dir)) continue;
         const text = try v.text(f.uri);
         const name = galaxyName(a, text) orelse continue;
-        try out.append(.{ .name = name, .dir = std.fs.path.dirname(f.path) orelse continue });
+        try out.append(.{ .name = name, .dir = dir, .metadata_uri = f.uri });
     }
     return out.toOwnedSlice();
+}
+
+fn isWorkspaceCollectionRoot(root: []const u8, dir: []const u8) bool {
+    if (std.mem.eql(u8, root, dir)) return true;
+    if (dir.len <= root.len or !std.mem.startsWith(u8, dir, root) or dir[root.len] != std.fs.path.sep) return false;
+    var parts = std.mem.splitScalar(u8, dir[root.len + 1 ..], std.fs.path.sep);
+    while (parts.next()) |part| {
+        if (std.mem.eql(u8, part, "ansible_collections")) return parts.next() != null;
+    }
+    return false;
 }
 
 /// `namespace.name` from `galaxy.yml` text.

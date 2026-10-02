@@ -47,8 +47,7 @@ pub fn collect(a: Allocator, v: *wv.View, query: []const u8) ![]const Info {
 
     for (colls) |c| {
         if (!symbols.matches(c.name, query)) continue;
-        const galaxy = try std.fs.path.join(a, &.{ c.dir, "galaxy.yml" });
-        try out.append(.{ .name = c.name, .kind = .package, .uri = try uriOf(a, v, galaxy), .whole_file = true });
+        try out.append(.{ .name = c.name, .kind = .package, .uri = c.metadata_uri, .whole_file = true });
     }
 
     // Roles, one per directory, pointing at tasks/main.yml when present.
@@ -62,13 +61,14 @@ pub fn collect(a: Allocator, v: *wv.View, query: []const u8) ![]const Info {
     var rit = role_targets.iterator();
     while (rit.next()) |e| {
         const name = std.fs.path.basename(e.key_ptr.*);
-        if (!symbols.matches(name, query)) continue;
+        const container = collectionOf(colls, e.key_ptr.*) orelse "";
+        if (!try memberMatches(a, name, container, query)) continue;
         try out.append(.{
             .name = name,
             .kind = .module,
             .uri = e.value_ptr.*,
             .whole_file = true,
-            .container = collectionOf(colls, e.key_ptr.*) orelse "",
+            .container = container,
         });
     }
 
@@ -124,6 +124,13 @@ pub fn collect(a: Allocator, v: *wv.View, query: []const u8) ![]const Info {
     return out.toOwnedSlice();
 }
 
+/// Keep member names short; search also accepts the collection-qualified name.
+fn memberMatches(a: Allocator, name: []const u8, container: []const u8, query: []const u8) !bool {
+    if (symbols.matches(name, query)) return true;
+    if (container.len == 0) return false;
+    return symbols.matches(try std.fmt.allocPrint(a, "{s}.{s}", .{ container, name }), query);
+}
+
 /// FQCN of the Workspace collection that contains `path`, if any.
 fn collectionOf(colls: []const collections.Known, path: []const u8) ?[]const u8 {
     var best: ?collections.Known = null;
@@ -137,11 +144,6 @@ fn collectionOf(colls: []const collections.Known, path: []const u8) ?[]const u8 
 fn relative(root: []const u8, path: []const u8) []const u8 {
     if (path.len > root.len + 1 and std.mem.startsWith(u8, path, root) and path[root.len] == '/') return path[root.len + 1 ..];
     return path;
-}
-
-fn uriOf(a: Allocator, v: *wv.View, path: []const u8) ![]const u8 {
-    if (wv.view.find(v.files, path)) |f| return f.uri;
-    return @import("../paths.zig").pathToUri(a, path);
 }
 
 fn toValue(a: Allocator, v: *wv.View, info: Info) !Value {

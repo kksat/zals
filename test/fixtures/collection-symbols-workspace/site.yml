@@ -1,0 +1,10 @@
+- hosts: all
+  roles:
+    - contract.standard.standard_role
+    - contract.dotted.dotted_role
+    - contract.arbitrary.arbitrary_role
+    - contract.root.root_role
+- hosts: all
+  collections: [contract.dotted]
+  roles:
+    - dotted_role
