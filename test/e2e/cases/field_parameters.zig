@@ -131,6 +131,15 @@ const schema_leaf = "              <declared_only_region>:\n                type
 const endpoint = m.cursor(play, "          <endpoint>:\n            region_name: passed-main-region");
 const endpoint_spec = "          <endpoint>:\n            type: dict\n            options:\n              region_name:\n                type: str\n                description: Main endpoint region contract.";
 pub const all = passedCases() ++ referenceCases() ++ [_]m.Case{
+    .{
+        .name = "field parameter/load-looking data in defaults, vars, facts, and module args is not callee scope",
+        .method = .implementation,
+        .from = m.cursor(play, "            <region_name>: passed-main-region"),
+        .expected = &.{
+            m.span(receiver ++ "vars/main.yml", "    <region_name>: receiver-region-vars"),
+            m.span(receiver ++ "defaults/main.yml", "    <region_name>: receiver-region-default"),
+        },
+    },
     .{ .name = "field parameter/schema-only: exact schema definition", .method = .definition, .from = schema_only, .expected = &.{m.span(specs, schema_leaf)} },
     .{ .name = "field parameter/schema-only: caller's supplied value is not callee implementation", .method = .implementation, .from = schema_only, .expected = &.{} },
     .{ .name = "field parameter/schema-only: no reads", .method = .references, .from = schema_only, .include_declaration = false, .expected = &.{} },

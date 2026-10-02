@@ -70,8 +70,10 @@ Argument-spec `options:` maps explicitly declare fields. Structural properties
 like `type`, `description`, and `default` are not themselves fields, nor are
 package, requirements, or execution-environment metadata keys. A data key named
 `vars`, `roles`, or `set_fact` inside a structured value does not introduce a
-second binding scope. Module argument data is not a variable binding either;
-only actual play/task/block containers and recognized binding maps are followed.
+second binding scope. Likewise, data keys named `include_vars` or `vars_files`
+do not introduce file loads. Module argument data is not a variable binding
+either; only actual play/task/block containers and recognized binding maps are
+followed.
 YAML aliases, object identity, and loop aliases are not expanded or traced. The same Workspace,
 open-buffer, and no-session boundaries as root variables apply. See
 [ADR-0041](adr/0041-field-name-navigation.md).

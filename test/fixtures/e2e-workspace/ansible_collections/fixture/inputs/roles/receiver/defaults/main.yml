@@ -9,3 +9,8 @@ alternate_config:
 input_configs:
   - endpoint:
       region_name: receiver-list-region
+# Load-looking keys are data here, not callee vars-file directives.
+data_with_load_names:
+  include_vars: ../../../../../../playbooks/vars/receiver-field-values.json
+  vars_files:
+    - ../../../../../../playbooks/vars/receiver-field-values.json

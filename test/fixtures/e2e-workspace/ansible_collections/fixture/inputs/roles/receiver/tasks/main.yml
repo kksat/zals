@@ -4,3 +4,18 @@
 - name: Read the main endpoint region
   ansible.builtin.debug:
     msg: "{{ input_config.endpoint.region_name }}"
+- name: Load-looking data below task vars is not a directive
+  vars:
+    task_payload:
+      include_vars: ../../../../../../playbooks/vars/receiver-field-values.json
+  debug:
+    msg: task-data
+- name: Load-looking set-fact data is not a directive
+  set_fact:
+    fact_payload:
+      vars_files:
+        - ../../../../../../playbooks/vars/receiver-field-values.json
+- name: Load-looking module argument data is not a directive
+  debug:
+    msg:
+      include_vars: ../../../../../../playbooks/vars/receiver-field-values.json

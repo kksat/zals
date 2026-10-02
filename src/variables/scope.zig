@@ -118,7 +118,11 @@ pub const VarFileLoad = struct {
 /// the Workspace root.
 pub fn varFileLoads(allocator: Allocator, forest: *const dom.Forest, file_path: []const u8, root: ?[]const u8) ![]const VarFileLoad {
     var out = std.array_list.Managed(VarFileLoad).init(allocator);
-    for (forest.roots) |node| try walkTargets(allocator, node, file_path, root, &out);
+    // Map-root documents are variable/metadata data. Actual play/task files
+    // start with a sequence; nested directive-looking values stay data.
+    for (forest.roots) |node| {
+        if (node.isSeq()) try walkTargets(allocator, node, file_path, root, &out);
+    }
     return out.toOwnedSlice();
 }
 
@@ -147,7 +151,7 @@ fn walkTargets(
                 } else if (isModuleKey(key, "include_vars")) {
                     try addIncludeVars(allocator, val, file_path, root, out);
                 }
-                try walkTargets(allocator, val, file_path, root, out);
+                if (definitions.isTaskContainer(key)) try walkTargets(allocator, val, file_path, root, out);
             }
         },
         .seq => for (node.items) |item| try walkTargets(allocator, item, file_path, root, out),

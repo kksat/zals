@@ -160,7 +160,8 @@ fn walk(
     }
 }
 
-fn isTaskContainer(key: []const u8) bool {
+/// Ansible play/task containers, excluding keyword values and module data.
+pub fn isTaskContainer(key: []const u8) bool {
     for ([_][]const u8{ "tasks", "handlers", "pre_tasks", "post_tasks", "block", "rescue", "always" }) |container| {
         if (std.mem.eql(u8, key, container)) return true;
     }
