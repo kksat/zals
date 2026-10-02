@@ -88,8 +88,9 @@ _Avoid_: legacy role, standalone role
 
 **Role parameter**:
 A parameter passed to a role at its invocation site: a key in a play's `roles:`
-entry, or a key under `vars:` of an `include_role`/`import_role` task. Hover
-shows the unrendered YAML option from the role's argument specs.
+entry, or a key under `vars:` of an `include_role`/`import_role` task. Its
+contract is the selected argument-spec option; its implementations are concrete
+bindings in the called Role.
 _Avoid_: role argument, role input, role call param
 
 **Role reference**:

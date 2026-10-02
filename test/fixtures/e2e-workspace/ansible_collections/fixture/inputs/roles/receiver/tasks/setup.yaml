@@ -1,0 +1,3 @@
+- name: Read the setup receiver input
+  ansible.builtin.debug:
+    msg: "{{ input_value }}"

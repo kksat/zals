@@ -17,6 +17,12 @@ pub const Target = enum { definition, implementation };
 /// Null means the cursor is not on a variable. An empty slice means it is a
 /// variable but has no matching bindings (or no concrete implementation).
 pub fn locations(self: *Server, a: Allocator, params: std.json.Value, target: Target) !?[]const types.Location {
+    const role_navigation = @import("role_navigation.zig");
+    if (target == .definition) {
+        if (try role_navigation.parameterDefinition(self, a, params)) |locs| return locs;
+    } else {
+        if (try role_navigation.parameterImplementation(self, a, params)) |locs| return locs;
+    }
     const loc = util.cursorAt(self, params) orelse return null;
     var src = vs.ServerSource{ .server = self };
     var index = variables.Index.init(a, src.source());

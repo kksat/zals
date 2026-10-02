@@ -1,0 +1,6 @@
+argument_specs:
+  main:
+    options:
+      input_value:
+        type: str
+        description: Other receiver input

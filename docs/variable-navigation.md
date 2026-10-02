@@ -30,6 +30,32 @@ argument-spec option it can open its default, vars value, or invocation value;
 a schema-only option has no implementation. From a Jinja-valued role name it
 navigates the variable binding, not a guessed role.
 
+## Passed role parameters
+
+Keys passed through a `roles:` map entry (directly or under its `vars:`) and
+through `vars:` on `include_role`/`import_role` have a called-role context:
+
+| Request from a passed key | Answer |
+| --- | --- |
+| Go to definition | The matching option of the resolved role's selected argument-spec entry point; ordinary variable navigation if no matching option exists |
+| Go to implementation | Ranked concrete bindings in the resolved callee's role/file set, excluding schemas, caller keys, and unrelated roles |
+| Hover | The matching option documentation, falling back to ordinary variable hover |
+| Find references | Still the complete Workspace-wide root-name result, with or without bindings according to `includeDeclaration` |
+
+`tasks_from: setup.yml` and `setup.yaml` select the `setup` argument-spec entry
+point; absent `tasks_from` selects `main`. Map and key-value role includes use
+the same rules. Task, block, and play `collections:` declarations affect all
+three role-context requests. Metadata and defaults/vars files can use either
+YAML extension. Unsaved option documentation and shifted key positions win
+over their disk copy.
+
+A passed schema-only input or unresolved role has no callee implementation.
+Implementation searches conventional role files and one level of their
+vars-file loads; it does not simulate only the selected task entry point.
+From the option itself or a normal read, ordinary root-variable navigation
+still applies, so definition results can be broader than from a passed key.
+See [ADR-0039](adr/0039-role-parameter-navigation.md).
+
 ### What is the same from every site?
 
 Given the same indexed/open-document state, **find-references has an identical

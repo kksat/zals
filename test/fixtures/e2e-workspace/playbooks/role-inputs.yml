@@ -1,0 +1,45 @@
+- hosts: localhost
+  gather_facts: false
+  roles:
+    - role: fixture.inputs.receiver
+      input_value: from-roles-map
+    - role: fixture.inputs.receiver
+      vars:
+        input_value: from-role-vars
+  tasks:
+    - name: Pass a receiver input
+      ansible.builtin.include_role:
+        name: fixture.inputs.receiver
+      vars:
+        input_value: from-include
+    - name: Pass an input using task-local collection context
+      collections: [fixture.other]
+      ansible.builtin.include_role:
+        name: receiver
+      vars:
+        input_value: from-task-collection
+    - name: Import a different receiver entry point
+      ansible.builtin.import_role:
+        name: fixture.inputs.receiver
+        tasks_from: setup.yaml
+      vars:
+        input_value: from-import
+    - name: Include the setup entry point using key-value arguments
+      include_role: name=fixture.inputs.receiver tasks_from=setup.yml
+      vars:
+        input_value: from-kv-include
+    - name: Pass a schema-only receiver input
+      ansible.builtin.import_role:
+        name: fixture.inputs.receiver
+      vars:
+        receiver_declared_only: provided-schema-only
+    - name: Do not guess an unresolved role from another role's input name
+      include_role:
+        name: uninstalled.inputs.receiver
+      vars:
+        input_value: from-unresolved-role
+    - name: Import the role with YAML metadata and defaults
+      import_role:
+        name: yaml_receiver
+      vars:
+        yaml_input: from-yaml-role

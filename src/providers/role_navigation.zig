@@ -11,6 +11,8 @@ const roles = @import("../roles/root.zig");
 const paths = @import("../paths.zig");
 const wv = @import("workspace_view.zig");
 const RoleRef = @import("../workspace/facts.zig").RoleRef;
+const variables = @import("../variables/root.zig");
+const vs = @import("variable_source.zig");
 
 /// Every Role reference in the Workspace that can resolve to the same role
 /// directory as the cursor. Null when the cursor is not on a role reference.
@@ -188,12 +190,13 @@ pub fn parameterHover(self: *Server, a: Allocator, params: Value) !?types.Hover 
     defer cur.forest.deinit();
     const param = parameterAt(cur.path) orelse return null;
     const path = try paths.uriToPath(a, cur.doc.uri);
-    const collections = yaml.collections.getDeclaredCollections(cur.forest.allocator(), cur.path) catch &.{};
+    const collections = yaml.collections.getRoleDeclaredCollections(cur.forest.allocator(), path, cur.path) catch &.{};
     const range = cur.doc.rangeFromOffsets(param.start, param.end);
     const name = try a.dupe(u8, param.name);
     const spec = blk: {
         const dir = util.resolveRole(self, a, param.role, path, collections) orelse break :blk null;
-        break :blk try optionSpec(a, dir, param.entry_point, param.name);
+        var src = vs.ServerSource{ .server = self };
+        break :blk try optionSpecFrom(a, src.source(), dir, param.entry_point, param.name);
     } orelse return @import("variable_hover.zig").hoverName(self, a, cur.doc.uri, name, range);
     const text = try std.fmt.allocPrint(
         a,
@@ -203,18 +206,79 @@ pub fn parameterHover(self: *Server, a: Allocator, params: Value) !?types.Hover 
     return markdown(range, text);
 }
 
-pub const OptionSpec = struct { file: []const u8, yaml: []const u8 };
+/// Definition of a parameter is its option in the called role's selected
+/// argument-spec entry point, matching parameter hover. Without an option,
+/// the caller falls back to ordinary variable navigation.
+pub fn parameterDefinition(self: *Server, a: Allocator, params: Value) !?[]const types.Location {
+    var cur = util.parseAt(self, a, params) orelse return null;
+    defer cur.forest.deinit();
+    const param = parameterAt(cur.path) orelse return null;
+    const path = try paths.uriToPath(a, cur.doc.uri);
+    const declared = try yaml.collections.getRoleDeclaredCollections(cur.forest.allocator(), path, cur.path);
+    var locs = std.array_list.Managed(types.Location).init(a);
+    var src = vs.ServerSource{ .server = self };
+    var index = variables.Index.init(a, src.source());
+    for (util.resolveRoleAll(self, a, param.role, path, declared)) |dir| {
+        const spec = (try optionSpecFrom(a, src.source(), dir, param.entry_point, param.name)) orelse continue;
+        const uri = try paths.pathToUri(a, try std.fs.path.join(a, &.{ dir, "meta", spec.file }));
+        try locs.append(try vs.location(a, self, &index, .{
+            .uri = uri,
+            .start = spec.start,
+            .end = spec.end,
+            .kind = .definition,
+        }));
+    }
+    if (locs.items.len == 0) return null;
+    return try locs.toOwnedSlice();
+}
+
+/// Implementations of a passed parameter are concrete bindings in the
+/// resolved callee's role/file set, not the caller's own key or another role
+/// with a coincidentally equal variable name.
+pub fn parameterImplementation(self: *Server, a: Allocator, params: Value) !?[]const types.Location {
+    var cur = util.parseAt(self, a, params) orelse return null;
+    defer cur.forest.deinit();
+    const param = parameterAt(cur.path) orelse return null;
+    const path = try paths.uriToPath(a, cur.doc.uri);
+    const declared = try yaml.collections.getRoleDeclaredCollections(cur.forest.allocator(), path, cur.path);
+    var src = vs.ServerSource{ .server = self };
+    var index = variables.Index.init(a, src.source());
+    var locs = std.array_list.Managed(types.Location).init(a);
+    for (util.resolveRoleAll(self, a, param.role, path, declared)) |dir| {
+        const uri = try paths.pathToUri(a, try std.fs.path.join(a, &.{ dir, "tasks", "main.yml" }));
+        for (try index.definitions(a, uri, param.name)) |d| {
+            if (d.site == .argument_specs) continue;
+            try locs.append(try vs.location(a, self, &index, d));
+        }
+    }
+    return try locs.toOwnedSlice();
+}
+
+pub const OptionSpec = struct { file: []const u8, yaml: []const u8, start: usize, end: usize };
 
 /// The unrendered YAML of `argument_specs.<entry>.options.<name>` in the
 /// role's `meta/argument_specs.*`, else `meta/main.*`.
 pub fn optionSpec(a: Allocator, role_dir: []const u8, entry: []const u8, name: []const u8) !?OptionSpec {
+    return optionSpecFrom(a, null, role_dir, entry, name);
+}
+
+fn optionSpecFrom(a: Allocator, source: ?variables.FileSource, role_dir: []const u8, entry: []const u8, name: []const u8) !?OptionSpec {
     for ([_][]const u8{ "argument_specs.yml", "argument_specs.yaml", "main.yml", "main.yaml" }) |file| {
-        const text = readFile(a, &.{ role_dir, "meta", file }) orelse continue;
+        const text = if (source) |src| blk: {
+            const path = try std.fs.path.join(a, &.{ role_dir, "meta", file });
+            break :blk (try src.read(a, try paths.pathToUri(a, path))) orelse continue;
+        } else readFile(a, &.{ role_dir, "meta", file }) orelse continue;
         var forest = yaml.parse(a, text) catch continue;
         defer forest.deinit();
         for (forest.roots) |root| {
             const pair = optionPair(root, entry, name) orelse continue;
-            return .{ .file = file, .yaml = try dedent(a, text, pair.start, pair.end) };
+            const key = pair.key orelse continue;
+            return .{
+                .file = file,
+                .yaml = try dedent(a, text, pair.start, pair.end),
+                .start = key.start,
+                .end = key.end,
+            };
         }
     }
     return null;

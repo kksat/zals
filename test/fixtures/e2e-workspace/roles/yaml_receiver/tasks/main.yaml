@@ -1,0 +1,3 @@
+- name: Read the YAML receiver input
+  ansible.builtin.debug:
+    msg: "{{ yaml_input }}"

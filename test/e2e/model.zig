@@ -14,7 +14,7 @@ pub const ExpectedLocation = union(enum) {
     file_start: []const u8,
 };
 
-pub const Method = enum { references, definition, implementation };
+pub const Method = enum { references, definition, implementation, hover };
 
 pub const Case = struct {
     name: []const u8,
@@ -24,6 +24,9 @@ pub const Case = struct {
     /// variable cases; expected locations are never derived from this flag.
     include_declaration: bool = true,
     expected: []const ExpectedLocation,
+    /// Hover cases also assert independently specified documentation excerpts.
+    markdown_contains: []const []const u8 = &.{},
+    markdown_excludes: []const []const u8 = &.{},
 };
 
 pub fn cursor(path: []const u8, snippet: []const u8) Anchor {

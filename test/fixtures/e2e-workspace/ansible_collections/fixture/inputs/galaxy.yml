@@ -1,0 +1,5 @@
+namespace: fixture
+name: inputs
+version: 1.0.0
+readme: README.md
+authors: [Navigation fixture]

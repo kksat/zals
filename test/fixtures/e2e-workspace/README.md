@@ -18,6 +18,14 @@ collection declarations for the two `notify` Roles.
 `ops/roles/check` and `services/roles/check` exercise ambiguous editor fallback.
 The `metadata_only` Role deliberately has metadata but no main task file.
 
+`fixture.inputs` and `fixture.other` have same-named receiver roles and
+same-named input variables. `playbooks/role-inputs.yml` exercises parameter
+navigation from roles entries and include/import tasks, selected argument-spec
+entry points, per-task collection context, and unresolved/schema-only negatives.
+`roles/yaml_receiver` uses `meta/main.yaml` and YAML defaults/main tasks.
+Their root-variable references remain Workspace-wide, while passed-key
+contracts and implementations stay specific to the called Role.
+
 Files under `negative/` contain intentional non-matches or missing targets;
 positive playbooks remain structurally valid Ansible. The marker file is
 `fixture-workspace-root` because Git cannot check in a nested `.git` file.

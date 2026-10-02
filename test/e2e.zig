@@ -55,7 +55,7 @@ test "navigation contracts across a static Ansible Workspace" {
 
 fn assertCapabilities(result: Value) !void {
     const caps = lsp.field(result, "capabilities") orelse return error.MissingCapabilities;
-    for ([_][]const u8{ "definitionProvider", "implementationProvider", "referencesProvider" }) |name| {
+    for ([_][]const u8{ "definitionProvider", "implementationProvider", "referencesProvider", "hoverProvider" }) |name| {
         const value = lsp.field(caps, name) orelse {
             std.debug.print("Missing navigation capability: {s}\n", .{name});
             return error.MissingCapability;
@@ -99,15 +99,23 @@ fn runCase(a: Allocator, client: *lsp.Client, resolver: anchor.Resolver, opened:
             .textDocument = document,
             .position = source.position,
         }),
+        .hover => try client.request("textDocument/hover", .{
+            .textDocument = document,
+            .position = source.position,
+        }),
     };
-    const actual = try parseLocations(a, result);
+    const actual = if (case.method == .hover)
+        try parseHoverLocations(a, result, source.uri)
+    else
+        try parseLocations(a, result);
+    const hover_matches = if (case.method == .hover) try hoverMatches(result, case) else true;
     const expected = try a.alloc(anchor.Location, case.expected.len);
     for (case.expected, 0..) |location, i| expected[i] = try resolver.location(location);
     if (case.method == .references) {
         std.mem.sort(anchor.Location, actual, {}, locationLessThan);
         std.mem.sort(anchor.Location, expected, {}, locationLessThan);
     }
-    if (locationsEqual(actual, expected)) return true;
+    if (locationsEqual(actual, expected) and hover_matches) return true;
 
     std.debug.print("FAIL {s} ({s}, includeDeclaration={}):\n", .{
         case.name, @tagName(case.method), case.include_declaration,
@@ -117,6 +125,39 @@ fn runCase(a: Allocator, client: *lsp.Client, resolver: anchor.Resolver, opened:
     std.debug.print("  actual ({d}):\n", .{actual.len});
     for (actual) |location| printLocation(resolver, location);
     return false;
+}
+
+fn parseHoverLocations(a: Allocator, result: Value, uri: []const u8) ![]anchor.Location {
+    if (result == .null) return &.{};
+    const range = lsp.field(result, "range") orelse return error.MissingHoverRange;
+    const locations = try a.alloc(anchor.Location, 1);
+    locations[0] = .{ .uri = uri, .range = .{
+        .start = try parsePosition(lsp.field(range, "start") orelse return error.MissingRangeStart),
+        .end = try parsePosition(lsp.field(range, "end") orelse return error.MissingRangeEnd),
+    } };
+    return locations;
+}
+
+fn hoverMatches(result: Value, case: m.Case) !bool {
+    if (result == .null) return case.expected.len == 0;
+    const contents = lsp.field(result, "contents") orelse return error.MissingHoverContents;
+    const kind = lsp.field(contents, "kind") orelse return error.MissingMarkupKind;
+    if (kind != .string or !std.mem.eql(u8, kind.string, "markdown")) return error.InvalidMarkupKind;
+    const value = lsp.field(contents, "value") orelse return error.MissingMarkupValue;
+    if (value != .string) return error.InvalidMarkupValue;
+    for (case.markdown_contains) |excerpt| {
+        if (std.mem.indexOf(u8, value.string, excerpt) == null) {
+            std.debug.print("  missing hover excerpt: {s}\n  actual hover: {s}\n", .{ excerpt, value.string });
+            return false;
+        }
+    }
+    for (case.markdown_excludes) |excerpt| {
+        if (std.mem.indexOf(u8, value.string, excerpt) != null) {
+            std.debug.print("  unexpected hover excerpt: {s}\n  actual hover: {s}\n", .{ excerpt, value.string });
+            return false;
+        }
+    }
+    return true;
 }
 
 fn parseLocations(a: Allocator, result: Value) ![]anchor.Location {

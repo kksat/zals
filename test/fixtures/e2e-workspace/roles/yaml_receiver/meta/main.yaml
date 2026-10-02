@@ -1,0 +1,6 @@
+argument_specs:
+  main:
+    options:
+      yaml_input:
+        type: str
+        description: Receiver input documented in YAML metadata

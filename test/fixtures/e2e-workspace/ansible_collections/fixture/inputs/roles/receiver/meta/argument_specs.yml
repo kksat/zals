@@ -1,0 +1,14 @@
+argument_specs:
+  main:
+    options:
+      input_value:
+        type: str
+        description: Main receiver input
+      receiver_declared_only:
+        type: str
+        description: Schema-only receiver input
+  setup:
+    options:
+      input_value:
+        type: str
+        description: Setup receiver input
