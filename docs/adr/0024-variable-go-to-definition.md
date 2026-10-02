@@ -3,7 +3,8 @@
 - **Status:** Accepted
 - **Date:** 2025-09-18
 - **Supersedes:** —
-- **Superseded by:** in part by ADR-0031 (parse cache), ADR-0032 (search boundary)
+- **Superseded by:** in part by ADR-0031 (parse cache), ADR-0032 (search boundary),
+  [ADR-0036](0036-variable-navigation-from-bindings.md) (binding-key trigger)
 
 ## Context
 

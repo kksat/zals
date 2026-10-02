@@ -45,7 +45,7 @@ pub fn definition(self: *Server, a: Allocator, params: std.json.Value) !Result {
     return moduleDefinition(self, a, params);
 }
 
-/// Jump from a variable reference to its definitions: the reachable ones
+/// Jump from a variable reference or binding to its definitions: the reachable ones
 /// ranked by precedence, then the rest of the Workspace (ADR-0024, ADR-0032).
 fn variableDefinition(self: *Server, a: Allocator, params: std.json.Value) !?[]const types.Location {
     const td = json_util.field(params, "textDocument") orelse return null;
@@ -58,8 +58,6 @@ fn variableDefinition(self: *Server, a: Allocator, params: std.json.Value) !?[]c
     var src = vs.ServerSource{ .server = self };
     var index = variables.Index.init(a, src.source());
     const cur = (try index.occurrenceAt(a, uri, offset)) orelse return null;
-    if (cur.kind != .reference) return null;
-
     if (try wv.View.forUri(self, a, uri)) |found| {
         var v = found;
         const path = try paths.uriToPath(a, uri);

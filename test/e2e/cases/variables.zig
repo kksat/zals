@@ -209,11 +209,57 @@ pub const all = [_]m.Case{
         },
     },
     .{
+        .name = "variable/default key cursor: definitions are available from a binding",
+        .method = .definition,
+        .from = m.cursor(pf_defaults, "<app_port>: 8080"),
+        .expected = &.{
+            m.span(pf_defaults, "<app_port>: 8080"),
+            m.span(pf_specs, "      <app_port>:"),
+        },
+    },
+    .{
         .name = "variable/default key cursor: find app_port reads without declarations",
         .method = .references,
         .from = m.cursor(pf_defaults, "<app_port>: 8080"),
         .include_declaration = false,
         .expected = app_port_reads,
+    },
+    .{
+        .name = "variable/default key cursor: find app_port reads and declarations",
+        .method = .references,
+        .from = m.cursor(pf_defaults, "<app_port>: 8080"),
+        .include_declaration = true,
+        .expected = app_port_with_declarations,
+    },
+    .{
+        .name = "variable/argument_specs option cursor: definitions use the same name as reads",
+        .method = .definition,
+        .from = m.cursor(pf_specs, "      <app_port>:"),
+        .expected = &.{
+            m.span(pf_defaults, "<app_port>: 8080"),
+            m.span(pf_specs, "      <app_port>:"),
+        },
+    },
+    .{
+        .name = "variable/argument_specs option cursor: find app_port reads without declarations",
+        .method = .references,
+        .from = m.cursor(pf_specs, "      <app_port>:"),
+        .include_declaration = false,
+        .expected = app_port_reads,
+    },
+    .{
+        .name = "variable/Jinja role read: app_port reference group without declarations",
+        .method = .references,
+        .from = m.cursor(pf_tasks, "port {{ <app_port> }}"),
+        .include_declaration = false,
+        .expected = app_port_reads,
+    },
+    .{
+        .name = "variable/Jinja shared read: app_port reference group with declarations",
+        .method = .references,
+        .from = m.cursor(common, "on {{ <app_port> }}"),
+        .include_declaration = true,
+        .expected = app_port_with_declarations,
     },
     .{
         .name = "variable/argument_specs option cursor: find app_port reads and declarations",
@@ -246,6 +292,22 @@ pub const all = [_]m.Case{
         .name = "variable/Jinja role vars: readiness_label references with declaration",
         .method = .references,
         .from = m.cursor(pf_tasks, "{{ <readiness_label> }}"),
+        .include_declaration = true,
+        .expected = &.{
+            m.span(pf_tasks, "{{ <readiness_label> }}"),
+            m.span(pf_vars, "<readiness_label>: ready"),
+        },
+    },
+    .{
+        .name = "variable/role vars key cursor: definition is available from a binding",
+        .method = .definition,
+        .from = m.cursor(pf_vars, "<readiness_label>: ready"),
+        .expected = &.{m.span(pf_vars, "<readiness_label>: ready")},
+    },
+    .{
+        .name = "variable/role vars key cursor: find readiness_label reads and binding",
+        .method = .references,
+        .from = m.cursor(pf_vars, "<readiness_label>: ready"),
         .include_declaration = true,
         .expected = &.{
             m.span(pf_tasks, "{{ <readiness_label> }}"),

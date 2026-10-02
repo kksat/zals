@@ -35,9 +35,11 @@ collections across the Workspace, plus `workspace/symbol`. See
 [ADR-0032](docs/adr/0032-workspace-wide-navigation.md).
 
 Variable navigation (find-references and variable go-to-definition) is a
-post-parity extension; upstream has no counterpart. See
-[ADR-0024](docs/adr/0024-variable-go-to-definition.md) and
-[ADR-0025](docs/adr/0025-variable-references.md).
+post-parity extension; upstream has no counterpart. Reads and binding keys are
+both entry points. See the [variable navigation scope guide](docs/variable-navigation.md),
+[ADR-0024](docs/adr/0024-variable-go-to-definition.md),
+[ADR-0025](docs/adr/0025-variable-references.md), and
+[ADR-0036](docs/adr/0036-variable-navigation-from-bindings.md).
 
 Document symbols (`textDocument/documentSymbol`) are a second post-parity
 extension: a semantic outline for playbooks, task and handler files, variable

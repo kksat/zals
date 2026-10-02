@@ -40,6 +40,7 @@ Each ADR captures one decision, its context, and its consequences. Statuses are
 | [0033](0033-semantic-navigation-e2e-oracles.md) | Semantic navigation E2E oracles | Accepted |
 | [0034](0034-resolved-role-reference-identity.md) | Match role references by resolved identity | Accepted |
 | [0035](0035-isolated-navigation-fixture.md) | Isolate the navigation E2E fixture and dependency | Accepted |
+| [0036](0036-variable-navigation-from-bindings.md) | Variable navigation from bindings | Accepted |
 
 ## Template
 
