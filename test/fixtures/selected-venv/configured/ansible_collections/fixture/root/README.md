@@ -1,0 +1,1 @@
+# Configured path root collection

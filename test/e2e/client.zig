@@ -12,18 +12,36 @@ pub const Client = struct {
     next_id: i64 = 1,
     index_ready: bool = false,
 
+    pub const StartOptions = struct {
+        collections_path: ?[]const u8 = null,
+        use_fixture_config: bool = true,
+        venv_override: ?[]const u8 = null,
+    };
+
     pub fn start(a: Allocator, binary: []const u8, fixture: []const u8, deps: []const u8, home: []const u8) !Client {
+        return startWithOptions(a, binary, fixture, deps, home, .{});
+    }
+
+    pub fn startWithOptions(a: Allocator, binary: []const u8, fixture: []const u8, deps: []const u8, home: []const u8, options: StartOptions) !Client {
         var env = try std.process.getEnvMap(a);
         defer env.deinit();
-        const collection_paths = try std.fmt.allocPrint(a, "{s}{c}{s}", .{ fixture, std.fs.path.delimiter, deps });
-        try env.put("ANSIBLE_COLLECTIONS_PATH", collection_paths);
+        const collection_paths = options.collections_path orelse try std.fmt.allocPrint(a, "{s}{c}{s}", .{ fixture, std.fs.path.delimiter, deps });
+        if (collection_paths.len > 0) try env.put("ANSIBLE_COLLECTIONS_PATH", collection_paths) else env.remove("ANSIBLE_COLLECTIONS_PATH");
         env.remove("ANSIBLE_COLLECTIONS_PATHS");
         try env.put("ANSIBLE_ROLES_PATH", try std.fs.path.join(a, &.{ fixture, "roles" }));
-        try env.put("ANSIBLE_CONFIG", try std.fs.path.join(a, &.{ fixture, "ansible.cfg" }));
+        if (options.use_fixture_config) {
+            try env.put("ANSIBLE_CONFIG", try std.fs.path.join(a, &.{ fixture, "ansible.cfg" }));
+        } else env.remove("ANSIBLE_CONFIG");
         try env.put("HOME", home);
+        // Isolate the docs cache too, even if the test runner has XDG configured.
+        try env.put("XDG_CACHE_HOME", try std.fs.path.join(a, &.{ home, ".cache" }));
         env.remove("VIRTUAL_ENV");
 
-        var child = std.process.Child.init(&.{ binary, "--stdio", "--log-level", "error" }, a);
+        const argv: []const []const u8 = if (options.venv_override) |venv|
+            &.{ binary, "--stdio", "--log-level", "error", "--venv", venv }
+        else
+            &.{ binary, "--stdio", "--log-level", "error" };
+        var child = std.process.Child.init(argv, a);
         child.env_map = &env;
         child.stdin_behavior = .Pipe;
         child.stdout_behavior = .Pipe;

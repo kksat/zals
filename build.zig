@@ -100,6 +100,20 @@ pub fn build(b: *std.Build) void {
     addE2eInputs(b, run_e2e, "test/dependencies");
     const e2e_step = b.step("e2e", "Run navigation end-to-end tests");
     e2e_step.dependOn(&run_e2e.step);
+
+    const venv_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("test/selected_venv_e2e.zig"),
+        .target = target,
+        .optimize = optimize,
+    }) });
+    const run_venv = b.addRunArtifact(venv_tests);
+    run_venv.step.dependOn(b.getInstallStep());
+    run_venv.setCwd(b.path("."));
+    run_venv.addFileInput(exe.getEmittedBin());
+    addE2eInputs(b, run_venv, "test/fixtures/selected-venv");
+    const venv_step = b.step("selected-venv-e2e", "Run selected virtual environment end-to-end tests");
+    venv_step.dependOn(&run_venv.step);
+    e2e_step.dependOn(&run_venv.step);
 }
 
 fn addE2eInputs(b: *std.Build, run: *std.Build.Step.Run, path: []const u8) void {

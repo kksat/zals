@@ -1,0 +1,8 @@
+- name: Selected environment collections
+  hosts: all
+  collections:
+    - fixture.root
+  tasks:
+    - name: Root installed module
+      fixture.root.probe:
+        message: root

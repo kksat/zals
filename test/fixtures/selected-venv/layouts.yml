@@ -1,0 +1,6 @@
+- hosts: all
+  collections:
+    - fixture.windows
+    - fixture.posix
+    - fixture.posix_next
+  tasks: []

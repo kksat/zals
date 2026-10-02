@@ -1,0 +1,1 @@
+# Adjacent path root collection

@@ -111,7 +111,7 @@ pub fn rolesPaths(a: Allocator, ctx: Context, file_path: []const u8) ![]const []
 
 /// Collection search paths for `file_path`, in resolution order: the adjacent
 /// `collections/` directory, the configured paths, the selected virtual
-/// environment's `site-packages`, then the Workspace's collection directories.
+/// environment's root and `site-packages`, then the Workspace's collection directories.
 /// Each entry is a directory that contains (or may contain)
 /// `ansible_collections/`.
 pub fn collectionsPaths(a: Allocator, ctx: Context, file_path: []const u8) ![]const []const u8 {
@@ -129,27 +129,37 @@ pub fn collectionsPaths(a: Allocator, ctx: Context, file_path: []const u8) ![]co
     } else {
         for (ctx.dump_collections) |p| try appendUnique(&out, try expandHome(a, p, ctx.env));
     }
-    if (try venvSitePackages(a, ctx)) |sp| try appendUnique(&out, sp);
+    if (try venvRoot(a, ctx)) |venv| {
+        if (hasCollections(a, venv)) try appendUnique(&out, venv);
+    }
+    try appendAll(&out, try venvSitePackagesPaths(a, ctx));
     for (ctx.workspace_collections) |p| try appendUnique(&out, p);
     return out.toOwnedSlice();
+}
+
+fn venvRoot(a: Allocator, ctx: Context) !?[]const u8 {
+    if (ctx.venv.len == 0) return null;
+    if (std.fs.path.isAbsolute(ctx.venv)) return try a.dupe(u8, ctx.venv);
+    const root = ctx.workspace_root orelse return null;
+    return try std.fs.path.join(a, &.{ root, ctx.venv });
 }
 
 /// `site-packages` of the selected virtual environment when it contains
 /// `ansible_collections/`, or null.
 pub fn venvSitePackages(a: Allocator, ctx: Context) !?[]const u8 {
-    if (ctx.venv.len == 0) return null;
-    const venv = if (std.fs.path.isAbsolute(ctx.venv))
-        try a.dupe(u8, ctx.venv)
-    else blk: {
-        const root = ctx.workspace_root orelse return null;
-        break :blk try std.fs.path.join(a, &.{ root, ctx.venv });
-    };
-    // Windows layout.
+    const paths = try venvSitePackagesPaths(a, ctx);
+    return if (paths.len > 0) paths[0] else null;
+}
+
+fn venvSitePackagesPaths(a: Allocator, ctx: Context) ![]const []const u8 {
+    var out = std.array_list.Managed([]const u8).init(a);
+    const venv = (try venvRoot(a, ctx)) orelse return &.{};
+    // Windows layout, then POSIX layouts in deterministic order.
     const win = try std.fs.path.join(a, &.{ venv, "Lib", "site-packages" });
-    if (hasCollections(a, win)) return win;
+    if (hasCollections(a, win)) try appendUnique(&out, win);
 
     const lib = try std.fs.path.join(a, &.{ venv, "lib" });
-    var dir = std.fs.cwd().openDir(lib, .{ .iterate = true }) catch return null;
+    var dir = std.fs.cwd().openDir(lib, .{ .iterate = true }) catch return out.toOwnedSlice();
     defer dir.close();
     var names = std.array_list.Managed([]const u8).init(a);
     var it = dir.iterate();
@@ -161,9 +171,9 @@ pub fn venvSitePackages(a: Allocator, ctx: Context) !?[]const u8 {
     std.mem.sort([]const u8, names.items, {}, lessString);
     for (names.items) |name| {
         const sp = try std.fs.path.join(a, &.{ lib, name, "site-packages" });
-        if (hasCollections(a, sp)) return sp;
+        if (hasCollections(a, sp)) try appendUnique(&out, sp);
     }
-    return null;
+    return out.toOwnedSlice();
 }
 
 fn envPaths(a: Allocator, ctx: Context, name: []const u8) !?[]const []const u8 {
