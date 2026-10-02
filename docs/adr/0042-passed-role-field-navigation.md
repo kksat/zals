@@ -30,7 +30,10 @@ matching concrete callee path without a schema.
 Workspace callee implementations reuse persistent `field_defs` and `var_loads`
 facts, replaced by facts extracted from open buffers. The callee file set is
 its conventional sources plus one level of their vars loads, with load-site
-precedence retained. Unindexed dependencies use a bounded source fallback;
+precedence retained. Load-looking keys inside data are not load directives.
+Explicit vars loads remain eligible regardless of their filename extension
+(including JSON); this does not broaden general Workspace discovery.
+Unindexed dependencies use a bounded source fallback;
 non-Workspace callees retain filesystem discovery. Requests do not re-enumerate
 or reparse an indexed role's disk sources.
 
@@ -41,5 +44,9 @@ quoted schema keys, changed descriptions and concrete values, and complete
 references with stale disk sites excluded. A second buffer scenario changes a
 callee's `include_vars` target and its loaded dictionary, checking the exact
 load/vars/default implementation order. These are preservation oracles for the
-index-reuse refactor, not artificially failing tests. No playbook execution, loop tracing,
+index-reuse refactor, not artificially failing tests. A JSON dependency scenario
+locks down extension-independent loads and original-source buffer ranges;
+load-looking data controls must not widen callee scope. Post-review evidence is
+[recorded separately](../../test/field_navigation_review_e2e.md).
+No playbook execution, loop tracing,
 YAML alias expansion, or fixture mutation is involved.

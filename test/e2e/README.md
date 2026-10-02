@@ -59,6 +59,9 @@ Field-expression RED/GREEN evidence and literal-escape limitations are recorded
 in [`test/field_expressions_e2e.md`](../field_expressions_e2e.md). Raw/assignment
 boundary evidence is in
 [`test/field_lexical_boundaries_e2e.md`](../field_lexical_boundaries_e2e.md).
+Post-review binding/load boundaries, JSON dependencies, index reuse, and final
+aggregate evidence are in
+[`test/field_navigation_review_e2e.md`](../field_navigation_review_e2e.md).
 
 The last suite requires `ansible` and `ansible-doc` on PATH (see
 [`test/selected_venv_e2e.md`](../selected_venv_e2e.md)); the other suites do not

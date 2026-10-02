@@ -18,9 +18,12 @@ requested from every positive origin and negative cursor. Non-BMP prefixes
 exercise UTF-16 spans. Ordinary field groups are Workspace-wide leaf names,
 separate from root Variable groups.
 
-Run directly (parent owns aggregate/build registration):
+The parent registers `field-lexical-boundaries-e2e` in `build.zig` and the
+aggregate `make e2e` / CI target, tracking the binary and fixture inputs.
+Run the registered target, or invoke the test roots directly:
 
 ```sh
+DEVELOPER_DIR=/nonexistent zig build field-lexical-boundaries-e2e
 DEVELOPER_DIR=/nonexistent zig build
 DEVELOPER_DIR=/nonexistent zig test test/field_lexical_boundaries_e2e.zig
 DEVELOPER_DIR=/nonexistent zig test test/field_expressions_e2e.zig
@@ -108,4 +111,6 @@ with a trailing `+` is invalid and is not newly recognized as a raw opener.
 This work does not normalize YAML scalar escapes or decode static Jinja key
 escapes. It does not expand YAML aliases or introduce runtime object identity,
 loop tracing, or Jinja binding-flow analysis. Only raw-block literals and
-`set` field-assignment target/read separation are in scope.
+`set` field-assignment target/read separation are in scope. The integrated
+YAML-normalization and post-review fixes are verified in
+[field_navigation_review_e2e.md](field_navigation_review_e2e.md).
