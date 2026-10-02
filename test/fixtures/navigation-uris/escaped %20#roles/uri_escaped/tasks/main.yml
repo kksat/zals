@@ -1,0 +1,5 @@
+- name: Escaped path implementation
+  ansible.builtin.debug:
+    msg: uri_escaped
+- name: Continue navigation from the returned URI
+  ansible.builtin.import_tasks: next.yml

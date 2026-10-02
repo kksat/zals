@@ -3,27 +3,16 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-/// Strip a `file://` URI to a filesystem path. Percent-decodes `%20` only,
-/// matching the rest of the server.
+/// Strip a `file://` URI to a filesystem path and percent-decode once.
+/// A literal `%20` filename is represented as `%2520`, not a space.
 pub fn uriToPath(allocator: Allocator, uri: []const u8) ![]const u8 {
     var path = uri;
     if (std.mem.startsWith(u8, path, "file://")) path = path["file://".len..];
     if (path.len >= 3 and path[0] == '/' and std.ascii.isAlphabetic(path[1]) and path[2] == ':') {
         path = path[1..];
     }
-    if (std.mem.indexOf(u8, path, "%20") == null) return allocator.dupe(u8, path);
-    var buf = std.array_list.Managed(u8).init(allocator);
-    var i: usize = 0;
-    while (i < path.len) {
-        if (i + 2 < path.len and path[i] == '%' and path[i + 1] == '2' and path[i + 2] == '0') {
-            try buf.append(' ');
-            i += 3;
-        } else {
-            try buf.append(path[i]);
-            i += 1;
-        }
-    }
-    return buf.toOwnedSlice();
+    const component: std.Uri.Component = .{ .percent_encoded = path };
+    return std.fmt.allocPrint(allocator, "{f}", .{std.fmt.alt(component, .formatRaw)});
 }
 
 /// LSP file URIs must be absolute. Anchor relative filesystem paths to the
@@ -31,12 +20,17 @@ pub fn uriToPath(allocator: Allocator, uri: []const u8) ![]const u8 {
 /// exist (code actions also use this helper for new files).
 pub fn pathToUri(allocator: Allocator, path: []const u8) ![]const u8 {
     if (std.mem.startsWith(u8, path, "file:")) return path;
-    if (std.fs.path.isAbsolute(path)) return std.fmt.allocPrint(allocator, "file://{s}", .{path});
+    if (std.fs.path.isAbsolute(path)) return absolutePathToUri(allocator, path);
     const cwd = try std.process.getCwdAlloc(allocator);
     defer allocator.free(cwd);
     const absolute = try std.fs.path.join(allocator, &.{ cwd, path });
     defer allocator.free(absolute);
-    return std.fmt.allocPrint(allocator, "file://{s}", .{absolute});
+    return absolutePathToUri(allocator, absolute);
+}
+
+fn absolutePathToUri(allocator: Allocator, path: []const u8) ![]const u8 {
+    const uri: std.Uri = .{ .scheme = "file", .host = .{ .raw = "" }, .path = .{ .raw = path } };
+    return std.fmt.allocPrint(allocator, "{f}", .{uri});
 }
 
 const testing = std.testing;

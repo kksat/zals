@@ -1,0 +1,4 @@
+argument_specs:
+  main:
+    short_description: The literal percent space and hash path target
+    options: {}

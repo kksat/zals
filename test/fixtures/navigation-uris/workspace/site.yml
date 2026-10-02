@@ -4,3 +4,4 @@
   roles:
     - role: uri_demo
     - role: uri_paths.dependency.collection_demo
+    - role: uri_escaped

@@ -9,8 +9,11 @@ The stdio server starts with this directory as its cwd and explicit relative
 `ANSIBLE_ROLES_PATH=role-path` and
 `ANSIBLE_COLLECTIONS_PATH=collection-path`, plus an isolated HOME/cache and
 disabled virtual-environment lookup. An absolute-path control uses the same
-files. Tests open the unchanged `workspace/site.yml`, wait for the index, and
-assert complete definition/implementation locations and exact existing targets.
+files. `escaped %20#roles/` adds a separate installed role in a path with a
+space, literal `%20`, and hash; its `import_tasks` exercises navigation after
+opening the exact escaped URI returned by the server. Tests open unchanged
+fixture files, wait for the index, and assert complete definition/implementation
+locations, explicit escaped URI suffixes, and exact existing targets.
 
 Run from the repository root:
 

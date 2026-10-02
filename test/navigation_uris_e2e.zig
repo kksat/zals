@@ -34,11 +34,61 @@ test "stdio navigation returns absolute file URIs for relative collection enviro
     });
 }
 
+test "stdio navigation escapes literal percent space and hash in file targets" {
+    try checkNavigation(.{
+        .absolute_paths = true,
+        .roles_path = "escaped %20#roles",
+        .snippet = "- role: <uri_escaped>",
+        .definition = "escaped %20#roles/uri_escaped/meta/argument_specs.yml",
+        .definition_uri_path = "escaped%20%2520%23roles/uri_escaped/meta/argument_specs.yml",
+        .implementation = "escaped %20#roles/uri_escaped/tasks/main.yml",
+        .implementation_uri_path = "escaped%20%2520%23roles/uri_escaped/tasks/main.yml",
+    });
+}
+
+test "stdio navigation can follow a returned escaped file URI" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const fixture = try std.fs.cwd().realpathAlloc(a, fixture_path);
+    var home_dir = std.testing.tmpDir(.{});
+    defer home_dir.cleanup();
+    const home = try home_dir.dir.realpathAlloc(a, ".");
+    const roles = try std.fs.path.join(a, &.{ fixture, "escaped %20#roles" });
+    var client = try startClient(a, fixture, home, roles, "collection-path");
+    defer client.deinit();
+    try initialize(a, &client, fixture);
+    const resolver: anchor.Resolver = .{ .allocator = a, .fixture = fixture, .deps = fixture };
+    const invocation = try resolver.cursor(.{ .path = "workspace/site.yml", .snippet = "- role: <uri_escaped>" });
+    try openDocument(&client, resolver, "workspace/site.yml", invocation.uri);
+    const implementation = try client.request("textDocument/implementation", .{
+        .textDocument = .{ .uri = invocation.uri },
+        .position = invocation.position,
+    });
+    try expectFileStart(a, fixture, "escaped %20#roles/uri_escaped/tasks/main.yml", "escaped%20%2520%23roles/uri_escaped/tasks/main.yml", implementation);
+    const returned = try parseLocation(a, implementation);
+    // Open the exact URI the server returned, as an editor would. Only the
+    // cursor position comes from the named static snippet, not server output.
+    const source = try resolver.cursor(.{
+        .path = "escaped %20#roles/uri_escaped/tasks/main.yml",
+        .snippet = "import_tasks: <next.yml>",
+    });
+    try openDocument(&client, resolver, "escaped %20#roles/uri_escaped/tasks/main.yml", returned.uri);
+    const next = try client.request("textDocument/definition", .{
+        .textDocument = .{ .uri = returned.uri },
+        .position = source.position,
+    });
+    try expectFileStart(a, fixture, "escaped %20#roles/uri_escaped/tasks/next.yml", "escaped%20%2520%23roles/uri_escaped/tasks/next.yml", next);
+}
+
 const NavigationCase = struct {
     absolute_paths: bool = false,
+    roles_path: []const u8 = "role-path",
     snippet: []const u8,
     definition: []const u8,
+    definition_uri_path: ?[]const u8 = null,
     implementation: []const u8,
+    implementation_uri_path: ?[]const u8 = null,
 };
 
 fn checkNavigation(case: NavigationCase) !void {
@@ -49,7 +99,7 @@ fn checkNavigation(case: NavigationCase) !void {
     var home_dir = std.testing.tmpDir(.{});
     defer home_dir.cleanup();
     const home = try home_dir.dir.realpathAlloc(a, ".");
-    const roles = if (case.absolute_paths) try std.fs.path.join(a, &.{ fixture, "role-path" }) else "role-path";
+    const roles = if (case.absolute_paths) try std.fs.path.join(a, &.{ fixture, case.roles_path }) else case.roles_path;
     const collections = if (case.absolute_paths) try std.fs.path.join(a, &.{ fixture, "collection-path" }) else "collection-path";
     var client = try startClient(a, fixture, home, roles, collections);
     defer client.deinit();
@@ -58,9 +108,9 @@ fn checkNavigation(case: NavigationCase) !void {
     const resolver: anchor.Resolver = .{ .allocator = a, .fixture = fixture, .deps = fixture };
     const source = try resolver.cursor(.{ .path = "workspace/site.yml", .snippet = case.snippet });
     try openDocument(&client, resolver, "workspace/site.yml", source.uri);
-    const cases = [_]struct { method: []const u8, target: []const u8 }{
-        .{ .method = "textDocument/definition", .target = case.definition },
-        .{ .method = "textDocument/implementation", .target = case.implementation },
+    const cases = [_]struct { method: []const u8, target: []const u8, uri_path: []const u8 }{
+        .{ .method = "textDocument/definition", .target = case.definition, .uri_path = case.definition_uri_path orelse case.definition },
+        .{ .method = "textDocument/implementation", .target = case.implementation, .uri_path = case.implementation_uri_path orelse case.implementation },
     };
     var failures: usize = 0;
     for (cases) |request| {
@@ -68,7 +118,7 @@ fn checkNavigation(case: NavigationCase) !void {
             .textDocument = .{ .uri = source.uri },
             .position = source.position,
         });
-        expectFileStart(a, fixture, request.target, result) catch |err| {
+        expectFileStart(a, fixture, request.target, request.uri_path, result) catch |err| {
             std.debug.print("FAIL {s}: {s}\n", .{ request.method, @errorName(err) });
             failures += 1;
         };
@@ -126,21 +176,15 @@ fn openDocument(client: *lsp.Client, resolver: anchor.Resolver, path: []const u8
     } });
 }
 
-fn expectFileStart(a: Allocator, fixture: []const u8, target: []const u8, result: Value) !void {
+fn expectFileStart(a: Allocator, fixture: []const u8, target: []const u8, uri_path: []const u8, result: Value) !void {
     const expected_path = try std.fs.path.join(a, &.{ fixture, target });
     // The written oracle names an existing file, never a fabricated fallback.
     const file = try std.fs.openFileAbsolute(expected_path, .{});
     file.close();
-    const expected_uri = try std.fmt.allocPrint(a, "file://{s}", .{expected_path});
-    const value = switch (result) {
-        .object => result,
-        .array => |items| blk: {
-            try std.testing.expectEqual(@as(usize, 1), items.items.len);
-            break :blk items.items[0];
-        },
-        else => return error.ExpectedLocation,
-    };
-    const actual = try std.json.parseFromValueLeaky(anchor.Location, a, value, .{});
+    // Escaped suffixes are written explicitly in each case, independently of
+    // production URI conversion. Only the checkout's absolute prefix varies.
+    const expected_uri = try std.fmt.allocPrint(a, "file://{s}/{s}", .{ fixture, uri_path });
+    const actual = try parseLocation(a, result);
     try std.testing.expectEqualStrings(expected_uri, actual.uri);
     const parsed = try std.Uri.parse(actual.uri);
     try std.testing.expectEqualStrings("file", parsed.scheme);
@@ -153,4 +197,16 @@ fn expectFileStart(a: Allocator, fixture: []const u8, target: []const u8, result
         .start = .{ .line = 0, .character = 0 },
         .end = .{ .line = 0, .character = 0 },
     }, actual.range);
+}
+
+fn parseLocation(a: Allocator, result: Value) !anchor.Location {
+    const value = switch (result) {
+        .object => result,
+        .array => |items| blk: {
+            try std.testing.expectEqual(@as(usize, 1), items.items.len);
+            break :blk items.items[0];
+        },
+        else => return error.ExpectedLocation,
+    };
+    return std.json.parseFromValueLeaky(anchor.Location, a, value, .{});
 }
