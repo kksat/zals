@@ -132,6 +132,11 @@ names; role `meta/main.yml` `argument_specs` options; and role invocation params
 in a playbook's `roles:` entry.
 _Avoid_: definition site, declaration, binding, assignment
 
+**Variable implementation**:
+A binding that can supply a Variable's runtime value, rather than an
+argument-spec declaration describing that value.
+_Avoid_: variable body, variable implementation file
+
 **Reachable definition**:
 A Variable definition that can apply at a given Variable reference: one in the
 reference's own role scope or playbook scope, in a playbook that invokes that

@@ -557,10 +557,10 @@ pub const all = [_]m.Case{
         .expected = &.{},
     },
     .{
-        .name = "role/negative Jinja-valued include name: not a static role implementation",
+        .name = "role/Jinja-valued include name: implementation binds the variable, not a static role",
         .method = .implementation,
         .from = m.cursor("negative/roles.yml", "name: \"{{ <dynamic_role> }}\""),
-        .expected = &.{},
+        .expected = &.{m.span("negative/roles.yml", "<dynamic_role>: example.rollout.deploy")},
     },
     .{
         .name = "role/negative requirement URL source: not a role reference",

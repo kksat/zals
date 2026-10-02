@@ -209,6 +209,18 @@ pub const all = [_]m.Case{
         },
     },
     .{
+        .name = "variable/default key cursor: concrete implementation excludes the schema",
+        .method = .implementation,
+        .from = m.cursor(pf_defaults, "<app_port>: 8080"),
+        .expected = &.{m.span(pf_defaults, "<app_port>: 8080")},
+    },
+    .{
+        .name = "variable/Jinja shared read: implementation reaches the concrete default",
+        .method = .implementation,
+        .from = m.cursor(common, "on {{ <app_port> }}"),
+        .expected = &.{m.span(pf_defaults, "<app_port>: 8080")},
+    },
+    .{
         .name = "variable/default key cursor: definitions are available from a binding",
         .method = .definition,
         .from = m.cursor(pf_defaults, "<app_port>: 8080"),
@@ -230,6 +242,24 @@ pub const all = [_]m.Case{
         .from = m.cursor(pf_defaults, "<app_port>: 8080"),
         .include_declaration = true,
         .expected = app_port_with_declarations,
+    },
+    .{
+        .name = "variable/schema-only option: declaration is still a definition",
+        .method = .definition,
+        .from = m.cursor(pf_specs, "      <declared_only>:"),
+        .expected = &.{m.span(pf_specs, "      <declared_only>:")},
+    },
+    .{
+        .name = "variable/schema-only option: no concrete implementation",
+        .method = .implementation,
+        .from = m.cursor(pf_specs, "      <declared_only>:"),
+        .expected = &.{},
+    },
+    .{
+        .name = "variable/argument_specs option cursor: implementation is the concrete default",
+        .method = .implementation,
+        .from = m.cursor(pf_specs, "      <app_port>:"),
+        .expected = &.{m.span(pf_defaults, "<app_port>: 8080")},
     },
     .{
         .name = "variable/argument_specs option cursor: definitions use the same name as reads",
@@ -297,6 +327,12 @@ pub const all = [_]m.Case{
             m.span(pf_tasks, "{{ <readiness_label> }}"),
             m.span(pf_vars, "<readiness_label>: ready"),
         },
+    },
+    .{
+        .name = "variable/role vars key cursor: concrete implementation is available",
+        .method = .implementation,
+        .from = m.cursor(pf_vars, "<readiness_label>: ready"),
+        .expected = &.{m.span(pf_vars, "<readiness_label>: ready")},
     },
     .{
         .name = "variable/role vars key cursor: definition is available from a binding",
@@ -400,6 +436,12 @@ pub const all = [_]m.Case{
         .from = m.cursor(deploy_tasks, "when: <deployment_result> is defined"),
         .include_declaration = true,
         .expected = deployment_result_with_declaration,
+    },
+    .{
+        .name = "variable/bare when: register is a concrete implementation",
+        .method = .implementation,
+        .from = m.cursor(deploy_tasks, "when: <deployment_result> is defined"),
+        .expected = &.{m.span(deploy_tasks, "register: <deployment_result>")},
     },
     .{
         .name = "variable/bare when: register definition",
@@ -739,6 +781,12 @@ pub const all = [_]m.Case{
             m.span(rollout, "      <release_tag>: release-candidate"),
             m.span(release, "<release_tag>: release-from-vars-file"),
         },
+    },
+    .{
+        .name = "variable/unbound Jinja item: no concrete implementation",
+        .method = .implementation,
+        .from = m.cursor(verify, "msg: \"{{ <item> }}\""),
+        .expected = &.{},
     },
     .{
         .name = "variable/unbound Jinja item: no definition",

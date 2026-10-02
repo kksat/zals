@@ -18,11 +18,17 @@ Argument specs in `meta/argument_specs.yml`, `.yaml`, and `meta/main.yml`,
 | Find references, declarations off | Every read of the same root name in the owning Workspace |
 | Find references, declarations on | The same reads plus every recognized binding of that name |
 | Go to definition | Reachable bindings in precedence order, then bindings elsewhere in the Workspace |
+| Go to implementation | The same ordered bindings, excluding schema-only argument-spec declarations |
 | Hover | Active and shadowed reachable bindings, then bindings elsewhere in the Workspace; role parameter keys prefer the called role's option documentation |
 
 Go-to-definition accepts binding keys, including keys in defaults, vars, and
 argument specs. The binding under the cursor remains in the result. When it is
 the only binding, returning its own location is intentional.
+
+Implementation navigates concrete value bindings, not role task files. From an
+argument-spec option it can open its default, vars value, or invocation value;
+a schema-only option has no implementation. From a Jinja-valued role name it
+navigates the variable binding, not a guessed role.
 
 ### What is the same from every site?
 

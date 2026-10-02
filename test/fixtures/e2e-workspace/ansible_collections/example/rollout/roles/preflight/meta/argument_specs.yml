@@ -8,3 +8,6 @@ argument_specs:
       app_port:
         type: int
         description: Port of the deployed service
+      declared_only:
+        type: str
+        description: An option with no concrete variable binding

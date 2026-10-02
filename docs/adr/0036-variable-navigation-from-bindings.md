@@ -12,6 +12,13 @@ ranked by precedence, followed by other same-named bindings in the owning
 Workspace (ADR-0032). The binding under the cursor remains a candidate; a
 variable with only one binding can therefore navigate to itself.
 
+Go-to-implementation accepts the same entry points and ranking, but omits
+argument-spec declarations: a schema describes an input, it does not implement
+a value. Defaults, vars, invocation values, `set_fact`, `register`, and the
+other concrete bindings remain candidates. An option with no concrete binding
+has a definition but no implementation. Dynamic role-name expressions navigate
+their variable's bindings rather than pretending to resolve a static role.
+
 Find-references retains ADR-0032's Workspace-wide **name-based** rule. From any
 read or binding of the same root variable, with the same `includeDeclaration`
 flag and the same document state, the complete result is identical. This

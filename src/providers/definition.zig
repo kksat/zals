@@ -2,16 +2,13 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const json_util = @import("../lsp/json_util.zig");
 const types = @import("../lsp/types.zig");
 const Server = @import("../lsp/server.zig").Server;
 const util = @import("util.zig");
 const yaml = @import("../yaml/root.zig");
-const variables = @import("../variables/root.zig");
 const roles = @import("../roles/root.zig");
 const paths = @import("../paths.zig");
-const vs = @import("variable_source.zig");
-const wv = @import("workspace_view.zig");
+const variable_navigation = @import("variable_navigation.zig");
 
 pub const Result = union(enum) {
     none,
@@ -26,7 +23,7 @@ const RoleResult = union(enum) {
 };
 
 pub fn definition(self: *Server, a: Allocator, params: std.json.Value) !Result {
-    if (try variableDefinition(self, a, params)) |locs| return .{ .locations = locs };
+    if (try variable_navigation.locations(self, a, params, .definition)) |locs| return .{ .locations = locs };
     switch (try @import("file_navigation.zig").definition(self, a, params)) {
         .skip => {},
         .none => return .none,
@@ -43,38 +40,6 @@ pub fn definition(self: *Server, a: Allocator, params: std.json.Value) !Result {
         .locations => |locs| return if (locs.len == 1) .{ .location = locs[0] } else .{ .locations = locs },
     }
     return moduleDefinition(self, a, params);
-}
-
-/// Jump from a variable reference or binding to its definitions: the reachable ones
-/// ranked by precedence, then the rest of the Workspace (ADR-0024, ADR-0032).
-fn variableDefinition(self: *Server, a: Allocator, params: std.json.Value) !?[]const types.Location {
-    const td = json_util.field(params, "textDocument") orelse return null;
-    const uri = json_util.string(td, "uri") orelse return null;
-    const pos_v = json_util.field(params, "position") orelse return null;
-    const pos = json_util.position(pos_v) orelse return null;
-    const doc = self.documents.get(uri) orelse return null;
-    const offset = doc.offsetAt(pos) orelse return null;
-
-    var src = vs.ServerSource{ .server = self };
-    var index = variables.Index.init(a, src.source());
-    const cur = (try index.occurrenceAt(a, uri, offset)) orelse return null;
-    if (try wv.View.forUri(self, a, uri)) |found| {
-        var v = found;
-        const path = try paths.uriToPath(a, uri);
-        const reach = try v.reachableFiles(path);
-        const wdefs = try wv.view.definitions(a, v.files, cur.name, reach);
-        if (wdefs.len == 0) return null;
-        var wlocs = std.array_list.Managed(types.Location).init(a);
-        for (wdefs) |d| try wlocs.append(try v.location(d.uri, d.start, d.end));
-        return try wlocs.toOwnedSlice();
-    }
-
-    const defs = try index.definitions(a, uri, cur.name);
-    if (defs.len == 0) return null;
-
-    var locs = std.array_list.Managed(types.Location).init(a);
-    for (defs) |d| try locs.append(try vs.location(a, self, &index, d));
-    return try locs.toOwnedSlice();
 }
 
 /// Jump from a role reference to the role's argument specs, metadata, or main

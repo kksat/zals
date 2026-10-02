@@ -1,4 +1,4 @@
-//! Go to implementation: open a role's main task file.
+//! Go to implementation: concrete variable bindings or a role's main tasks.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -9,9 +9,10 @@ const yaml = @import("../yaml/root.zig");
 const roles = @import("../roles/root.zig");
 const paths = @import("../paths.zig");
 
-/// The main task file of every role the reference can resolve to: the one
-/// Ansible would run, or every Workspace fallback match (ADR-0032).
+/// Variable implementations omit schema-only argument specs. Role references
+/// still open main tasks for the resolved role(s) (ADR-0032).
 pub fn implementation(self: *Server, a: Allocator, params: std.json.Value) !?[]const types.Location {
+    if (try @import("variable_navigation.zig").locations(self, a, params, .implementation)) |locs| return locs;
     var cur = util.parseAt(self, a, params) orelse return null;
     defer cur.forest.deinit();
     const arena = cur.forest.allocator();
