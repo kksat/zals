@@ -125,11 +125,68 @@ DEVELOPER_DIR=/nonexistent zig test test/e2e.zig
 - **GREEN:** independent suite **8/8**; `make test` passed; semantic suite
   **338 cases, 0 failures**.
 
+## Review follow-up / slice 9 — keyword-like members
+
+- Installed **Jinja 3.1.6** (`/opt/homebrew/lib/python3.14/site-packages/jinja2`)
+  rendered `data.filter`, `data.is`, and `data.true` identically to their
+  single/double-quoted subscript aliases. Qualified plugin names containing
+  these spellings, ordinary/trimmed filter blocks, and the conditional
+  expression used below were also accepted (plugin names registered explicitly
+  for that syntax check; the LSP suite does not execute Jinja or Ansible).
+- Added one stdio test with independently authored, complete answers for each
+  keyword-like field group. Both modes are requested from every dot read,
+  both quoted aliases, the binding key, and a statement/bare-expression read.
+  Genuine filter/test operators, dotted keyword-like plugin components, filter
+  blocks, and a called keyword-like method are negative cursor controls.
+- **RED:** previous lexical commit, independent suite 8 passed / 1 failed,
+  **30 positive requests failed**. Dot origins returned nothing, while
+  subscript/key origins returned two reads rather than four (three rather than
+  five including the key). Log: `/tmp/field-expressions-slice9-red.log`.
+- **Smallest fix:** handle member/plugin context before keyword spelling.
+  A `filter` block introduces plugin state only as the first word of a
+  statement tag (including the optional `-` whitespace-control marker),
+  not after an ordinary member dot or elsewhere in an expression.
+- A further **RED** control for
+  `data | lower if enabled else other.filter` exposed plugin state leaking
+  across a completed name into expression keywords: **12 field-group requests
+  and 2 root-Variable requests failed**.
+  Log: `/tmp/field-expressions-slice9-conditional-red.log`.
+  The minimal state correction distinguishes an explicit plugin-name dot from
+  the end of a plugin name, so `if`/`else` resume ordinary expression scanning.
+- **GREEN:** independent suite **9/9**, all full reference answers and negative
+  cursors; `make test` passed; the isolated snapshot's existing semantic suite
+  remains **338 cases, 0 failures**. Parent's separately evolving schema/hover
+  cases are not imported into this worktree.
+
+## Known limitations (not broadened in this follow-up)
+
+### Static-subscript literal escapes
+
+The scanner preserves the raw source contents of a literal key; it does **not**
+decode Jinja string escapes when assigning the field name. For example, installed
+Jinja resolves `data['\u0066ilter']` to the `filter` key, but this scanner stores
+the name `\u0066ilter`, so it does not join the ordinary `filter` name group.
+Escaped quotes, backslashes, Unicode escapes, and other decoded-key aliases are
+not claimed as supported. Honoring escapes while skipping string boundaries
+(slice 4) is different from decoding field-key literals.
+
+### Delimiters inside quoted literals — separate concern
+
+By code inspection, `scanScalarNames` finds the next `}}`/`%}` with a plain
+substring search, without skipping quoted literals. Installed Jinja accepted
+both `{{ '}}' ~ data.field }}` and
+`{% set v = '%}' ~ data.field %}{{ v }}`; the current scalar scanner can truncate
+those bodies before the genuine field read. A string containing an apparent
+later opening tag can conversely be scanned as a phantom expression after the
+premature close. This is a separate, pre-existing delimiter-boundary concern;
+it has **not** been repaired or silently added to this lexical change, and the
+existing string-control tests do not claim coverage of it.
+
 ## Final verification
 
 - `make build`: passed.
 - `DEVELOPER_DIR=/nonexistent zig test test/field_expressions_e2e.zig`:
-  **8 tests passed**, **150 reference requests** with exact full-result oracles.
+  **9 tests passed**, **212 reference requests** with exact full-result oracles.
 - `make test`: passed.
 - `DEVELOPER_DIR=/nonexistent zig test test/e2e.zig`:
   **338 semantic cases, 0 failures**.

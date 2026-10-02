@@ -4,7 +4,8 @@
 //! from Jinja expressions (`{{ … }}`, `{% … %}`) and bare-expression bodies
 //! (the value of `when`, `loop`, and friends). Dot reads and static quoted
 //! subscripts are fields, not root variables. Filter/test names, called methods,
-//! Jinja keywords, and ordinary string literals are not field reads.
+//! Jinja keywords, and ordinary string literals are not field reads. After a
+//! member dot, keyword spellings are ordinary field names.
 //!
 //! Offsets are absolute byte offsets into the document, so callers can map them
 //! back to LSP positions without re-scanning.
@@ -70,18 +71,18 @@ fn scanScalarNames(allocator: Allocator, raw: []const u8, base: usize, names: Na
         if (i + 1 < raw.len and raw[i] == '{' and raw[i + 1] == '{') {
             const body_start = i + 2;
             const rel = std.mem.indexOf(u8, raw[body_start..], "}}") orelse {
-                try scanExpressionNames(allocator, raw[body_start..], base + body_start, names, out);
+                try scanExpressionNames(allocator, raw[body_start..], base + body_start, names, false, out);
                 return;
             };
-            try scanExpressionNames(allocator, raw[body_start .. body_start + rel], base + body_start, names, out);
+            try scanExpressionNames(allocator, raw[body_start .. body_start + rel], base + body_start, names, false, out);
             i = body_start + rel + 2;
         } else if (i + 1 < raw.len and raw[i] == '{' and raw[i + 1] == '%') {
             const body_start = i + 2;
             const rel = std.mem.indexOf(u8, raw[body_start..], "%}") orelse {
-                try scanExpressionNames(allocator, raw[body_start..], base + body_start, names, out);
+                try scanExpressionNames(allocator, raw[body_start..], base + body_start, names, true, out);
                 return;
             };
-            try scanExpressionNames(allocator, raw[body_start .. body_start + rel], base + body_start, names, out);
+            try scanExpressionNames(allocator, raw[body_start .. body_start + rel], base + body_start, names, true, out);
             i = body_start + rel + 2;
         } else if (i + 1 < raw.len and raw[i] == '{' and raw[i + 1] == '#') {
             const rel = std.mem.indexOf(u8, raw[i + 2 ..], "#}") orelse return;
@@ -99,16 +100,19 @@ pub fn scanExpression(
     base: usize,
     out: *std.array_list.Managed(Ident),
 ) !void {
-    return scanExpressionNames(allocator, text, base, .roots, out);
+    return scanExpressionNames(allocator, text, base, .roots, false, out);
 }
 
 pub fn scanExpressionFields(allocator: Allocator, text: []const u8, base: usize, out: *std.array_list.Managed(Ident)) !void {
-    return scanExpressionNames(allocator, text, base, .fields, out);
+    return scanExpressionNames(allocator, text, base, .fields, false, out);
 }
 
-fn scanExpressionNames(allocator: Allocator, text: []const u8, base: usize, names: Names, out: *std.array_list.Managed(Ident)) !void {
+fn scanExpressionNames(allocator: Allocator, text: []const u8, base: usize, names: Names, is_statement: bool, out: *std.array_list.Managed(Ident)) !void {
     _ = allocator;
-    const Prev = enum { other, dot, pipe, is_test, plugin_name };
+    // Only the tag's first word can introduce a filter block. '-' is Jinja's
+    // optional whitespace-control marker immediately after the opening tag.
+    const statement_start = skipWhitespace(text, if (text.len > 0 and text[0] == '-') 1 else 0);
+    const Prev = enum { other, dot, pipe, is_test, plugin_name, plugin_dot };
     var prev: Prev = .other;
     var can_subscript = false;
     var i: usize = 0;
@@ -124,6 +128,7 @@ fn scanExpressionNames(allocator: Allocator, text: []const u8, base: usize, name
                 const end = skipString(text, start);
                 const close = skipWhitespace(text, end);
                 if (end > start + 1 and text[end - 1] == text[start] and close < text.len and text[close] == ']') {
+                    // Names preserve raw literal contents; escapes are not decoded.
                     if (!followedByCall(text, close + 1)) try out.append(.{ .name = text[start + 1 .. end - 1], .start = base + start + 1, .end = base + end - 1 });
                     i = close + 1;
                     prev = .other;
@@ -139,7 +144,7 @@ fn scanExpressionNames(allocator: Allocator, text: []const u8, base: usize, name
         }
         if (c == '.') {
             i += 1;
-            if (prev != .plugin_name) prev = .dot;
+            prev = if (prev == .plugin_name) .plugin_dot else .dot;
             continue;
         }
         if (c == '|') {
@@ -151,18 +156,22 @@ fn scanExpressionNames(allocator: Allocator, text: []const u8, base: usize, name
             var j = i;
             while (j < text.len and isIdentChar(text[j])) j += 1;
             const word = text[i..j];
-            can_subscript = !isKeyword(word) and prev != .pipe and prev != .is_test and prev != .plugin_name;
-            if (std.mem.eql(u8, word, "is")) {
-                prev = .is_test;
-            } else if (std.mem.eql(u8, word, "filter")) {
-                prev = .pipe;
+            can_subscript = prev == .dot or (!isKeyword(word) and prev != .pipe and prev != .is_test and prev != .plugin_dot);
+            // Member/plugin context wins over keyword spelling: data.is is a
+            // field, while acme.is.filter after a pipe is a qualified filter.
+            if (prev == .dot) {
+                if (names == .fields and !followedByCall(text, j)) try out.append(.{ .name = word, .start = base + i, .end = base + j });
+                prev = .other;
             } else if (prev == .is_test and std.mem.eql(u8, word, "not")) {
                 prev = .is_test;
+            } else if (prev == .pipe or prev == .is_test or prev == .plugin_dot) {
+                prev = .plugin_name;
+            } else if (std.mem.eql(u8, word, "is")) {
+                prev = .is_test;
+            } else if (is_statement and i == statement_start and std.mem.eql(u8, word, "filter")) {
+                prev = .pipe;
             } else if (isKeyword(word)) {
                 prev = .other;
-            } else if (prev == .dot or prev == .pipe or prev == .is_test or prev == .plugin_name) {
-                if (prev == .dot and names == .fields and !followedByCall(text, j)) try out.append(.{ .name = word, .start = base + i, .end = base + j });
-                prev = if (prev == .dot) .other else .plugin_name;
             } else {
                 if (names == .roots) try out.append(.{ .name = word, .start = base + i, .end = base + j });
                 prev = .other;

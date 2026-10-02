@@ -227,6 +227,114 @@ test "stdio template filter-block names are not root or field reads" {
     }, block_reads, blocks_with_definitions);
 }
 
+const keyword_filter_reads: []const m.ExpectedLocation = &.{
+    m.span(tasks, "filter-member {{ data.<filter> }}"),
+    m.span(tasks, "filter-member {{ data.filter }} / {{ data['<filter>'] }}"),
+    m.span(tasks, "filter-member {{ data.filter }} / {{ data['filter'] }} / {{ data[\"<filter>\"] }}"),
+    m.span(tasks, "filter-condition {% if data.<filter> %}"),
+    m.span(tasks, "conditional-member {{ data | lower if enabled else other.<filter> }}"),
+};
+const keyword_filter_with_definitions: []const m.ExpectedLocation = &.{
+    m.span(tasks, "filter-member {{ data.<filter> }}"),
+    m.span(tasks, "filter-member {{ data.filter }} / {{ data['<filter>'] }}"),
+    m.span(tasks, "filter-member {{ data.filter }} / {{ data['filter'] }} / {{ data[\"<filter>\"] }}"),
+    m.span(tasks, "filter-condition {% if data.<filter> %}"),
+    m.span(tasks, "conditional-member {{ data | lower if enabled else other.<filter> }}"),
+    m.span(defaults, "  <filter>: filter-value"),
+};
+const keyword_is_reads: []const m.ExpectedLocation = &.{
+    m.span(tasks, "is-member {{ data.<is> }}"),
+    m.span(tasks, "is-member {{ data.is }} / {{ data['<is>'] }}"),
+    m.span(tasks, "is-member {{ data.is }} / {{ data['is'] }} / {{ data[\"<is>\"] }}"),
+    m.span(tasks, "is-statement {% set saved = data.<is> %}"),
+};
+const keyword_is_with_definitions: []const m.ExpectedLocation = &.{
+    m.span(tasks, "is-member {{ data.<is> }}"),
+    m.span(tasks, "is-member {{ data.is }} / {{ data['<is>'] }}"),
+    m.span(tasks, "is-member {{ data.is }} / {{ data['is'] }} / {{ data[\"<is>\"] }}"),
+    m.span(tasks, "is-statement {% set saved = data.<is> %}"),
+    m.span(defaults, "  <is>: is-value"),
+};
+const keyword_true_reads: []const m.ExpectedLocation = &.{
+    m.span(tasks, "true-member {{ data.<true> }}"),
+    m.span(tasks, "true-member {{ data.true }} / {{ data['<true>'] }}"),
+    m.span(tasks, "true-member {{ data.true }} / {{ data['true'] }} / {{ data[\"<true>\"] }}"),
+    m.span(tasks, "when: data.<true>"),
+};
+const keyword_true_with_definitions: []const m.ExpectedLocation = &.{
+    m.span(tasks, "true-member {{ data.<true> }}"),
+    m.span(tasks, "true-member {{ data.true }} / {{ data['<true>'] }}"),
+    m.span(tasks, "true-member {{ data.true }} / {{ data['true'] }} / {{ data[\"<true>\"] }}"),
+    m.span(tasks, "when: data.<true>"),
+    m.span(defaults, "  \"<true>\": true-value"),
+};
+
+test "stdio keyword-like data members share their dot, subscript, and binding-key groups" {
+    // These are independently written groups, not a spelling-substitution oracle.
+    const groups = [_]struct {
+        origins: []const m.Anchor,
+        reads: []const m.ExpectedLocation,
+        with_definitions: []const m.ExpectedLocation,
+    }{
+        .{ .origins = &.{
+            m.cursor(tasks, "filter-member {{ data.<filter> }}"),
+            m.cursor(tasks, "filter-member {{ data.filter }} / {{ data['<filter>'] }}"),
+            m.cursor(tasks, "filter-member {{ data.filter }} / {{ data['filter'] }} / {{ data[\"<filter>\"] }}"),
+            m.cursor(tasks, "filter-condition {% if data.<filter> %}"),
+            m.cursor(tasks, "conditional-member {{ data | lower if enabled else other.<filter> }}"),
+            m.cursor(defaults, "  <filter>: filter-value"),
+        }, .reads = keyword_filter_reads, .with_definitions = keyword_filter_with_definitions },
+        .{ .origins = &.{
+            m.cursor(tasks, "is-member {{ data.<is> }}"),
+            m.cursor(tasks, "is-member {{ data.is }} / {{ data['<is>'] }}"),
+            m.cursor(tasks, "is-member {{ data.is }} / {{ data['is'] }} / {{ data[\"<is>\"] }}"),
+            m.cursor(tasks, "is-statement {% set saved = data.<is> %}"),
+            m.cursor(defaults, "  <is>: is-value"),
+        }, .reads = keyword_is_reads, .with_definitions = keyword_is_with_definitions },
+        .{ .origins = &.{
+            m.cursor(tasks, "true-member {{ data.<true> }}"),
+            m.cursor(tasks, "true-member {{ data.true }} / {{ data['<true>'] }}"),
+            m.cursor(tasks, "true-member {{ data.true }} / {{ data['true'] }} / {{ data[\"<true>\"] }}"),
+            m.cursor(tasks, "when: data.<true>"),
+            m.cursor(defaults, "  \"<true>\": true-value"),
+        }, .reads = keyword_true_reads, .with_definitions = keyword_true_with_definitions },
+    };
+    var failures: usize = 0;
+    for (groups) |group| {
+        checkGroup(group.origins, group.reads, group.with_definitions) catch {
+            failures += 1;
+        };
+    }
+    checkGroup(&.{
+        m.cursor(tasks, "filter-operator {{ data | <filter> }}"),
+        m.cursor(tasks, "qualified-filter-operator {{ data | <acme>.is.filter"),
+        m.cursor(tasks, "qualified-filter-operator {{ data | acme.<is>.filter"),
+        m.cursor(tasks, "qualified-filter-operator {{ data | acme.is.<filter>"),
+        m.cursor(tasks, "test-operator {{ data is <true> }}"),
+        m.cursor(tasks, "qualified-test-operator {{ data is not <acme>.filter.true"),
+        m.cursor(tasks, "qualified-test-operator {{ data is not acme.<filter>.true"),
+        m.cursor(tasks, "qualified-test-operator {{ data is not acme.filter.<true>"),
+        m.cursor(tasks, "keyword-filter-block {% filter <filter> %}"),
+        m.cursor(tasks, "trimmed-filter-block {%- filter <acme>.is.filter"),
+        m.cursor(tasks, "trimmed-filter-block {%- filter acme.<is>.filter"),
+        m.cursor(tasks, "trimmed-filter-block {%- filter acme.is.<filter>"),
+        m.cursor(tasks, "keyword-method {{ data.<filter>() }}"),
+        m.cursor(tasks, "conditional-member {{ data | <lower> if enabled"),
+    }, &.{}, &.{}) catch {
+        failures += 1;
+    };
+    checkGroup(&.{
+        m.cursor(tasks, "conditional-member {{ data | lower if <enabled> else"),
+    }, &.{
+        m.span(tasks, "conditional-member {{ data | lower if <enabled> else"),
+    }, &.{
+        m.span(tasks, "conditional-member {{ data | lower if <enabled> else"),
+    }) catch {
+        failures += 1;
+    };
+    try std.testing.expectEqual(@as(usize, 0), failures);
+}
+
 /// Both reference modes have separate, complete written answers. Every origin
 /// sees the same Workspace-wide leaf-NAME group, not receiver object identity.
 fn checkGroup(origins: []const m.Anchor, reads: []const m.ExpectedLocation, with_definitions: []const m.ExpectedLocation) !void {

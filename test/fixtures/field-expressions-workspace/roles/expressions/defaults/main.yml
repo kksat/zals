@@ -19,3 +19,7 @@ context_field: root-context
 filter_blocks:
   block_field: stored-block
 block_field: root-block
+keyword_members:
+  filter: filter-value
+  is: is-value
+  "true": true-value

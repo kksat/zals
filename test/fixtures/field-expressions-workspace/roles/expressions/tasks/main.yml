@@ -62,3 +62,20 @@
       plain-block {% filter block_field %}text{% endfilter %}
       qualified-block {% filter acme.tools.block_field %}text{% endfilter %}
       argument-block {% filter acme.tools.apply(other['block_field']) %}text{% endfilter %}
+- name: Keyword-like data members are ordinary fields, not plugin names
+  ansible.builtin.debug:
+    msg: |-
+      filter-member {{ data.filter }} / {{ data['filter'] }} / {{ data["filter"] }}
+      filter-condition {% if data.filter %}yes{% endif %}
+      is-member {{ data.is }} / {{ data['is'] }} / {{ data["is"] }}
+      is-statement {% set saved = data.is %}
+      true-member {{ data.true }} / {{ data['true'] }} / {{ data["true"] }}
+      filter-operator {{ data | filter }}
+      qualified-filter-operator {{ data | acme.is.filter }}
+      test-operator {{ data is true }}
+      qualified-test-operator {{ data is not acme.filter.true }}
+      keyword-filter-block {% filter filter %}text{% endfilter %}
+      trimmed-filter-block {%- filter acme.is.filter -%}text{% endfilter %}
+      keyword-method {{ data.filter() }}
+      conditional-member {{ data | lower if enabled else other.filter }}
+  when: data.true
