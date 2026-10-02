@@ -10,3 +10,6 @@ filter_field: root-filter
 methods:
   method_field: stored-value
 method_field: root-method
+literals:
+  literal_field: stored-literal
+literal_field: root-literal

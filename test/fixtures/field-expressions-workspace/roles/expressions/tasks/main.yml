@@ -24,3 +24,16 @@
       double-call {{ item[ "method_field" ] () }}
       returned-field {{ item.invoke().method_field }}
       method-argument {{ item.invoke(other['method_field']) }}
+- name: Strings and comments do not read fields
+  ansible.builtin.debug:
+    msg: |-
+      genuine {{ record.literal_field }}
+      single-string {{ 'record.literal_field' }}
+      double-string {{ "record.literal_field" }}
+      escaped-single {{ 'it\'s record.literal_field' }}
+      escaped-double {{ "say \"record.literal_field\"" }}
+      literal-list {{ ['literal_field', "literal_field"] }}
+      literal-map {{ {'literal_field': "literal_field"} }}
+      {# comment {{ record.literal_field }} #}
+      outside record.literal_field
+    # YAML comment {{ record.literal_field }}

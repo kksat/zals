@@ -189,8 +189,8 @@ fn skipString(text: []const u8, start: usize) usize {
     const quote = text[start];
     var i = start + 1;
     while (i < text.len) {
-        if (text[i] == '\\' and quote == '"') {
-            i += 2;
+        if (text[i] == '\\') {
+            i = @min(i + 2, text.len);
             continue;
         }
         if (text[i] == quote) return i + 1;

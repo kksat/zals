@@ -73,3 +73,17 @@ DEVELOPER_DIR=/nonexistent zig test test/e2e.zig
   call's argument and result expressions normally.
 - **GREEN:** independent suite 3/3; `make test` passed; semantic suite
   **338 cases, 0 failures**.
+
+## Slice 4 — strings and comments
+
+- Added one test with complete genuine-read/key answers and eleven negative
+  cursors: single/double strings, escaped quotes, literal list/map strings,
+  Jinja comments, YAML comments, and non-expression text.
+- **RED:** previous lexical commit, independent suite 3 passed / 1 failed.
+  The escaped single-quoted string leaked a false field read; both negative
+  requests failed (2/3 locations rather than none).
+  Log: `/tmp/field-expressions-slice4-red.log`.
+- **Smallest fix:** honor backslash escapes in both Jinja quote styles, keeping
+  the string skip bounded by the expression length.
+- **GREEN:** independent suite 4/4; `make test` passed; semantic suite
+  **338 cases, 0 failures**.

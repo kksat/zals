@@ -111,6 +111,34 @@ test "stdio called methods are not field reads but their arguments and return-va
     }, method_reads, method_with_definitions);
 }
 
+const literal_reads: []const m.ExpectedLocation = &.{
+    m.span(tasks, "genuine {{ record.<literal_field> }}"),
+};
+const literal_with_definitions: []const m.ExpectedLocation = &.{
+    m.span(tasks, "genuine {{ record.<literal_field> }}"),
+    m.span(defaults, "  <literal_field>: stored-literal"),
+};
+
+test "stdio quoted strings and comments are not field reads" {
+    try checkGroup(&.{
+        m.cursor(tasks, "single-string {{ 'record.<literal_field>' }}"),
+        m.cursor(tasks, "double-string {{ \"record.<literal_field>\" }}"),
+        m.cursor(tasks, "escaped-single {{ 'it\\'s record.<literal_field>' }}"),
+        m.cursor(tasks, "escaped-double {{ \"say \\\"record.<literal_field>\\\"\" }}"),
+        m.cursor(tasks, "literal-list {{ ['<literal_field>',"),
+        m.cursor(tasks, "literal-list {{ ['literal_field', \"<literal_field>\"]"),
+        m.cursor(tasks, "literal-map {{ {'<literal_field>':"),
+        m.cursor(tasks, "literal-map {{ {'literal_field': \"<literal_field>\"}"),
+        m.cursor(tasks, "{# comment {{ record.<literal_field> }} #}"),
+        m.cursor(tasks, "outside record.<literal_field>"),
+        m.cursor(tasks, "# YAML comment {{ record.<literal_field> }}"),
+    }, &.{}, &.{});
+    try checkGroup(&.{
+        m.cursor(tasks, "genuine {{ record.<literal_field> }}"),
+        m.cursor(defaults, "  <literal_field>: stored-literal"),
+    }, literal_reads, literal_with_definitions);
+}
+
 /// Both reference modes have separate, complete written answers. Every origin
 /// sees the same Workspace-wide leaf-NAME group, not receiver object identity.
 fn checkGroup(origins: []const m.Anchor, reads: []const m.ExpectedLocation, with_definitions: []const m.ExpectedLocation) !void {
