@@ -165,7 +165,8 @@ option that declares its contract.
 _Avoid_: field assignment, property declaration
 
 **Field reference**:
-A read of a Variable field through member access in a Jinja expression.
+A read of a Variable field through dot access or a static quoted subscript in a
+Jinja expression. Raw-block contents and field assignment targets are not reads.
 _Avoid_: field usage, property access
 
 **Variable implementation**:
@@ -188,7 +189,9 @@ _Avoid_: reference occurrence, variable usage, variable use, variable mention
 
 **Jinja expression**:
 Text delimited by `{{ … }}` or `{% … %}`. Root identifiers and field reads are
-navigation occurrences; filter and test names are not.
+navigation occurrences; raw literals, filter and test names, called members,
+and field write targets are not field reads. YAML scalar quoting is normalized
+before scanning without changing reported source positions.
 _Avoid_: template, interpolation
 
 **Bare-expression key**:

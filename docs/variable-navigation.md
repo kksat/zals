@@ -55,6 +55,12 @@ expressions are included. Strings/comments, filter/test plugin names (including
 qualified names), called methods, and numeric/computed subscripts are not field
 reads; a dynamic subscript such as `record[key]` reads the root variable `key`.
 Keyword-spelled data members such as `record.filter` remain real fields.
+YAML quoting is normalized before scanning: both
+`"{{ record[\"region\"] }}"` and `'{{ record[''region''] }}'` identify the
+`region` field. Reported ranges remain in the original document, including
+escaped spellings and UTF-16 positions. Jinja raw-block contents are literal,
+and the left field in `{% set ns.region = other.region %}` is a write, not a
+field reference; the RHS remains a read.
 Static key literals retain their raw contents: Jinja escape-decoded aliases
 (such as `record['\\u0072egion']`) are not normalized into the `region` group.
 A field without a declaration still finds its reads; its hover reports that no
@@ -66,8 +72,7 @@ package, requirements, or execution-environment metadata keys. A data key named
 `vars`, `roles`, or `set_fact` inside a structured value does not introduce a
 second binding scope. Module argument data is not a variable binding either;
 only actual play/task/block containers and recognized binding maps are followed.
-YAML aliases,
-object identity, and loop aliases are not expanded or traced. The same Workspace,
+YAML aliases, object identity, and loop aliases are not expanded or traced. The same Workspace,
 open-buffer, and no-session boundaries as root variables apply. See
 [ADR-0041](adr/0041-field-name-navigation.md).
 
@@ -116,6 +121,9 @@ callee or schema-only field has no callee implementation. If no selected
 full-path option exists, definition/hover retain ordinary name-based fallback;
 a generic fallback hover is labeled **Variable field**, not **Role parameter
 field**. Metadata, defaults, and vars overlays supersede disk ranges and values.
+Indexed callee implementations reuse stored full-path facts and vars-load
+provenance; changed task/load/value buffers override them without reparsing the
+callee's disk file set.
 See [ADR-0042](adr/0042-passed-role-field-navigation.md).
 
 ### What is the same from every site?

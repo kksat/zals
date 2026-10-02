@@ -17,7 +17,15 @@ not add a path component. Nested argument-spec `options:` declare schema fields;
 properties such as `type`, `description`, and `default` are not themselves field
 definitions. Package and execution-environment metadata maps are not variable
 values. A field retains its root-and-key path even though ordinary matching uses
-only its leaf name.
+only its leaf name. Reserved data keys inside a bound value do not establish
+another binding scope; module argument values are not variable bindings.
+
+Dot access and static quoted subscripts share a name group. YAML scalar quoting
+is normalized before expression scanning with original-source byte spans, so
+escaped/doubled quote encodings preserve the same field identity and UTF-16
+locations. This is separate from decoding Jinja literal-key escapes, which is
+not supported. Raw-block contents are literal; `set` field targets are writes,
+not field reads. Genuine RHS/capture reads remain eligible.
 
 References have complete, identical answers from each recognized field read or
 key in a Workspace. Declarations off returns reads; declarations on also returns

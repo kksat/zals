@@ -106,6 +106,12 @@ pub fn build(b: *std.Build) void {
             .inputs = &.{"test/fixtures/field-expressions-workspace"},
         },
         .{
+            .name = "field-lexical-boundaries-e2e",
+            .source = "test/field_lexical_boundaries_e2e.zig",
+            .description = "Run raw-block and field-assignment lexical boundary tests",
+            .inputs = &.{"test/fixtures/field-lexical-boundaries-workspace"},
+        },
+        .{
             .name = "selected-venv-e2e",
             .source = "test/selected_venv_e2e.zig",
             .description = "Run selected virtual environment and module docs tests",

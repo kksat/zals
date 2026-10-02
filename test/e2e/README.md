@@ -28,6 +28,9 @@ explicit origin; a role or entry-point context does not narrow root references.
 Field cases exercise both declaration modes and ordered definition/implementation
 plus hover from every read, concrete key, and nested schema key in a small group.
 Schema-only, metadata, unbound, and same-named-root cases are deliberate controls.
+Escaped YAML keys retain quote-free source ranges. Reserved data keys such as
+`vars` do not introduce duplicate bindings; task-vars, vars-file, set-fact,
+and passed-role values exercise all actions, with module-argument negatives.
 Passed-field cases check full-path callee/entry-point targets, lists and quoted
 YAML keys, intermediate dictionaries, and negative collisions. Both complete
 reference answers are requested from all 27 explicit sites of a field group,
@@ -44,15 +47,18 @@ files on disk.
 | Build target | Test root | Contract |
 | --- | --- | --- |
 | `navigation-e2e` | `test/e2e.zig` | Read-only semantic navigation with complete written location oracles |
-| `field-expressions-e2e` | `test/field_expressions_e2e.zig` | Dot/static-subscript reads, expression contexts, literal/plugin/method negatives |
-| `field-parameter-edits-e2e` | `test/field_parameter_edits_e2e.zig` | Changed full-path contracts/values and complete Workspace field references |
+| `field-expressions-e2e` | `test/field_expressions_e2e.zig` | Dot/static-subscript reads, YAML quoting/source spans, expression contexts, literal/plugin/method negatives |
+| `field-lexical-boundaries-e2e` | `test/field_lexical_boundaries_e2e.zig` | Raw literals, field-assignment targets, genuine RHS/capture reads, whitespace markers |
+| `field-parameter-edits-e2e` | `test/field_parameter_edits_e2e.zig` | Changed full-path contracts/values, complete Workspace references, and callee vars-load overlays |
 | `role-parameter-edits-e2e` | `test/role_parameter_edits_e2e.zig` | Unsaved argument-spec ranges and hover |
 | `collection-symbols-e2e` | `test/collection_symbols_e2e.zig` | Collection layouts, member symbols, open buffers, and watcher boundaries |
 | `navigation-uris-e2e` | `test/navigation_uris_e2e.zig` | Absolute and escaped targets from relative/absolute search paths |
 | `selected-venv-e2e` | `test/selected_venv_e2e.zig` | Selected installations, per-file module docs, discovery, and cache isolation |
 
 Field-expression RED/GREEN evidence and literal-escape limitations are recorded
-in [`test/field_expressions_e2e.md`](../field_expressions_e2e.md).
+in [`test/field_expressions_e2e.md`](../field_expressions_e2e.md). Raw/assignment
+boundary evidence is in
+[`test/field_lexical_boundaries_e2e.md`](../field_lexical_boundaries_e2e.md).
 
 The last suite requires `ansible` and `ansible-doc` on PATH (see
 [`test/selected_venv_e2e.md`](../selected_venv_e2e.md)); the other suites do not
