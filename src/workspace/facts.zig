@@ -36,6 +36,10 @@ pub const RoleRef = struct {
 pub const Facts = struct {
     var_defs: []const Definition = &.{},
     var_refs: []const Span = &.{},
+    /// Nested mapping keys in recognized variable values.
+    field_defs: []const variables.fields.Definition = &.{},
+    /// Member reads, name-matched independently of their receiver.
+    field_refs: []const Span = &.{},
     /// Role references (role invocations, `include_role`/`import_role`
     /// names, role dependencies).
     role_refs: []const RoleRef = &.{},
@@ -74,6 +78,14 @@ pub fn extractIn(a: Allocator, root: ?[]const u8, path: []const u8, text: []cons
     const refs = try a.alloc(Span, idents.items.len);
     for (idents.items, 0..) |r, i| refs[i] = .{ .name = try a.dupe(u8, r.name), .start = r.start, .end = r.end };
 
+    var field_defs = std.array_list.Managed(variables.fields.Definition).init(a);
+    variables.fields.collect(a, &forest, path, variables.scope.fileKind(path, role_resolve.enclosingRole(path)), &field_defs) catch {};
+
+    var field_idents = std.array_list.Managed(variables.jinja.Ident).init(a);
+    variables.index.collectFieldReferences(a, &forest, &field_idents) catch {};
+    const field_refs = try a.alloc(Span, field_idents.items.len);
+    for (field_idents.items, 0..) |r, i| field_refs[i] = .{ .name = try a.dupe(u8, r.name), .start = r.start, .end = r.end };
+
     var role_refs = std.array_list.Managed(RoleRef).init(a);
     for (forest.roots) |r| try walkRoleRefs(a, &forest, path, r, &role_refs);
 
@@ -84,6 +96,8 @@ pub fn extractIn(a: Allocator, root: ?[]const u8, path: []const u8, text: []cons
     return .{
         .var_defs = try defs.toOwnedSlice(),
         .var_refs = refs,
+        .field_defs = try field_defs.toOwnedSlice(),
+        .field_refs = field_refs,
         .role_refs = try role_refs.toOwnedSlice(),
         .var_loads = var_loads,
         .file_refs = file_refs.collect(a, &forest, path, root) catch &.{},

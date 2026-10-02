@@ -3,7 +3,8 @@
 - **Status:** Accepted
 - **Date:** 2025-09-18
 - **Supersedes:** —
-- **Superseded by:** in part by ADR-0032 (search boundary)
+- **Superseded by:** in part by ADR-0032 (search boundary),
+  [ADR-0041](0041-field-name-navigation.md) (separate field-name references)
 
 ## Context
 
@@ -32,6 +33,8 @@ targets and `meta/main.yml`.
 `failed_when`, `until`, `loop`, `with_*`, and `assert.that`. Only root
 identifiers count; attributes, filters, and tests do not. Dynamic access
 (`vars['x']`, `lookup('vars', …)`, `hostvars[…]`) is out of scope.
+ADR-0041 adds a separate group for field reads and parsed nested keys; it does
+not turn fields into root-variable references or infer runtime binding identity.
 
 **`includeDeclaration`.** When true, return every variable definition in the
 file set alongside the references. Definitions are peers; the cursor's own

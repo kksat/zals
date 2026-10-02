@@ -54,23 +54,34 @@ pub fn scanScalar(
     base: usize,
     out: *std.array_list.Managed(Ident),
 ) !void {
+    return scanScalarNames(allocator, raw, base, .roots, out);
+}
+
+/// Field names read through member access, separately from root identifiers.
+pub fn scanScalarFields(allocator: Allocator, raw: []const u8, base: usize, out: *std.array_list.Managed(Ident)) !void {
+    return scanScalarNames(allocator, raw, base, .fields, out);
+}
+
+const Names = enum { roots, fields };
+
+fn scanScalarNames(allocator: Allocator, raw: []const u8, base: usize, names: Names, out: *std.array_list.Managed(Ident)) !void {
     var i: usize = 0;
     while (i < raw.len) {
         if (i + 1 < raw.len and raw[i] == '{' and raw[i + 1] == '{') {
             const body_start = i + 2;
             const rel = std.mem.indexOf(u8, raw[body_start..], "}}") orelse {
-                try scanExpression(allocator, raw[body_start..], base + body_start, out);
+                try scanExpressionNames(allocator, raw[body_start..], base + body_start, names, out);
                 return;
             };
-            try scanExpression(allocator, raw[body_start .. body_start + rel], base + body_start, out);
+            try scanExpressionNames(allocator, raw[body_start .. body_start + rel], base + body_start, names, out);
             i = body_start + rel + 2;
         } else if (i + 1 < raw.len and raw[i] == '{' and raw[i + 1] == '%') {
             const body_start = i + 2;
             const rel = std.mem.indexOf(u8, raw[body_start..], "%}") orelse {
-                try scanExpression(allocator, raw[body_start..], base + body_start, out);
+                try scanExpressionNames(allocator, raw[body_start..], base + body_start, names, out);
                 return;
             };
-            try scanExpression(allocator, raw[body_start .. body_start + rel], base + body_start, out);
+            try scanExpressionNames(allocator, raw[body_start .. body_start + rel], base + body_start, names, out);
             i = body_start + rel + 2;
         } else if (i + 1 < raw.len and raw[i] == '{' and raw[i + 1] == '#') {
             const rel = std.mem.indexOf(u8, raw[i + 2 ..], "#}") orelse return;
@@ -88,6 +99,14 @@ pub fn scanExpression(
     base: usize,
     out: *std.array_list.Managed(Ident),
 ) !void {
+    return scanExpressionNames(allocator, text, base, .roots, out);
+}
+
+pub fn scanExpressionFields(allocator: Allocator, text: []const u8, base: usize, out: *std.array_list.Managed(Ident)) !void {
+    return scanExpressionNames(allocator, text, base, .fields, out);
+}
+
+fn scanExpressionNames(allocator: Allocator, text: []const u8, base: usize, names: Names, out: *std.array_list.Managed(Ident)) !void {
     _ = allocator;
     const Prev = enum { other, dot, pipe, is_test };
     var prev: Prev = .other;
@@ -124,9 +143,10 @@ pub fn scanExpression(
             } else if (isKeyword(word)) {
                 prev = .other;
             } else if (prev == .dot or prev == .pipe or prev == .is_test) {
+                if (prev == .dot and names == .fields) try out.append(.{ .name = word, .start = base + i, .end = base + j });
                 prev = .other;
             } else {
-                try out.append(.{ .name = word, .start = base + i, .end = base + j });
+                if (names == .roots) try out.append(.{ .name = word, .start = base + i, .end = base + j });
                 prev = .other;
             }
             i = j;

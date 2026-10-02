@@ -5,6 +5,7 @@ const std = @import("std");
 
 pub const jinja = @import("jinja.zig");
 pub const definitions = @import("definitions.zig");
+pub const fields = @import("fields.zig");
 pub const scope = @import("scope.zig");
 pub const source = @import("source.zig");
 pub const index = @import("index.zig");

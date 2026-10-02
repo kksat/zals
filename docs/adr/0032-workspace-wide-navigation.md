@@ -14,7 +14,8 @@
   [ADR-0037](0037-selected-venv-collections.md) (selected installations and
   contextual module services), [ADR-0038](0038-workspace-collection-members.md)
   (metadata-defined collection roots and public source symbols), and
-  [ADR-0039](0039-role-parameter-navigation.md) (callee parameter navigation).
+  [ADR-0039](0039-role-parameter-navigation.md) (callee parameter navigation),
+  [ADR-0041](0041-field-name-navigation.md) (separate field-name navigation).
   [ADR-0040](0040-navigation-file-uris.md) defines file-URI serialization.
 
 ## Context

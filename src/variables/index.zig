@@ -49,6 +49,63 @@ pub const Index = struct {
         return .{ .allocator = allocator, .source = source };
     }
 
+    /// A field read or key, in a separate name group from root variables.
+    pub fn fieldOccurrenceAt(self: *Index, a: Allocator, uri: []const u8, offset: usize) !?Cursor {
+        const scan = try self.scanFile(a, uri, try scope.uriToPath(a, uri));
+        for (scan.field_defs) |d| {
+            if (d.start <= offset and offset <= d.end) return .{
+                .name = d.name,
+                .kind = .definition,
+                .start = d.start,
+                .end = d.end,
+            };
+        }
+        for (scan.field_refs) |r| {
+            if (r.start <= offset and offset <= r.end) return .{
+                .name = r.name,
+                .kind = .reference,
+                .start = r.start,
+                .end = r.end,
+            };
+        }
+        return null;
+    }
+
+    pub fn fieldOccurrences(self: *Index, a: Allocator, uri: []const u8, name: []const u8) ![]Occurrence {
+        const files = try self.fileSet(a, uri);
+        var out = std.array_list.Managed(Occurrence).init(a);
+        for (files.uris) |file_uri| {
+            const path = try scope.uriToPath(a, file_uri);
+            const scan = try self.scanFile(a, file_uri, path);
+            for (scan.field_defs) |d| {
+                if (!std.mem.eql(u8, d.name, name)) continue;
+                var site = d.site;
+                for (files.loads) |load| {
+                    if (std.mem.eql(u8, load.path, path) and load.site.rank() < site.rank()) site = load.site;
+                }
+                try out.append(.{ .uri = file_uri, .start = d.start, .end = d.end, .kind = .definition, .site = site });
+            }
+            for (scan.field_refs) |r| {
+                if (std.mem.eql(u8, r.name, name)) try out.append(.{
+                    .uri = file_uri,
+                    .start = r.start,
+                    .end = r.end,
+                    .kind = .reference,
+                });
+            }
+        }
+        return out.toOwnedSlice();
+    }
+
+    pub fn fieldDefinitions(self: *Index, a: Allocator, uri: []const u8, name: []const u8) ![]Occurrence {
+        var out = std.array_list.Managed(Occurrence).init(a);
+        for (try self.fieldOccurrences(a, uri, name)) |occurrence| {
+            if (occurrence.kind == .definition) try out.append(occurrence);
+        }
+        std.mem.sort(Occurrence, out.items, {}, lessByRank);
+        return out.toOwnedSlice();
+    }
+
     /// The variable occurrence under `offset` in `uri`, or null.
     pub fn occurrenceAt(self: *Index, a: Allocator, uri: []const u8, offset: usize) !?Cursor {
         const path = try scope.uriToPath(a, uri);
@@ -149,6 +206,8 @@ pub const Index = struct {
     const FileScan = struct {
         definitions: []Definition,
         references: []jinja.Ident,
+        field_refs: []jinja.Ident = &.{},
+        field_defs: []@import("fields.zig").Definition = &.{},
     };
 
     fn scanFile(self: *Index, a: Allocator, uri: []const u8, path: []const u8) !FileScan {
@@ -162,9 +221,15 @@ pub const Index = struct {
         var refs = std.array_list.Managed(jinja.Ident).init(a);
         for (forest.roots) |root| try collectRefs(a, root, forest.text, &refs);
 
+        var field_refs = std.array_list.Managed(jinja.Ident).init(a);
+        try collectFieldReferences(a, &forest, &field_refs);
+        var field_defs = std.array_list.Managed(@import("fields.zig").Definition).init(a);
+        try @import("fields.zig").collect(a, &forest, path, scope.fileKind(path, scope.roleRoot(a, self.source, path)), &field_defs);
         return .{
             .definitions = try dupeDefinitions(a, defs.items),
             .references = try dupeIdents(a, refs.items),
+            .field_refs = try dupeIdents(a, field_refs.items),
+            .field_defs = try field_defs.toOwnedSlice(),
         };
     }
 
@@ -251,7 +316,7 @@ fn collectRefs(
     text: []const u8,
     out: *std.array_list.Managed(jinja.Ident),
 ) !void {
-    try walkRefs(a, node, text, out, false);
+    try walkRefs(a, node, text, out, false, .roots);
 }
 
 /// Every variable reference in `forest`: Jinja root identifiers and names in
@@ -260,12 +325,19 @@ pub fn collectReferences(a: Allocator, forest: *const dom.Forest, out: *std.arra
     for (forest.roots) |root| try collectRefs(a, root, forest.text, out);
 }
 
+pub fn collectFieldReferences(a: Allocator, forest: *const dom.Forest, out: *std.array_list.Managed(jinja.Ident)) !void {
+    for (forest.roots) |root| try walkRefs(a, root, forest.text, out, false, .fields);
+}
+
+const RefNames = enum { roots, fields };
+
 fn walkRefs(
     a: Allocator,
     node: *const Node,
     text: []const u8,
     out: *std.array_list.Managed(jinja.Ident),
     bare: bool,
+    names: RefNames,
 ) !void {
     switch (node.kind) {
         .map => {
@@ -273,14 +345,14 @@ fn walkRefs(
                 const key = if (pair.key) |k| k.stringValue() orelse continue else continue;
                 const val = pair.val orelse continue;
                 const is_bare = isBareExprKey(key);
-                if (is_bare) try scanBare(a, val, text, out);
-                try walkRefs(a, val, text, out, is_bare);
+                if (is_bare) try scanBare(a, val, text, out, names);
+                try walkRefs(a, val, text, out, is_bare, names);
             }
         },
-        .seq => for (node.items) |item| try walkRefs(a, item, text, out, bare),
+        .seq => for (node.items) |item| try walkRefs(a, item, text, out, bare, names),
         .scalar => if (!bare) {
             const st = scalarText(node, text);
-            try jinja.scanScalar(a, st.s, st.base, out);
+            if (names == .fields) try jinja.scanScalarFields(a, st.s, st.base, out) else try jinja.scanScalar(a, st.s, st.base, out);
         },
         else => {},
     }
@@ -291,15 +363,16 @@ fn scanBare(
     node: *const Node,
     text: []const u8,
     out: *std.array_list.Managed(jinja.Ident),
+    names: RefNames,
 ) !void {
     if (node.isScalar()) {
         const st = scalarText(node, text);
-        try jinja.scanExpression(a, st.s, st.base, out);
+        if (names == .fields) try jinja.scanExpressionFields(a, st.s, st.base, out) else try jinja.scanExpression(a, st.s, st.base, out);
     } else if (node.isSeq()) {
         for (node.items) |item| {
             if (!item.isScalar()) continue;
             const st = scalarText(item, text);
-            try jinja.scanExpression(a, st.s, st.base, out);
+            if (names == .fields) try jinja.scanExpressionFields(a, st.s, st.base, out) else try jinja.scanExpression(a, st.s, st.base, out);
         }
     }
 }

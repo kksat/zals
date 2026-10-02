@@ -7,7 +7,7 @@ source files with
 their unchanged on-disk contents. It does not install collections, copy the
 fixture, run Ansible, send edits, or test file watching.
 
-Cases live in `cases/{roles,collections,files,variables,role_parameters}.zig`. Each named case
+Cases live in `cases/{roles,collections,files,variables,role_parameters,fields}.zig`. Each named case
 spells out its full expected locations. `cursor(path, "...<selected>...")`
 selects a unique source snippet; `span(...)` marks a unique expected range;
 `fileStart(path)` expects the zero-width range at the start of a file. Markers
@@ -25,6 +25,9 @@ Hover cases assert exact cursor ranges plus independently specified Markdown
 excerpts and deliberate non-matches. The parameter cases also enumerate a
 sixteen-site root-variable group and verify both declaration modes from every
 explicit origin; a role or entry-point context does not narrow root references.
+Field cases exercise both declaration modes and ordered definition/implementation
+plus hover from every read, concrete key, and nested schema key in a small group.
+Schema-only, metadata, unbound, and same-named-root cases are deliberate controls.
 The separate `test/role_parameter_edits_e2e.zig` stdio scenario checks unsaved
 argument-spec documentation and shifted key ranges without changing fixture
 files on disk.

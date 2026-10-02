@@ -4,7 +4,8 @@
 - **Date:** 2025-09-18
 - **Supersedes:** —
 - **Superseded by:** in part by ADR-0031 (parse cache), ADR-0032 (search boundary),
-  [ADR-0036](0036-variable-navigation-from-bindings.md) (binding-key trigger)
+  [ADR-0036](0036-variable-navigation-from-bindings.md) (binding-key trigger),
+  [ADR-0041](0041-field-name-navigation.md) (separate field-name navigation)
 
 ## Context
 
@@ -28,6 +29,8 @@ expression (`{{ … }}`, `{% … %}`) or a bare name in an expression-valued key
 `assert.that`. All other keys are literal strings where only `{{ … }}` counts.
 Within an expression, only **root** identifiers resolve; an attribute (`name` in
 `user.name`) or filter (`default` in `x | default(y)`) returns no definition.
+ADR-0041 supersedes the attribute exclusion with a separate field-name group;
+filter/test plugin names remain excluded.
 
 **In-scope definition sites.**
 

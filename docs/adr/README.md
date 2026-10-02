@@ -45,6 +45,7 @@ Each ADR captures one decision, its context, and its consequences. Statuses are
 | [0038](0038-workspace-collection-members.md) | Workspace collection identity and members | Accepted |
 | [0039](0039-role-parameter-navigation.md) | Role parameter navigation | Accepted |
 | [0040](0040-navigation-file-uris.md) | Absolute, escaped navigation file URIs | Accepted |
+| [0041](0041-field-name-navigation.md) | Field-name navigation | Accepted |
 
 ## Template
 

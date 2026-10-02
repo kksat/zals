@@ -1,0 +1,4 @@
+---
+field_instances:
+  - resourcegroup_name: default-group
+unbound_field: unrelated-root-value

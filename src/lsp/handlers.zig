@@ -144,6 +144,7 @@ fn resolveResult(self: *Server, a: Allocator, params: Value) !Value {
 
 fn hoverResult(self: *Server, a: Allocator, params: Value) !Value {
     const loc = documentOffset(self, params) orelse return Value.null;
+    if (try providers.field_navigation.hover(self, a, params)) |h| return encode.hover(a, h);
     var opened = cursor.Doc.open(a, loc.doc.bytes()) catch return Value.null;
     defer opened.deinit();
     const lib = try self.docsForUri(a, loc.doc.uri);

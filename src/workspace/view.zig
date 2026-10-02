@@ -78,6 +78,56 @@ pub fn occurrences(a: Allocator, files: []const File, name: []const u8) ![]Occur
     return out.toOwnedSlice();
 }
 
+/// Field names are grouped independently of root variables and receivers.
+pub fn fieldOccurrences(a: Allocator, files: []const File, name: []const u8) ![]Occurrence {
+    var out = std.array_list.Managed(Occurrence).init(a);
+    for (files) |f| {
+        for (f.facts.field_defs) |def| {
+            if (std.mem.eql(u8, def.name, name)) try out.append(.{
+                .uri = f.uri,
+                .path = f.path,
+                .start = def.start,
+                .end = def.end,
+                .kind = .definition,
+                .site = def.site,
+            });
+        }
+        for (f.facts.field_refs) |ref| {
+            if (std.mem.eql(u8, ref.name, name)) try out.append(.{
+                .uri = f.uri,
+                .path = f.path,
+                .start = ref.start,
+                .end = ref.end,
+                .kind = .reference,
+            });
+        }
+    }
+    std.mem.sort(Occurrence, out.items, {}, lessPosition);
+    return out.toOwnedSlice();
+}
+
+pub fn fieldDefinitions(a: Allocator, files: []const File, name: []const u8, reachable: Reachability) ![]Occurrence {
+    const all = try fieldOccurrences(a, files, name);
+    var near = std.array_list.Managed(Occurrence).init(a);
+    var far = std.array_list.Managed(Occurrence).init(a);
+    for (all) |occurrence| {
+        if (occurrence.kind != .definition) continue;
+        var copy = occurrence;
+        if (contains(reachable.paths, occurrence.path)) {
+            copy.reachable = true;
+            if (reachable.loadSite(occurrence.path)) |site| {
+                if (copy.site == null or site.rank() < copy.site.?.rank()) copy.site = site;
+            }
+            try near.append(copy);
+        } else {
+            try far.append(copy);
+        }
+    }
+    std.mem.sort(Occurrence, near.items, {}, lessRank);
+    try near.appendSlice(far.items);
+    return near.toOwnedSlice();
+}
+
 /// Paths whose definitions can apply in the file at `path` (the Reachable
 /// definitions of `CONTEXT.md`): the file's role scope (every file under
 /// `role_dir`) or the file itself, the files whose references resolve to

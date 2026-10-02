@@ -147,6 +147,21 @@ names; role `meta/main.yml` `argument_specs` options; and role invocation params
 in a playbook's `roles:` entry.
 _Avoid_: definition site, declaration, binding, assignment
 
+**Variable field**:
+A named key within a Variable's structured value, also described by a nested
+argument-spec option. Field names are matched within the owning Workspace,
+separately from root Variable names, rather than by runtime object identity.
+_Avoid_: nested variable, attribute, property
+
+**Field definition**:
+A mapping key that supplies a Variable field's value, or a nested argument-spec
+option that declares its contract.
+_Avoid_: field assignment, property declaration
+
+**Field reference**:
+A read of a Variable field through member access in a Jinja expression.
+_Avoid_: field usage, property access
+
 **Variable implementation**:
 A binding that can supply a Variable's runtime value, rather than an
 argument-spec declaration describing that value.
@@ -166,8 +181,8 @@ expression (`{{ … }}`, `{% … %}`) or as a bare name in an expression-valued 
 _Avoid_: reference occurrence, variable usage, variable use, variable mention
 
 **Jinja expression**:
-Text delimited by `{{ … }}` or `{% … %}`. Only root identifiers are references;
-attribute, filter, and test names are not.
+Text delimited by `{{ … }}` or `{% … %}`. Root identifiers and field reads are
+navigation occurrences; filter and test names are not.
 _Avoid_: template, interpolation
 
 **Bare-expression key**:

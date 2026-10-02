@@ -211,7 +211,7 @@ fn addScalar(
 
 /// Range of `name` within a scalar node's raw source, so quoted values report
 /// the identifier without the quotes.
-fn scalarRange(node: *const Node, text: []const u8, name: []const u8) struct { start: usize, end: usize } {
+pub fn scalarRange(node: *const Node, text: []const u8, name: []const u8) struct { start: usize, end: usize } {
     if (node.end <= text.len and node.start <= node.end) {
         const raw = text[node.start..node.end];
         if (std.mem.indexOf(u8, raw, name)) |off| {

@@ -26,6 +26,12 @@ entry points, per-task collection context, and unresolved/schema-only negatives.
 Their root-variable references remain Workspace-wide, while passed-key
 contracts and implementations stay specific to the called Role.
 
+`roles/field_nav` describes the same field in a list default, a quoted key
+under an unrelated vars root, and a nested argument-spec option. Two differently
+named receivers deliberately join that field-name group without loop tracing.
+Schema-only and unbound members, a same-named root variable, and metadata keys
+exercise the separate field/root groups and all four navigation actions.
+
 Files under `negative/` contain intentional non-matches or missing targets;
 positive playbooks remain structurally valid Ansible. The marker file is
 `fixture-workspace-root` because Git cannot check in a nested `.git` file.

@@ -30,6 +30,35 @@ argument-spec option it can open its default, vars value, or invocation value;
 a schema-only option has no implementation. From a Jinja-valued role name it
 navigates the variable binding, not a guessed role.
 
+## Ordinary fields
+
+Fields such as `item.resourcegroup_name` form a separate name group from root
+variables. Matching uses the **leaf field name** across receivers and structured
+bindings, not loop source or runtime object identity. `item.region` and
+`backup.region` therefore share a group; a root variable named `region` does not.
+
+| Request from a field read or key | Answer |
+| --- | --- |
+| Find references, declarations off | Every field read of the same leaf name in the owning Workspace |
+| Find references, declarations on | Those reads plus parsed concrete mapping keys and nested argument-spec options |
+| Go to definition | Reachable field keys in precedence order, then same-named keys elsewhere in the Workspace |
+| Go to implementation | The same ordered concrete keys, excluding schema-only argument-spec options |
+| Hover | Active and shadowed values, plus nested option descriptions and other Workspace candidates |
+
+Concrete keys are collected below recognized variable bindings: dictionaries,
+including those inside lists, in defaults, vars, and other supported binding
+sites. Quoted keys have unquoted navigation ranges and show their parsed values.
+A schema-only field has a definition and description, but no implementation.
+A field without a declaration still finds its reads; its hover reports that no
+definition was found rather than showing a same-named root variable's value.
+
+Argument-spec `options:` maps explicitly declare fields. Structural properties
+like `type`, `description`, and `default` are not themselves fields, nor are
+package, requirements, or execution-environment metadata keys. YAML aliases,
+object identity, and loop aliases are not expanded or traced. The same Workspace,
+open-buffer, and no-session boundaries as root variables apply. See
+[ADR-0041](adr/0041-field-name-navigation.md).
+
 ## Passed role parameters
 
 Keys passed through a `roles:` map entry (directly or under its `vars:`) and
@@ -60,6 +89,8 @@ See [ADR-0039](adr/0039-role-parameter-navigation.md).
 
 Given the same indexed/open-document state, **find-references has an identical
 complete answer from every read and binding of a root name in one Workspace**.
+Fields have the same symmetry within their separate leaf-name group, including
+fields passed through role invocations and include/import tasks.
 `includeDeclaration` only controls which kinds of occurrences are returned; it
 does not change which name or Workspace is searched.
 

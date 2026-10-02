@@ -60,7 +60,7 @@ pub fn hoverName(self: *Server, a: Allocator, uri: []const u8, name: []const u8,
     return .{ .contents = .{ .kind = .markdown, .value = try render(a, name, entries.items, root) }, .range = range };
 }
 
-const Entry = struct {
+pub const Entry = struct {
     uri: []const u8,
     line: usize,
     site: ?variables.Site,
@@ -81,8 +81,16 @@ fn describe(a: Allocator, v: *wv.View, uri: []const u8, start: usize, site: ?var
 
 /// Markdown for the definitions of `name`, reachable ones first.
 pub fn render(a: Allocator, name: []const u8, entries: []const Entry, root: ?[]const u8) ![]const u8 {
+    return renderNamed(a, "Variable", name, entries, root);
+}
+
+pub fn renderField(a: Allocator, name: []const u8, entries: []const Entry, root: ?[]const u8) ![]const u8 {
+    return renderNamed(a, "Variable field", name, entries, root);
+}
+
+fn renderNamed(a: Allocator, label: []const u8, name: []const u8, entries: []const Entry, root: ?[]const u8) ![]const u8 {
     var out = std.array_list.Managed(u8).init(a);
-    try out.writer().print("**Variable** `{s}`\n", .{name});
+    try out.writer().print("**{s}** `{s}`\n", .{ label, name });
     var reachable: usize = 0;
     for (entries) |e| if (e.reachable) {
         reachable += 1;
@@ -156,7 +164,9 @@ pub fn valueAt(a: Allocator, text: []const u8, start: usize) ?[]const u8 {
 fn pairWithKeyAt(node: *yaml.Node, start: usize) ?*yaml.Node {
     switch (node.kind) {
         .map => for (node.items) |pair| {
-            if (pair.key) |k| if (k.start == start) return pair;
+            // Definition ranges exclude key quotes. Accept their inner start
+            // as well as the raw YAML scalar start.
+            if (pair.key) |k| if (k.start <= start and start < k.end) return pair;
             if (pair.val) |v| if (pairWithKeyAt(v, start)) |p| return p;
         },
         .seq => for (node.items) |item| {

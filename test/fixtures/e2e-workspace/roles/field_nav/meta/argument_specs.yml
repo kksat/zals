@@ -1,0 +1,14 @@
+---
+argument_specs:
+  main:
+    options:
+      field_instances:
+        type: list
+        elements: dict
+        options:
+          resourcegroup_name:
+            type: str
+            description: Resource group field contract.
+          declared_only_field:
+            type: str
+            description: Schema-only field contract.

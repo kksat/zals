@@ -809,17 +809,17 @@ pub const all = [_]m.Case{
         .expected = &.{m.span(verify, "msg: \"{{ <item> }}\"")},
     },
     .{
-        .name = "variable/non-match: attribute is not a variable definition",
+        .name = "field/member definition: vars-file mapping key",
         .method = .definition,
         .from = m.cursor(verify, "{{ service.<name> | default('unnamed') }}"),
-        .expected = &.{},
+        .expected = &.{m.span(release, "  <name>: rollout-api")},
     },
     .{
-        .name = "variable/non-match: attribute is not a reference",
+        .name = "field/unbound member: references contain the read",
         .method = .references,
         .from = m.cursor(verify, "{{ service.<name> | default('unnamed') }}"),
         .include_declaration = false,
-        .expected = &.{},
+        .expected = &.{m.span(verify, "{{ service.<name> | default('unnamed') }}")},
     },
     .{
         .name = "variable/non-match: filter is not a variable definition",

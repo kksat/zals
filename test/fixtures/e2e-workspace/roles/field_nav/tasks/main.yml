@@ -1,0 +1,7 @@
+---
+- name: Read resource group fields
+  ansible.builtin.debug:
+    msg: "🛰 {{ field_item.resourcegroup_name }} / {{ field_backup.resourcegroup_name }}"
+- name: Schema-only and unbound field names stay separate from roots
+  ansible.builtin.debug:
+    msg: "{{ field_item.declared_only_field }} / {{ field_item.unbound_field }} / {{ unbound_field }}"

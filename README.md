@@ -41,7 +41,9 @@ remain outside the Workspace symbol set. See
 
 Variable navigation (find-references, definition, and implementation) is a
 post-parity extension; upstream has no counterpart. Reads and binding keys are
-both entry points. See the [variable navigation scope guide](docs/variable-navigation.md),
+both entry points. Structured-value fields have a separate Workspace-wide
+leaf-name group, parsed key targets, and nested argument-spec descriptions
+([ADR-0041](docs/adr/0041-field-name-navigation.md)). See the [variable navigation scope guide](docs/variable-navigation.md),
 [ADR-0024](docs/adr/0024-variable-go-to-definition.md),
 [ADR-0025](docs/adr/0025-variable-references.md), and
 [ADR-0036](docs/adr/0036-variable-navigation-from-bindings.md).
