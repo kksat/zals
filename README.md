@@ -101,7 +101,7 @@ release page and put `zals` on your `PATH`.
 ```sh
 make build           # build the server into zig-out/bin/zals
 make test            # run unit tests
-make e2e             # run Zig navigation E2E tests against the fixture Workspace
+make e2e             # run all stdio E2E suites (requires ansible-core on PATH)
 make smoke           # run the existing stdio smoke tests
 make run ARGS=--version
 ```
@@ -115,9 +115,13 @@ zig build e2e
 ```
 
 The [navigation E2E suite](test/e2e/README.md) uses a static Ansible Workspace
-and an explicitly written location oracle; it needs no Galaxy installation,
-virtual environment, or Ansible execution. Unit, E2E, and smoke targets run in
-separate CI jobs.
+and an explicitly written location oracle; `zig build navigation-e2e` needs no
+Galaxy installation, virtual environment, or Ansible execution. `make e2e`
+also runs the collection-symbol, file-URI, unsaved-argument-spec, and
+[selected-venv/module-docs](test/selected_venv_e2e.md) suites. The module-docs
+suite requires `ansible` and `ansible-doc` from `ansible-core` on PATH; CI uses
+Python 3.12 and `ansible-core==2.19.2`. No suite installs collections or executes
+playbooks. Unit, E2E, and smoke targets run in separate CI jobs.
 
 > **macOS 26 + Xcode 26.5 SDK:** Zig 0.15.1's bundled lld fails to link against
 > the SDK's `libSystem.B.tbd` (it lists `arm64e-macos` but not `arm64-macos`),

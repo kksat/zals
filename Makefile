@@ -41,7 +41,7 @@ run: build
 	./zig-out/bin/zals $(ARGS)
 
 fmt:
-	zig fmt src build.zig test/e2e.zig test/e2e
+	zig fmt src build.zig test
 
 clean:
 	rm -rf zig-out .zig-cache

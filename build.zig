@@ -84,36 +84,66 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_mod_tests.step);
     test_step.dependOn(&run_exe_tests.step);
 
-    // Separate, black-box navigation suite. Build zals, then run one Zig test
-    // process against the checked-in Workspace; do not mix it into `test`.
-    const e2e_tests = b.addTest(.{ .root_module = b.createModule(.{
-        .root_source_file = b.path("test/e2e.zig"),
-        .target = target,
-        .optimize = optimize,
-    }) });
-    const run_e2e = b.addRunArtifact(e2e_tests);
-    run_e2e.step.dependOn(b.getInstallStep());
-    run_e2e.setCwd(b.path("."));
-    // A cached success must never hide new or changed fixture references.
-    run_e2e.addFileInput(exe.getEmittedBin());
-    addE2eInputs(b, run_e2e, "test/fixtures/e2e-workspace");
-    addE2eInputs(b, run_e2e, "test/dependencies");
-    const e2e_step = b.step("e2e", "Run navigation end-to-end tests");
-    e2e_step.dependOn(&run_e2e.step);
-
-    const venv_tests = b.addTest(.{ .root_module = b.createModule(.{
-        .root_source_file = b.path("test/selected_venv_e2e.zig"),
-        .target = target,
-        .optimize = optimize,
-    }) });
-    const run_venv = b.addRunArtifact(venv_tests);
-    run_venv.step.dependOn(b.getInstallStep());
-    run_venv.setCwd(b.path("."));
-    run_venv.addFileInput(exe.getEmittedBin());
-    addE2eInputs(b, run_venv, "test/fixtures/selected-venv");
-    const venv_step = b.step("selected-venv-e2e", "Run selected virtual environment end-to-end tests");
-    venv_step.dependOn(&run_venv.step);
-    e2e_step.dependOn(&run_venv.step);
+    // Independent real-stdio suites; none is mixed into the unit-test target.
+    const e2e_step = b.step("e2e", "Run all stdio end-to-end suites");
+    const suites = [_]struct {
+        name: []const u8,
+        source: []const u8,
+        description: []const u8,
+        inputs: []const []const u8,
+        needs_ansible: bool = false,
+    }{
+        .{
+            .name = "navigation-e2e",
+            .source = "test/e2e.zig",
+            .description = "Run static semantic navigation end-to-end tests",
+            .inputs = &.{ "test/fixtures/e2e-workspace", "test/dependencies" },
+        },
+        .{
+            .name = "selected-venv-e2e",
+            .source = "test/selected_venv_e2e.zig",
+            .description = "Run selected virtual environment and module docs tests",
+            .inputs = &.{"test/fixtures/selected-venv"},
+            .needs_ansible = true,
+        },
+        .{
+            .name = "collection-symbols-e2e",
+            .source = "test/collection_symbols_e2e.zig",
+            .description = "Run Workspace collection layout and member symbol tests",
+            .inputs = &.{ "test/fixtures/collection-symbols-workspace", "test/dependencies" },
+        },
+        .{
+            .name = "navigation-uris-e2e",
+            .source = "test/navigation_uris_e2e.zig",
+            .description = "Run absolute and escaped navigation file URI tests",
+            .inputs = &.{"test/fixtures/navigation-uris"},
+        },
+        .{
+            .name = "role-parameter-edits-e2e",
+            .source = "test/role_parameter_edits_e2e.zig",
+            .description = "Run unsaved role argument-spec navigation tests",
+            .inputs = &.{ "test/fixtures/e2e-workspace", "test/dependencies" },
+        },
+    };
+    for (suites) |suite| {
+        const tests = b.addTest(.{ .root_module = b.createModule(.{
+            .root_source_file = b.path(suite.source),
+            .target = target,
+            .optimize = optimize,
+        }) });
+        const run_tests = b.addRunArtifact(tests);
+        run_tests.step.dependOn(b.getInstallStep());
+        run_tests.setCwd(b.path("."));
+        // A cached success must never hide changed server or fixture inputs.
+        run_tests.addFileInput(exe.getEmittedBin());
+        for (suite.inputs) |input| addE2eInputs(b, run_tests, input);
+        // Ansible is an external runtime dependency, not a tracked file input.
+        // Re-run module-docs scenarios even if only the installed tools changed.
+        run_tests.has_side_effects = suite.needs_ansible;
+        const suite_step = b.step(suite.name, suite.description);
+        suite_step.dependOn(&run_tests.step);
+        e2e_step.dependOn(&run_tests.step);
+    }
 }
 
 fn addE2eInputs(b: *std.Build, run: *std.Build.Step.Run, path: []const u8) void {

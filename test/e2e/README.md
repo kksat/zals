@@ -1,7 +1,7 @@
 # Navigation E2E suite
 
-Run `make e2e` to build zals and run **one** Zig E2E test over the named
-cases. It starts one stdio server with an isolated HOME and the checked-in
+Run `zig build navigation-e2e` to build zals and run **one** Zig E2E test over
+the named cases (`make e2e` runs this and the independent suites listed below). It starts one stdio server with an isolated HOME and the checked-in
 collections/roles paths, waits for `ansible/workspaceIndexReady`, then opens
 source files with
 their unchanged on-disk contents. It does not install collections, copy the
@@ -28,3 +28,29 @@ explicit origin; a role or entry-point context does not narrow root references.
 The separate `test/role_parameter_edits_e2e.zig` stdio scenario checks unsaved
 argument-spec documentation and shifted key ranges without changing fixture
 files on disk.
+
+## Independent stdio suites
+
+`make e2e` / `zig build e2e` runs all of these roots against the installed
+`zig-out/bin/zals`. Each can also be selected separately:
+
+| Build target | Test root | Contract |
+| --- | --- | --- |
+| `navigation-e2e` | `test/e2e.zig` | Read-only semantic navigation with complete written location oracles |
+| `role-parameter-edits-e2e` | `test/role_parameter_edits_e2e.zig` | Unsaved argument-spec ranges and hover |
+| `collection-symbols-e2e` | `test/collection_symbols_e2e.zig` | Collection layouts, member symbols, open buffers, and watcher boundaries |
+| `navigation-uris-e2e` | `test/navigation_uris_e2e.zig` | Absolute and escaped targets from relative/absolute search paths |
+| `selected-venv-e2e` | `test/selected_venv_e2e.zig` | Selected installations, per-file module docs, discovery, and cache isolation |
+
+The last suite requires `ansible` and `ansible-doc` on PATH (see
+[`test/selected_venv_e2e.md`](../selected_venv_e2e.md)); the other suites do not
+require those executables. CI installs `ansible-core==2.19.2` on Python 3.12
+before the aggregate target. All fixture files are ordinary checked-in data;
+no suite installs collections or executes a playbook.
+
+The build tracks the server and every relevant fixture/dependency file as run
+inputs. The module-docs suite always runs because changes to the external
+Ansible installation are not represented by those file inputs. These suites
+remain separate from `make test` and the existing Python smoke targets.
+On macOS, direct Zig invocations may need `DEVELOPER_DIR=/nonexistent`, as
+explained in the root README.
