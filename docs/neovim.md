@@ -57,6 +57,61 @@ instead of running both. Ansible search paths come from `ANSIBLE_*`, the
 nearest `ansible.cfg`, and the selected virtual environment—not from Neovim
 filetype rules.
 
+## zals and yamlls
+
+Neovim has no general LSP priority setting: navigation can query all attached
+clients that support the method. Prefer non-overlapping filetypes instead of
+relying on attachment order. zals should own `yaml.ansible`, while yamlls keeps
+ordinary YAML and its other specialized filetypes:
+
+```lua
+vim.lsp.config("yamlls", {
+  filetypes = { "yaml", "yaml.docker-compose", "yaml.gitlab", "yaml.helm-values" },
+})
+```
+
+In LazyVim, put that `filetypes` list under
+`opts.servers.yamlls` in your `neovim/nvim-lspconfig` plugin spec; put zals's
+configuration under `opts.servers.zals`. Keep `ansiblels` disabled when zals
+replaces it. Register the Ansible filetype rules before opening source buffers.
+
+For already-open buffers, changing filetype can leave the previous client
+attached. Restart Neovim after changing the configuration, or detach yamlls from
+just the Ansible buffer with `vim.lsp.buf_detach_client(bufnr, client.id)`.
+Do not stop the entire yamlls client if it still serves ordinary YAML buffers.
+
+## Existing Vimscript filetype detectors
+
+If tasks work but references from a role's `vars/main.yml` do not, check the
+variable buffer's filetype and attached clients first. Neovim's built-in
+Ansible detection can recognize tasks while leaving variable files as `yaml`;
+`yamlls` alone does not provide zals's variable references.
+
+A `BufRead`/`BufNewFile` autocmd pattern containing a slash matches the **full
+absolute path**, not a path relative to the project. A rule such as
+`ansible_collections/**/*.yml` therefore misses
+`/path/to/project/ansible_collections/internal/leapp/roles/upgrade_perform/vars/main.yml`.
+Use a leading `*/`:
+
+```vim
+augroup zals_collection_filetypes
+  autocmd!
+  autocmd BufRead,BufNewFile */ansible_collections/**/*.yml,*/ansible_collections/**/*.yaml set filetype=yaml.ansible
+augroup END
+```
+
+The ready-to-source [Vimscript example](examples/neovim-filetypes.vim) contains
+these rules. They cover collection YAML only; the Lua configuration above also
+covers standalone roles, playbooks, and templates. After fixing an existing
+detector, reopen the buffer or run `:set filetype=yaml.ansible` to trigger LSP
+attachment for an already-open variable file.
+
+`make neovim-test` (Neovim 0.11+ required) tests the example with real filetype
+detection and a real zals process: references from folded-value vars keys in
+both YAML extensions, with and without declarations, plus an ordinary YAML
+buffer that must not attach. A direct stdio provider test cannot detect missing
+editor attachment.
+
 ## Trying the checked-in E2E fixture
 
 The fixture at `test/fixtures/e2e-workspace/` deliberately has

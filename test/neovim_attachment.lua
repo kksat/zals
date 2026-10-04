@@ -1,0 +1,107 @@
+-- Run with: nvim --headless -u NONE -l test/neovim_attachment.lua
+-- Exercise real filetype detection, LSP attachment, and references from a
+-- collection role's vars key. A direct stdio request cannot catch this bug.
+local root = vim.fn.tempname()
+vim.fn.mkdir(root .. "/.git", "p")
+root = assert(vim.uv.fs_realpath(root))
+local role = root .. "/ansible_collections/internal/leapp/roles/upgrade_perform"
+local tasks = role .. "/tasks/upgrade.yml"
+local variables = {
+  role .. "/vars/main.yml",
+  role .. "/vars/main.yaml",
+}
+
+local function write_file(path, lines)
+  vim.fn.mkdir(vim.fn.fnamemodify(path, ":h"), "p")
+  assert(vim.fn.writefile(lines, path) == 0)
+end
+
+local ok, err = xpcall(function()
+  write_file(tasks, {
+    "- name: Execute upgrade",
+    "  ansible.builtin.command:",
+    '    argv: "{{ upgrade_perform_cmd }}"',
+  })
+  for _, path in ipairs(variables) do
+    write_file(path, {
+      "---",
+      "upgrade_perform_cmd: >-",
+      "  {{",
+      "    ['leapp', 'upgrade']",
+      "    + (upgrade_extra_leapp_args.split()",
+      "       if upgrade_extra_leapp_args | default('') else [])",
+      "  }}",
+    })
+  end
+  local ordinary_yaml = root .. "/ordinary.yml"
+  write_file(ordinary_yaml, { "some_setting: value" })
+
+  vim.cmd("filetype on")
+  vim.cmd("source docs/examples/neovim-filetypes.vim")
+  local ready = {}
+  vim.lsp.config("zals", {
+    cmd = { assert(vim.uv.fs_realpath("zig-out/bin/zals")), "--stdio" },
+    filetypes = { "yaml.ansible" },
+    root_markers = { ".git" },
+    init_options = {
+      ansible = { validation = { enabled = false, lint = { enabled = false } } },
+    },
+    handlers = {
+      ["ansible/workspaceIndexReady"] = function(_, _, ctx)
+        ready[ctx.client_id] = true
+      end,
+    },
+  })
+  vim.lsp.enable("zals")
+
+  for _, path in ipairs(variables) do
+    vim.cmd.edit(vim.fn.fnameescape(path))
+    local bufnr = vim.api.nvim_get_current_buf()
+    assert(vim.bo.filetype == "yaml.ansible", path .. ": got filetype " .. vim.bo.filetype)
+    assert(vim.wait(10000, function()
+      return #vim.lsp.get_clients({ bufnr = bufnr, name = "zals" }) == 1
+    end), "zals did not attach to " .. path)
+    local client = vim.lsp.get_clients({ bufnr = bufnr, name = "zals" })[1]
+    assert(vim.wait(10000, function()
+      -- Requests drive the server's index handoff queue.
+      client:request_sync("workspace/symbol", { query = "__neovim_test_wait__" }, 1000, bufnr)
+      return ready[client.id]
+    end), "Workspace index did not become ready")
+    for _, include_declaration in ipairs({ false, true }) do
+      local response, request_err = client:request_sync("textDocument/references", {
+        textDocument = { uri = vim.uri_from_fname(path) },
+        position = { line = 1, character = 3 },
+        context = { includeDeclaration = include_declaration },
+      }, 10000, bufnr)
+      assert(response and not response.err, vim.inspect(request_err or response))
+      local locations = response.result
+      assert(#locations == (include_declaration and 3 or 1), vim.inspect(locations))
+      local expected = { [vim.uri_from_fname(tasks)] = { line = 2, start = 14, finish = 33 } }
+      if include_declaration then
+        for _, variable in ipairs(variables) do
+          expected[vim.uri_from_fname(variable)] = { line = 1, start = 0, finish = 19 }
+        end
+      end
+      for _, location in ipairs(locations) do
+        local span = assert(expected[location.uri], "unexpected or duplicate location: " .. vim.inspect(location))
+        assert(location.range.start.line == span.line and location.range.start.character == span.start)
+        assert(location.range["end"].line == span.line and location.range["end"].character == span.finish)
+        expected[location.uri] = nil
+      end
+      assert(next(expected) == nil, "missing locations: " .. vim.inspect(expected))
+    end
+  end
+
+  vim.cmd.edit(vim.fn.fnameescape(ordinary_yaml))
+  assert(vim.bo.filetype == "yaml", "ordinary YAML should not be classified as Ansible")
+  assert(#vim.lsp.get_clients({ bufnr = 0, name = "zals" }) == 0)
+end, debug.traceback)
+
+for _, client in ipairs(vim.lsp.get_clients({ name = "zals" })) do
+  client:stop(true)
+end
+vim.fn.delete(root, "rf")
+if not ok then
+  error(err)
+end
+print("Neovim attachment: collection vars (.yml/.yaml) references pass")
