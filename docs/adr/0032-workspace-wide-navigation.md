@@ -26,7 +26,7 @@ find a role elsewhere in the project, a Galaxy role (`namespace.role`), or a
 role in a collection installed into a virtual environment. Nothing listed the
 places that name a role, a collection, or a task file, and there was no
 project-wide symbol search. The glossary terms used here are defined in
-`CONTEXT.md`.
+`GLOSSARY.md`.
 
 ## Decision
 
@@ -101,7 +101,7 @@ when none matches do they use step 7, returning every match there.
   enclosing role's `tasks/` (task files) or `vars/` (vars files) directory,
   then the Workspace root. Find-references returns every site that names the
   same resolved file.
-- **Collections.** Collection references are the six sites in `CONTEXT.md`.
+- **Collections.** Collection references are the six sites in `GLOSSARY.md`.
   Go-to-definition opens `galaxy.yml`, else `MANIFEST.json` (installed
   collections ship that instead), else `README.md`. Hover shows `README.md`,
   else the unrendered `galaxy.yml`, else `MANIFEST.json`. Completion at

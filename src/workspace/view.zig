@@ -186,7 +186,7 @@ pub fn calleeFieldDefinitions(a: Allocator, files: []const File, set: Reachabili
 }
 
 /// Paths whose definitions can apply in the file at `path` (the Reachable
-/// definitions of `CONTEXT.md`): the file's role scope (every file under
+/// definitions of `GLOSSARY.md`): the file's role scope (every file under
 /// `role_dir`) or the file itself, the files whose references resolve to
 /// that Role (or, for a task file outside a role, the files that include it),
 /// and one level of the vars files those load. Role invokers are resolved by

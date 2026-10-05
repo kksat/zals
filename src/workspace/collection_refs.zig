@@ -1,4 +1,4 @@
-//! Collection references (ADR-0032, `CONTEXT.md`).
+//! Collection references (ADR-0032, `GLOSSARY.md`).
 //!
 //! Sites: a `collections:` entry (play, block, task, role metadata,
 //! `requirements.yml`, inline execution-environment requirements); a

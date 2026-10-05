@@ -2,7 +2,7 @@
 //!
 //! A Workspace is the nearest directory containing the root marker (a file or
 //! a directory) at or above a start path. The default marker is `.git`. A
-//! nested marker is its own Workspace. See CONTEXT.md.
+//! nested marker is its own Workspace. See GLOSSARY.md.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
