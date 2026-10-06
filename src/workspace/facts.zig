@@ -63,21 +63,33 @@ pub fn extract(a: Allocator, path: []const u8, text: []const u8) !Facts {
 /// Facts for the file at `path` in the Workspace rooted at `root` (used to
 /// resolve file references).
 pub fn extractIn(a: Allocator, root: ?[]const u8, path: []const u8, text: []const u8) !Facts {
+    return extractInWithParser(a, a, root, path, text);
+}
+
+/// Keep parser storage separate from the facts' long-lived entry arena.
+/// A nested arena backed by an entry arena cannot release its parse tree.
+/// Returned facts own all their strings in `a`; no parse storage is borrowed.
+pub fn extractInWithParser(a: Allocator, parser_allocator: Allocator, root: ?[]const u8, path: []const u8, text: []const u8) !Facts {
     // Collection source files contribute path-based symbols only. Python
     // DOCUMENTATION strings are not Ansible plays or variable definitions.
     if (!@import("discover.zig").isAnsibleFile(std.fs.path.basename(path))) return .{};
-    return extractDependencyIn(a, root, path, text);
+    return extractDependencyWithParser(a, parser_allocator, root, path, text);
 }
 
 /// Explicit vars-file loads are Ansible data regardless of their extension.
 /// Keep this separate from Workspace discovery so Python DOCUMENTATION and
 /// unrelated JSON files still cannot introduce navigation facts.
 pub fn extractDependencyIn(a: Allocator, root: ?[]const u8, path: []const u8, text: []const u8) !Facts {
-    var forest = yaml.parse(a, text) catch return .{};
+    return extractDependencyWithParser(a, a, root, path, text);
+}
+
+fn extractDependencyWithParser(a: Allocator, parser_allocator: Allocator, root: ?[]const u8, path: []const u8, text: []const u8) !Facts {
+    var forest = yaml.parse(parser_allocator, text) catch return .{};
     defer forest.deinit();
 
+    const kind = variables.scope.fileKind(path, role_resolve.enclosingRole(path));
     var defs = std.array_list.Managed(Definition).init(a);
-    variables.definitions.collect(a, &forest, variables.scope.fileKind(path, role_resolve.enclosingRole(path)), &defs) catch {};
+    variables.definitions.collect(a, &forest, kind, &defs) catch {};
     for (defs.items) |*d| d.name = try a.dupe(u8, d.name);
 
     var idents = std.array_list.Managed(variables.jinja.Ident).init(a);
@@ -86,7 +98,7 @@ pub fn extractDependencyIn(a: Allocator, root: ?[]const u8, path: []const u8, te
     for (idents.items, 0..) |r, i| refs[i] = .{ .name = try a.dupe(u8, r.name), .start = r.start, .end = r.end };
 
     var field_defs = std.array_list.Managed(variables.fields.Definition).init(a);
-    variables.fields.collect(a, &forest, path, variables.scope.fileKind(path, role_resolve.enclosingRole(path)), &field_defs) catch {};
+    variables.fields.collect(a, &forest, path, kind, &field_defs) catch {};
 
     var field_idents = std.array_list.Managed(variables.jinja.Ident).init(a);
     variables.index.collectFieldReferences(a, &forest, &field_idents) catch {};

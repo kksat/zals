@@ -25,7 +25,10 @@ Keep a persistent, in-memory **Workspace index** owned by the server.
   by path and mtime. An entry holds the facts navigation needs: variable
   definitions and references, role references, collection references, task-file
   and vars-file references, role invocations, and workspace symbols. Entries own
-  their memory in a per-entry arena.
+  their memory in a per-entry arena. File text and parse trees use separate
+  temporary storage, reused across a scan with retained capacity capped at
+  1 MiB; they are not retained in entries. Python/PowerShell source candidates
+  contribute path-only symbols, so their bodies are not read.
 - **Discovery.** Each Workspace is walked from its root. Hidden directories,
   `node_modules`, `venv`, directories containing `pyvenv.cfg`, and nested
   Workspaces (directories holding the root marker) are skipped.

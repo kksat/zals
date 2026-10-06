@@ -24,6 +24,12 @@ pub const Entry = struct {
 
     /// Parse `path` (or `text` when given) into a new entry.
     pub fn build(gpa: Allocator, root: []const u8, path: []const u8, text: ?[]const u8, mtime: i128) !*Entry {
+        var scratch = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        defer scratch.deinit();
+        return buildWithScratch(gpa, scratch.allocator(), root, path, text, mtime);
+    }
+
+    fn buildWithScratch(gpa: Allocator, temporary: Allocator, root: []const u8, path: []const u8, text: ?[]const u8, mtime: i128) !*Entry {
         const self = try gpa.create(Entry);
         errdefer gpa.destroy(self);
         self.arena = std.heap.ArenaAllocator.init(gpa);
@@ -32,8 +38,11 @@ pub const Entry = struct {
         self.path = try a.dupe(u8, path);
         self.root = try a.dupe(u8, root);
         self.mtime = mtime;
-        const body = text orelse (readFile(a, path) orelse "");
-        self.facts = try facts_mod.extractIn(a, self.root, path, body);
+        // Source candidates contribute path-only symbols, so never read their
+        // Python/PowerShell bodies. YAML text and parser storage are temporary,
+        // not backed by the entry arena which survives for the whole session.
+        const body = if (text == null and discover_mod.isAnsibleFile(std.fs.path.basename(path))) readFile(temporary, path) else null;
+        self.facts = try facts_mod.extractInWithParser(a, temporary, self.root, path, text orelse body orelse "");
         return self;
     }
 
@@ -343,10 +352,15 @@ fn scan(index: *WorkspaceIndex, root: []const u8, marker: []const u8, generation
     ri.file_count = found.files.len;
     index.push(.{ .generation = generation, .root = gpa.dupe(u8, root) catch "", .info = ri });
 
+    // Reuse temporary parse pages across files without retaining a large
+    // outlier for the rest of the scan or contending on the shared allocator.
+    var scratch = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer scratch.deinit();
     for (found.files) |path| {
         if (index.shutdown.load(.acquire)) return;
+        _ = scratch.reset(.{ .retain_with_limit = 1024 * 1024 });
         const st = std.fs.cwd().statFile(path) catch continue;
-        const e = Entry.build(gpa, root, path, null, st.mtime) catch continue;
+        const e = Entry.buildWithScratch(gpa, scratch.allocator(), root, path, null, st.mtime) catch continue;
         index.push(.{ .generation = generation, .root = gpa.dupe(u8, root) catch "", .entry = e });
     }
 }
@@ -401,6 +415,22 @@ const Tree = struct {
         return std.fs.path.join(testing.allocator, &.{ self.root, rel });
     }
 };
+
+test "entries retain facts without retaining file text or parse storage" {
+    var tree = try Tree.init();
+    defer tree.deinit();
+    var body = std.array_list.Managed(u8).init(testing.allocator);
+    defer body.deinit();
+    try body.appendSlice("value: '{{ live_value }}'\n");
+    for (0..10_000) |_| try body.appendSlice("# ignored padding\n");
+    try tree.write("data.yml", body.items);
+    const path = try tree.path("data.yml");
+    defer testing.allocator.free(path);
+    const entry = try Entry.build(testing.allocator, tree.root, path, null, 0);
+    defer entry.destroy(testing.allocator);
+    try testing.expectEqualStrings("live_value", entry.facts.var_refs[0].name);
+    try testing.expect(entry.arena.queryCapacity() < 32 * 1024);
+}
 
 test "scan indexes files and root info" {
     var tree = try Tree.init();
