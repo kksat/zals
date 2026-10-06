@@ -62,7 +62,10 @@ pub const Server = struct {
 
     pub fn init(allocator: Allocator, transport: Transport) !Server {
         const runner = exec.Posix.posixRunner();
-        const pool = try concurrency.ThreadPool.init(allocator, 2);
+        // Leave room for file parsing alongside blocking docs bootstrap, but
+        // bound the pool on both large and single-core machines.
+        const workers = @min(4, @max(2, std.Thread.getCpuCount() catch 2));
+        const pool = try concurrency.ThreadPool.init(allocator, workers);
         errdefer pool.deinit();
         const writer = try Writer.init(allocator, transport.out_file);
         errdefer writer.deinit();

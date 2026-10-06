@@ -165,6 +165,7 @@ pub const WorkspaceIndex = struct {
             .root = try self.gpa.dupe(u8, root),
             .marker = try self.gpa.dupe(u8, marker),
             .generation = generation,
+            .pool = pool,
             .task = .{ .func = ScanJob.run, .ctx = job },
         };
         self.active_scans += 1;
@@ -186,7 +187,7 @@ pub const WorkspaceIndex = struct {
             try self.generations.put(try self.gpa.dupe(u8, root), generation);
         }
         self.active_scans += 1;
-        scan(self, root, marker, generation);
+        scan(self, root, marker, generation, null);
         self.drain();
     }
 
@@ -314,12 +315,13 @@ const ScanJob = struct {
     root: []u8,
     marker: []u8,
     generation: u64,
+    pool: *concurrency.ThreadPool,
     task: concurrency.Task,
 
     fn run(ctx: *anyopaque) void {
         const self: *ScanJob = @ptrCast(@alignCast(ctx));
         defer self.free();
-        scan(self.index, self.root, self.marker, self.generation);
+        scan(self.index, self.root, self.marker, self.generation, self.pool);
     }
 
     fn free(self: *ScanJob) void {
@@ -333,37 +335,88 @@ const ScanJob = struct {
 /// Walk and parse one Workspace, pushing entries, the root info, and a done
 /// marker onto the pending queue. Safe on a worker thread: it touches only
 /// the queue.
-fn scan(index: *WorkspaceIndex, root: []const u8, marker: []const u8, generation: u64) void {
+fn scan(index: *WorkspaceIndex, root: []const u8, marker: []const u8, generation: u64, pool: ?*concurrency.ThreadPool) void {
     const gpa = index.gpa;
-    defer index.push(.{ .generation = generation, .root = gpa.dupe(u8, root) catch "", .done = true });
+    // Transfer completion and discovery storage to ScanWork only after setup
+    // succeeds. Until then, even a failed discovery completes this generation.
+    var handed_off = false;
+    defer if (!handed_off) index.push(.{ .generation = generation, .root = gpa.dupe(u8, root) catch "", .done = true });
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer if (!handed_off) arena.deinit();
+    const a = arena.allocator();
+    const owned_root = a.dupe(u8, root) catch return;
+    const found = discover_mod.discover(a, owned_root, marker) catch return;
+    const work = gpa.create(ScanWork) catch return;
+    work.* = .{ .index = index, .arena = arena, .root = owned_root, .generation = generation, .files = found.files };
+    handed_off = true;
 
-    const ri = gpa.create(RootInfo) catch return;
-    ri.arena = std.heap.ArenaAllocator.init(gpa);
-    const a = ri.arena.allocator();
-    var walk_arena = std.heap.ArenaAllocator.init(gpa);
-    defer walk_arena.deinit();
-    const found = discover_mod.discover(walk_arena.allocator(), root, marker) catch {
-        ri.destroy(gpa);
-        return;
-    };
-    ri.root = a.dupe(u8, root) catch root;
-    ri.roles_dirs = dupeAll(a, found.roles_dirs) catch &.{};
-    ri.collection_paths = dupeAll(a, found.collection_paths) catch &.{};
-    ri.file_count = found.files.len;
-    index.push(.{ .generation = generation, .root = gpa.dupe(u8, root) catch "", .info = ri });
-
-    // Reuse temporary parse pages across files without retaining a large
-    // outlier for the rest of the scan or contending on the shared allocator.
-    var scratch = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer scratch.deinit();
-    for (found.files) |path| {
-        if (index.shutdown.load(.acquire)) return;
-        _ = scratch.reset(.{ .retain_with_limit = 1024 * 1024 });
-        const st = std.fs.cwd().statFile(path) catch continue;
-        const e = Entry.buildWithScratch(gpa, scratch.allocator(), root, path, null, st.mtime) catch continue;
-        index.push(.{ .generation = generation, .root = gpa.dupe(u8, root) catch "", .entry = e });
+    info: {
+        const ri = gpa.create(RootInfo) catch break :info;
+        ri.arena = std.heap.ArenaAllocator.init(gpa);
+        const info_a = ri.arena.allocator();
+        ri.root = info_a.dupe(u8, root) catch {
+            ri.destroy(gpa);
+            break :info;
+        };
+        ri.roles_dirs = dupeAll(info_a, found.roles_dirs) catch &.{};
+        ri.collection_paths = dupeAll(info_a, found.collection_paths) catch &.{};
+        ri.file_count = found.files.len;
+        index.push(.{ .generation = generation, .root = gpa.dupe(u8, root) catch "", .info = ri });
     }
+
+    // The discovery worker also parses files; it never waits on tasks queued
+    // to its own pool. Small scans avoid scheduling overhead. Additional tasks
+    // share a cursor, balancing uneven file sizes with at most four lanes.
+    if (pool) |p| {
+        const lanes = @max(1, @min(p.threads.len, @min(4, 1 + found.files.len / 64)));
+        for (work.tasks[0 .. lanes - 1]) |*task| {
+            task.* = .{ .func = ScanWork.run, .ctx = work };
+            _ = work.remaining.fetchAdd(1, .monotonic);
+            p.submit(task) catch {
+                _ = work.remaining.fetchSub(1, .monotonic);
+            };
+        }
+    }
+    ScanWork.run(work);
 }
+
+/// Immutable discovery snapshot plus a shared file cursor. The last lane
+/// publishes completion and frees the snapshot; no lane blocks waiting for
+/// another, so rescans and shutdown also work with a one-thread pool.
+const ScanWork = struct {
+    index: *WorkspaceIndex,
+    arena: std.heap.ArenaAllocator,
+    root: []const u8,
+    generation: u64,
+    files: []const []const u8,
+    next: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
+    remaining: std.atomic.Value(usize) = std.atomic.Value(usize).init(1),
+    tasks: [3]concurrency.Task = undefined,
+
+    fn run(ctx: *anyopaque) void {
+        const self: *ScanWork = @ptrCast(@alignCast(ctx));
+        defer self.finish();
+        var scratch = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        defer scratch.deinit();
+        while (!self.index.shutdown.load(.acquire)) {
+            const i = self.next.fetchAdd(1, .monotonic);
+            if (i >= self.files.len) return;
+            _ = scratch.reset(.{ .retain_with_limit = 1024 * 1024 });
+            const path = self.files[i];
+            const st = std.fs.cwd().statFile(path) catch continue;
+            const e = Entry.buildWithScratch(self.index.gpa, scratch.allocator(), self.root, path, null, st.mtime) catch continue;
+            self.index.push(.{ .generation = self.generation, .root = self.index.gpa.dupe(u8, self.root) catch "", .entry = e });
+        }
+    }
+
+    fn finish(self: *ScanWork) void {
+        if (self.remaining.fetchSub(1, .acq_rel) != 1) return;
+        const index = self.index;
+        index.push(.{ .generation = self.generation, .root = index.gpa.dupe(u8, self.root) catch "", .done = true });
+        self.arena.deinit();
+        index.gpa.destroy(self);
+    }
+};
 
 fn dupeAll(a: Allocator, items: []const []const u8) ![]const []const u8 {
     const out = try a.alloc([]const u8, items.len);
@@ -493,4 +546,96 @@ test "pool scan delivers through drain" {
     try testing.expectEqual(@as(usize, 0), index.count());
     pool.deinit();
     index.destroy();
+}
+
+fn waitForScans(index: *WorkspaceIndex) !void {
+    var timer = try std.time.Timer.start();
+    while (index.isScanning() and timer.read() < 10 * std.time.ns_per_s) {
+        index.drain();
+        std.Thread.sleep(std.time.ns_per_ms);
+    }
+    try testing.expect(!index.isScanning());
+}
+
+test "shared file scans retain every fact with one or several pool workers" {
+    var tree = try Tree.init();
+    defer tree.deinit();
+    var other = try Tree.init();
+    defer other.deinit();
+    const body =
+        \\- hosts: all
+        \\  vars:
+        \\    settings: {port: 80}
+        \\  tasks:
+        \\    - debug:
+        \\        msg: "{{ settings.port }}"
+        \\
+    ;
+    for (0..129) |i| {
+        const name = try std.fmt.allocPrint(testing.allocator, "playbooks/{d}.yml", .{i});
+        defer testing.allocator.free(name);
+        try tree.write(name, body);
+        try other.write(name, body);
+    }
+    for ([_]usize{ 1, 2, 4 }) |workers| {
+        const index = try WorkspaceIndex.create(testing.allocator);
+        defer index.destroy();
+        const pool = try concurrency.ThreadPool.init(testing.allocator, workers);
+        defer pool.deinit();
+        try index.syncRoots(pool, &.{ tree.root, other.root }, ".git", false);
+        try testing.expect(!index.takeReadyEvent());
+        try waitForScans(index);
+        try testing.expect(index.takeReadyEvent());
+        try testing.expect(!index.takeReadyEvent());
+        try testing.expectEqual(@as(usize, 258), index.count());
+        try testing.expectEqual(@as(usize, 129), index.info(tree.root).?.file_count);
+        try testing.expectEqual(@as(usize, 129), index.info(other.root).?.file_count);
+        var it = index.entries.valueIterator();
+        while (it.next()) |entry| {
+            const facts = entry.*.facts;
+            try testing.expectEqual(@as(usize, 1), facts.var_refs.len);
+            try testing.expectEqualStrings("settings", facts.var_refs[0].name);
+            try testing.expectEqual(@as(usize, 1), facts.field_refs.len);
+            try testing.expectEqualStrings("port", facts.field_refs[0].name);
+            try testing.expectEqualStrings("settings", facts.var_defs[0].name);
+            try testing.expectEqualStrings("port", facts.field_defs[0].name);
+        }
+    }
+}
+
+test "shared scans drop removed roots and stale generations, including on shutdown" {
+    var tree = try Tree.init();
+    defer tree.deinit();
+    for (0..129) |i| {
+        const name = try std.fmt.allocPrint(testing.allocator, "{d}.yml", .{i});
+        defer testing.allocator.free(name);
+        try tree.write(name, "- debug: msg=\"{{ value }}\"\n");
+    }
+    const index = try WorkspaceIndex.create(testing.allocator);
+    defer index.destroy();
+    const pool = try concurrency.ThreadPool.init(testing.allocator, 4);
+    var joined = false;
+    defer if (!joined) pool.deinit();
+    try index.syncRoots(pool, &.{tree.root}, ".git", false);
+    // Rescan while the first generation may still be discovering/parsing.
+    try index.syncRoots(pool, &.{tree.root}, ".git", true);
+    try index.syncRoots(pool, &.{}, ".git", false);
+    try waitForScans(index);
+    try testing.expectEqual(@as(usize, 0), index.count());
+    try testing.expect(index.info(tree.root) == null);
+    try testing.expect(index.takeReadyEvent());
+
+    try index.syncRoots(pool, &.{tree.root}, ".git", false);
+    try waitForScans(index);
+    try testing.expectEqual(@as(usize, 129), index.count());
+    try testing.expect(index.takeReadyEvent());
+    // Stop an active rescan with queued parse lanes. Joining the pool must
+    // release every snapshot and entry, even without another main-thread drain.
+    try index.syncRoots(pool, &.{tree.root}, ".git", true);
+    index.shutdown.store(true, .release);
+    pool.deinit();
+    joined = true;
+    index.drain();
+    try testing.expect(!index.isScanning());
+    try testing.expect(index.takeReadyEvent());
 }

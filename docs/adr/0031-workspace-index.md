@@ -26,15 +26,20 @@ Keep a persistent, in-memory **Workspace index** owned by the server.
   definitions and references, role references, collection references, task-file
   and vars-file references, role invocations, and workspace symbols. Entries own
   their memory in a per-entry arena. File text and parse trees use separate
-  temporary storage, reused across a scan with retained capacity capped at
-  1 MiB; they are not retained in entries. Python/PowerShell source candidates
+  temporary storage, reused by each parsing worker with retained capacity
+  capped at 1 MiB per worker; they are not retained in entries. Python/PowerShell source candidates
   contribute path-only symbols, so their bodies are not read.
 - **Discovery.** Each Workspace is walked from its root. Hidden directories,
   `node_modules`, `venv`, directories containing `pyvenv.cfg`, and nested
   Workspaces (directories holding the root marker) are skipped.
 - **Initial build.** On `initialized`, one pool task per Workspace (ADR-0011)
-  walks and parses in the background. Finished entries go to a pending queue
-  guarded by a mutex. The main thread drains that queue before handling each
+  discovers files in the background. For larger scans it submits additional
+  parsing tasks to the same bounded pool (two to four threads, based on CPU
+  count). Up to four tasks share a file cursor and an immutable discovery
+  snapshot, with separate parser scratch storage. The discovery task also
+  parses files rather than waiting for queued tasks, avoiding pool deadlocks.
+  The last task releases the snapshot and reports scan completion. Finished
+  entries go to a pending queue guarded by a mutex. The main thread drains that queue before handling each
   message and while waiting for input during background startup, so it remains
   the sole writer of the index map. When the scan finishes the server sends
   `ansible/workspaceIndexReady` with the file count, even if the client is idle.
