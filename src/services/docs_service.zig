@@ -1,9 +1,9 @@
 //! Background docs loading: catalog bootstrap, prefetch, and cache writes
 //! (ADR-0008, ADR-0011).
 //!
-//! The catalog is loaded eagerly (from the on-disk cache when possible) so
-//! `ansible/docsLibraryReady` can fire immediately. Full module docs are then
-//! prefetched on the thread pool in batches, with periodic cache writes.
+//! Version probing, catalog bootstrap, and module discovery run on the pool,
+//! independently of Workspace indexing. The main thread reports readiness once
+//! bootstrap completes; full module docs are then prefetched in batches.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -22,46 +22,86 @@ const write_every = 4;
 
 pub const DocsService = struct {
     allocator: Allocator,
+    /// Owned; freed after the pool has joined.
     cache_path: ?[]const u8 = null,
+    ready: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+    reported_ready: bool = false,
+    bootstrap_task: Task = undefined,
     lib: *DocsLibrary = undefined,
     pool: *ThreadPool = undefined,
     cache_writing: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
     shutdown: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
-    prefetch_task: Task = undefined,
     cache_task: Task = undefined,
     started: bool = false,
 
-    pub fn init(allocator: Allocator, cache_path: ?[]const u8) DocsService {
-        return .{ .allocator = allocator, .cache_path = cache_path };
+    pub fn init(allocator: Allocator) DocsService {
+        return .{ .allocator = allocator };
     }
 
-    /// Load the catalog (cache first, then `ansible-doc`) and kick off prefetch.
-    /// `lib`, `pool`, and `config` must outlive the service.
-    pub fn start(self: *DocsService, lib: *DocsLibrary, pool: *ThreadPool, config: *AnsibleConfig) void {
+    /// The pool must already be joined.
+    pub fn deinit(self: *DocsService) void {
+        if (self.cache_path) |p| self.allocator.free(p);
+    }
+
+    /// Keep polling until the main thread consumes readiness, not merely
+    /// until the worker finishes. Otherwise completion between drain and
+    /// the next blocking read could strand the readiness notification.
+    pub fn hasPendingBootstrap(self: *const DocsService) bool {
+        return self.started and !self.reported_ready;
+    }
+
+    /// Main-thread readiness handoff, once per service lifetime.
+    pub fn takeReadyEvent(self: *DocsService) bool {
+        if (!self.ready.load(.acquire) or self.reported_ready) return false;
+        self.reported_ready = true;
+        return true;
+    }
+
+    /// Schedule bootstrap without running subprocesses on the request thread.
+    /// `lib` and `pool` must outlive the service.
+    pub fn start(self: *DocsService, lib: *DocsLibrary, pool: *ThreadPool) void {
         if (self.started) return;
         self.started = true;
         self.lib = lib;
         self.pool = pool;
+        self.bootstrap_task = .{ .func = bootstrapEntry, .ctx = self };
+        self.pool.submit(&self.bootstrap_task) catch self.ready.store(true, .release);
+    }
 
+    fn bootstrapEntry(ctx: *anyopaque) void {
+        const self: *DocsService = @ptrCast(@alignCast(ctx));
+        self.bootstrap();
+    }
+
+    fn bootstrap(self: *DocsService) void {
+        if (self.shutdown.load(.acquire)) return;
+        if (computeFingerprint(self.allocator, self.lib.runner)) |fp| {
+            defer self.allocator.free(fp.hash);
+            defer self.allocator.free(fp.version);
+            self.cache_path = docs_cache.cachePath(self.allocator, fp.hash) catch null;
+            self.lib.mutex.lock();
+            self.lib.ansible_version = self.lib.arena.allocator().dupe(u8, fp.version) catch "";
+            self.lib.mutex.unlock();
+        }
+        if (self.shutdown.load(.acquire)) return;
         var loaded = false;
         if (self.cache_path) |p| {
             loaded = docs_cache.load(self.allocator, self.lib, p) catch false;
             // A cache with an empty catalog is useless; fall back to ansible-doc.
-            if (loaded and self.lib.catalog.count() == 0) loaded = false;
+            if (loaded and self.lib.catalogCount() == 0) loaded = false;
         }
         if (!loaded) {
             self.lib.loadCatalog() catch {};
         }
         // Discover module FQCNs on disk for completion (builtin + collections +
         // redirects). This is independent of the ansible-doc catalog.
-        self.lib.scanModuleIndex(config);
-
-        self.prefetch_task = .{ .func = prefetchEntry, .ctx = self };
-        self.pool.submit(&self.prefetch_task) catch {};
-    }
-
-    fn prefetchEntry(ctx: *anyopaque) void {
-        const self: *DocsService = @ptrCast(@alignCast(ctx));
+        if (self.shutdown.load(.acquire)) return;
+        // This worker owns its config snapshot; the server's lazy config is
+        // main-thread-only and must not be shared with bootstrap.
+        var config = AnsibleConfig.init(self.allocator, self.lib.runner);
+        defer config.deinit();
+        self.lib.scanModuleIndex(&config);
+        self.ready.store(true, .release);
         self.prefetch();
     }
 
@@ -105,6 +145,20 @@ pub const DocsService = struct {
         docs_cache.save(self.allocator, self.lib, p) catch {};
     }
 };
+
+test "bootstrap remains pending until readiness is consumed" {
+    var service = DocsService.init(std.testing.allocator);
+    defer service.deinit();
+    try std.testing.expect(!service.hasPendingBootstrap());
+    service.started = true;
+    try std.testing.expect(service.hasPendingBootstrap());
+    try std.testing.expect(!service.takeReadyEvent());
+    service.ready.store(true, .release);
+    try std.testing.expect(service.hasPendingBootstrap());
+    try std.testing.expect(service.takeReadyEvent());
+    try std.testing.expect(!service.hasPendingBootstrap());
+    try std.testing.expect(!service.takeReadyEvent());
+}
 
 /// Per-file module libraries. Each ordered path/cwd identity owns an immutable
 /// subprocess environment and its own in-memory docs. Never load/save these

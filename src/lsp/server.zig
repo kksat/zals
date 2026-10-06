@@ -21,7 +21,6 @@ const SchemaCatalog = @import("../services/schema_service.zig").Catalog;
 const AnsibleConfig = @import("../services/ansible_config.zig").AnsibleConfig;
 const concurrency = @import("../concurrency/root.zig");
 const docs_service = @import("../services/docs_service.zig");
-const docs_cache = @import("../services/docs_cache.zig");
 const DocsService = docs_service.DocsService;
 const Writer = @import("writer.zig").Writer;
 
@@ -38,7 +37,6 @@ pub const Server = struct {
     pool: *concurrency.ThreadPool,
     docs_service: DocsService,
     contextual_docs: docs_service.ContextLibraries,
-    cache_path: ?[]const u8 = null,
     encoding: PositionEncoding = .utf16,
     initialized: bool = false,
     shutdown_requested: bool = false,
@@ -71,7 +69,7 @@ pub const Server = struct {
         const index = try WorkspaceIndex.create(allocator);
         errdefer index.destroy();
 
-        var server = Server{
+        return Server{
             .allocator = allocator,
             .transport = transport,
             .writer = writer,
@@ -82,21 +80,12 @@ pub const Server = struct {
             .schemas = SchemaCatalog.init(allocator),
             .ansible_config = AnsibleConfig.init(allocator, runner),
             .pool = pool,
-            .docs_service = DocsService.init(allocator, null),
+            .docs_service = DocsService.init(allocator),
             .contextual_docs = docs_service.ContextLibraries.init(allocator, runner),
             .opened_uris = std.array_list.Managed([]const u8).init(allocator),
             .root_uris = std.array_list.Managed([]const u8).init(allocator),
             .index = index,
         };
-
-        if (docs_service.computeFingerprint(allocator, runner)) |fp| {
-            defer allocator.free(fp.hash);
-            defer allocator.free(fp.version);
-            server.cache_path = docs_cache.cachePath(allocator, fp.hash) catch null;
-            server.docs_service.cache_path = server.cache_path;
-            server.docs.ansible_version = server.docs.arena.allocator().dupe(u8, fp.version) catch "";
-        }
-        return server;
     }
 
     pub fn deinit(self: *Server) void {
@@ -112,7 +101,7 @@ pub const Server = struct {
         self.contextual_docs.deinit();
         self.schemas.deinit();
         self.ansible_config.deinit();
-        if (self.cache_path) |p| self.allocator.free(p);
+        self.docs_service.deinit();
         for (self.opened_uris.items) |u| self.allocator.free(u);
         self.opened_uris.deinit();
         for (self.root_uris.items) |u| self.allocator.free(u);
@@ -123,12 +112,18 @@ pub const Server = struct {
 
     pub fn run(self: *Server) !void {
         while (self.running) {
-            const body = (try self.transport.readMessage(self.allocator)) orelse break;
-            defer self.allocator.free(body);
-
             var arena = std.heap.ArenaAllocator.init(self.allocator);
             defer arena.deinit();
             const a = arena.allocator();
+            try self.drainBackground(a);
+            // While bootstrap/scanning is active, wake periodically to apply
+            // results and publish readiness even if the client sends nothing.
+            // Once ready, return to a blocking read (no idle polling).
+            if (self.index.isScanning() or self.docs_service.hasPendingBootstrap()) {
+                if (!try self.transport.waitForInput(25)) continue;
+            }
+            const body = (try self.transport.readMessage(self.allocator)) orelse break;
+            defer self.allocator.free(body);
 
             const msg = std.json.parseFromSliceLeaky(Value, a, body, .{}) catch continue;
             self.dispatch(a, msg) catch |err| {
@@ -142,12 +137,7 @@ pub const Server = struct {
         const id = json_util.field(msg, "id");
         const params = json_util.field(msg, "params") orelse Value.null;
 
-        self.index.drain();
-        if (self.index.takeReadyEvent()) {
-            var ready = json_util.obj(a);
-            try ready.put("filesCount", json_util.num(@as(i64, @intCast(self.index.count()))));
-            try self.notify(a, "ansible/workspaceIndexReady", .{ .object = ready });
-        }
+        try self.drainBackground(a);
 
         if (id) |req_id| {
             handlers.handleRequest(self, a, req_id, method, params) catch |err| {
@@ -155,6 +145,20 @@ pub const Server = struct {
             };
         } else {
             try handlers.handleNotification(self, a, method, params);
+        }
+    }
+
+    fn drainBackground(self: *Server, a: Allocator) !void {
+        self.index.drain();
+        if (self.index.takeReadyEvent()) {
+            var ready = json_util.obj(a);
+            try ready.put("filesCount", json_util.num(@as(i64, @intCast(self.index.count()))));
+            try self.notify(a, "ansible/workspaceIndexReady", .{ .object = ready });
+        }
+        if (self.docs_service.takeReadyEvent()) {
+            var ready = json_util.obj(a);
+            try ready.put("modulesCount", json_util.num(self.docs.catalogCount()));
+            try self.notify(a, "ansible/docsLibraryReady", .{ .object = ready });
         }
     }
 
@@ -336,8 +340,7 @@ pub const Server = struct {
         return .{
             .workspace_root = root,
             .venv = self.venvPath(),
-            .dump_roles = self.ansible_config.rolesPath(),
-            .dump_collections = self.ansible_config.collectionsPaths(),
+            .config = &self.ansible_config,
             .workspace_collections = self.workspaceCollectionPaths(root),
         };
     }

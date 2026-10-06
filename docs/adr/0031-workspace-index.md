@@ -32,8 +32,10 @@ Keep a persistent, in-memory **Workspace index** owned by the server.
 - **Initial build.** On `initialized`, one pool task per Workspace (ADR-0011)
   walks and parses in the background. Finished entries go to a pending queue
   guarded by a mutex. The main thread drains that queue before handling each
-  message, so it remains the sole writer of the index map. When the scan
-  finishes the server sends `ansible/workspaceIndexReady` with the file count.
+  message and while waiting for input during background startup, so it remains
+  the sole writer of the index map. When the scan finishes the server sends
+  `ansible/workspaceIndexReady` with the file count, even if the client is idle.
+  Docs bootstrap proceeds independently and does not delay scan submission.
 - **Open documents.** Facts for open documents are computed from the document
   store at query time, so unsaved edits win over the indexed disk copy.
 - **Updates.** When the client supports dynamic registration, the server

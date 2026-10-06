@@ -40,6 +40,7 @@ smoke: build
 	python3 test/smoke_code_actions.py
 	python3 test/smoke_role_navigation.py
 	python3 test/smoke_workspace.py
+	python3 test/smoke_cold_start.py
 
 run: build
 	./zig-out/bin/zals $(ARGS)

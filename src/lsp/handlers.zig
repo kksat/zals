@@ -50,10 +50,7 @@ pub fn handleRequest(self: *Server, a: Allocator, id: Value, method: []const u8,
 pub fn handleNotification(self: *Server, a: Allocator, method: []const u8, params: Value) !void {
     if (std.mem.eql(u8, method, "initialized")) {
         self.initialized = true;
-        self.docs_service.start(&self.docs, self.pool, &self.ansible_config);
-        var ready = json_util.obj(a);
-        try ready.put("modulesCount", json_util.num(self.docs.catalogCount()));
-        try self.notify(a, "ansible/docsLibraryReady", .{ .object = ready });
+        self.docs_service.start(&self.docs, self.pool);
         try self.warnMissingWorkspace(a);
         try self.registerFileWatchers(a);
         try self.syncIndex(false);
@@ -145,20 +142,16 @@ fn resolveResult(self: *Server, a: Allocator, params: Value) !Value {
 fn hoverResult(self: *Server, a: Allocator, params: Value) !Value {
     const loc = documentOffset(self, params) orelse return Value.null;
     if (try providers.field_navigation.hover(self, a, params)) |h| return encode.hover(a, h);
+    // Navigation hovers need YAML and Workspace facts, not a module catalog.
+    // Resolve them before docsForUri, whose cold library loads subprocesses.
+    if (try providers.collections.hover(self, a, params)) |h| return encode.hover(a, h);
+    if (try providers.role_navigation.hover(self, a, params)) |h| return encode.hover(a, h);
+    if (try providers.role_navigation.parameterHover(self, a, params)) |h| return encode.hover(a, h);
+    if (try providers.variable_hover.hover(self, a, params)) |h| return encode.hover(a, h);
     var opened = cursor.Doc.open(a, loc.doc.bytes()) catch return Value.null;
     defer opened.deinit();
     const lib = try self.docsForUri(a, loc.doc.uri);
     const cur = try opened.at(loc.doc.uri, loc.offset, cursor.fromLibrary(lib));
-    if (try providers.collections.hover(self, a, params)) |h| return encode.hover(a, h);
-    if (cur) |c| switch (c) {
-        .role_reference => return encode.hover(a, try providers.role_navigation.hover(self, a, params)),
-        else => {},
-    };
-    if (try providers.role_navigation.parameterHover(self, a, params)) |h| return encode.hover(a, h);
-    if (cur) |c| switch (c) {
-        .variable => return encode.hover(a, try providers.variable_hover.hover(self, a, params)),
-        else => {},
-    };
     return encode.hover(a, try providers.hover.format(a, loc.doc, cur));
 }
 

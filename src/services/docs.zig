@@ -152,12 +152,22 @@ pub const DocsLibrary = struct {
             if (self.findModule(fqcn)) |m| return m;
         }
 
-        var it = self.catalog.iterator();
-        while (it.next()) |e| {
-            const key = e.key_ptr.*;
-            if (std.mem.endsWith(u8, key, name) and key.len > name.len and key[key.len - name.len - 1] == '.') {
-                if (self.findModule(key)) |m| return m;
+        // Bootstrap may still be adding catalog entries. Snapshot candidate
+        // names under the lock, then release it before fetching any docs.
+        var candidates = std.array_list.Managed([]const u8).init(arena);
+        {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            var it = self.catalog.iterator();
+            while (it.next()) |e| {
+                const key = e.key_ptr.*;
+                if (std.mem.endsWith(u8, key, name) and key.len > name.len and key[key.len - name.len - 1] == '.') {
+                    candidates.append(key) catch return null;
+                }
             }
+        }
+        for (candidates.items) |key| {
+            if (self.findModule(key)) |m| return m;
         }
         return null;
     }

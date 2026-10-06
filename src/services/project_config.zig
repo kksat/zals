@@ -30,6 +30,9 @@ pub const Context = struct {
     dump_roles: []const []const u8 = &.{},
     /// `COLLECTIONS_PATHS` from `ansible-config dump`.
     dump_collections: []const []const u8 = &.{},
+    /// Lazy fallback for server callers. Do not shell out for a dump when
+    /// environment or ansible.cfg already supplies the requested paths.
+    config: ?*@import("ansible_config.zig").AnsibleConfig = null,
     /// Directories in the Workspace that contain `ansible_collections/`.
     workspace_collections: []const []const u8 = &.{},
     env: Env = processEnv,
@@ -103,7 +106,8 @@ pub fn rolesPaths(a: Allocator, ctx: Context, file_path: []const u8) ![]const []
     } else if ((try configValues(a, ctx, file_path)).roles_path) |p| {
         try appendAll(&out, p);
     } else {
-        for (ctx.dump_roles) |p| try appendUnique(&out, try expandHome(a, p, ctx.env));
+        const dumped = if (ctx.config) |config| config.rolesPath() else ctx.dump_roles;
+        for (dumped) |p| try appendUnique(&out, try expandHome(a, p, ctx.env));
     }
     for (default_roles_paths) |p| try appendUnique(&out, try expandHome(a, p, ctx.env));
     return out.toOwnedSlice();
@@ -129,7 +133,8 @@ pub fn collectionsPaths(a: Allocator, ctx: Context, file_path: []const u8) ![]co
     } else if ((try configValues(a, ctx, file_path)).collections_path) |p| {
         try appendAll(&out, p);
     } else {
-        for (ctx.dump_collections) |p| try appendUnique(&out, try expandHome(a, p, ctx.env));
+        const dumped = if (ctx.config) |config| config.collectionsPaths() else ctx.dump_collections;
+        for (dumped) |p| try appendUnique(&out, try expandHome(a, p, ctx.env));
     }
     if (try venvRoot(a, ctx)) |venv| {
         if (hasCollections(a, venv)) try appendUnique(&out, venv);
@@ -377,6 +382,46 @@ test "environment overrides ansible.cfg" {
     const paths = try rolesPaths(a, ctx, try tree.path(a, "site.yml"));
     try testing.expectEqualStrings("/env/roles", paths[0]);
     try testing.expectEqualStrings("/home/u/more", paths[1]);
+}
+
+test "config dump is lazy behind environment and file paths, then cached" {
+    const exec = @import("../exec/root.zig");
+    const Probe = struct {
+        calls: usize = 0,
+        fn run(ptr: *anyopaque, a: Allocator, _: []const []const u8) !exec.Result {
+            const self: *@This() = @ptrCast(@alignCast(ptr));
+            self.calls += 1;
+            return .{
+                .stdout = try a.dupe(u8, "DEFAULT_ROLES_PATH(default) = ['/dump/roles']\nCOLLECTIONS_PATHS(default) = ['/dump/collections']\n"),
+                .stderr = try a.dupe(u8, ""),
+                .term = .{ .Exited = 0 },
+            };
+        }
+        const vtable = exec.Runner.VTable{ .run = run };
+    };
+    var probe = Probe{};
+    var config = @import("ansible_config.zig").AnsibleConfig.init(testing.allocator, .{ .ptr = &probe, .vtable = &Probe.vtable });
+    defer config.deinit();
+    var tree = try Tree.init();
+    defer tree.deinit();
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    try tree.write("ansible.cfg", "[defaults]\nroles_path = ./configured_roles\ncollections_path = ./configured_collections\n");
+    const file = try tree.path(a, "site.yml");
+    var ctx = Context{ .workspace_root = tree.root, .config = &config, .venv = "", .env = fakeEnv };
+    const roles = try rolesPaths(a, ctx, file);
+    try testing.expectEqualStrings("/env/roles", roles[0]);
+    const collections = try collectionsPaths(a, ctx, file);
+    try testing.expectEqualStrings(try tree.path(a, "configured_collections"), collections[0]);
+    ctx.env = noEnv;
+    _ = try rolesPaths(a, ctx, file);
+    try testing.expectEqual(@as(usize, 0), probe.calls);
+
+    try std.fs.cwd().deleteFile(try tree.path(a, "ansible.cfg"));
+    try testing.expectEqualStrings("/dump/roles", (try rolesPaths(a, ctx, file))[0]);
+    try testing.expectEqualStrings("/dump/collections", (try collectionsPaths(a, ctx, file))[0]);
+    try testing.expectEqual(@as(usize, 1), probe.calls);
 }
 
 test "dump values apply without config or environment" {

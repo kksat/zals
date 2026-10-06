@@ -18,6 +18,33 @@ pub const Transport = struct {
         return .{ .in_file = in_file, .out_file = out_file };
     }
 
+    /// Wait for the next input without stranding background readiness events.
+    /// Buffered bytes must win over polling the fd (a read can contain several
+    /// LSP messages). EOF/error readiness is passed to readMessage as usual.
+    pub fn waitForInput(self: *Transport, timeout_ms: i32) !bool {
+        if (self.in_pos < self.in_len) return true;
+        if (@import("builtin").os.tag == .windows) {
+            const windows = std.os.windows;
+            const Pipe = struct {
+                extern "kernel32" fn PeekNamedPipe(
+                    windows.HANDLE,
+                    ?*anyopaque,
+                    windows.DWORD,
+                    ?*windows.DWORD,
+                    ?*windows.DWORD,
+                    ?*windows.DWORD,
+                ) callconv(.winapi) windows.BOOL;
+            };
+            var available: windows.DWORD = 0;
+            // A closed pipe or non-pipe input should fall through to read.
+            if (Pipe.PeekNamedPipe(self.in_file.handle, null, 0, null, &available, null) == 0 or available > 0) return true;
+            std.Thread.sleep(@as(u64, @intCast(timeout_ms)) * std.time.ns_per_ms);
+            return false;
+        }
+        var fds = [_]std.posix.pollfd{.{ .fd = self.in_file.handle, .events = std.posix.POLL.IN, .revents = 0 }};
+        return try std.posix.poll(&fds, timeout_ms) != 0;
+    }
+
     fn fill(self: *Transport) !void {
         if (self.in_pos < self.in_len) return;
         const n = self.in_file.read(&self.in_buf) catch |err| switch (err) {
@@ -122,4 +149,12 @@ test "frame round trip" {
     const msg = (try reader.readMessage(allocator)).?;
     defer allocator.free(msg);
     try std.testing.expectEqualStrings("{\"jsonrpc\":\"2.0\"}", msg);
+}
+
+test "input waiting honors already buffered messages" {
+    const file = std.fs.File.stdin();
+    var transport = Transport.init(file, std.fs.File.stdout());
+    transport.in_len = 2;
+    transport.in_pos = 1;
+    try std.testing.expect(try transport.waitForInput(0));
 }

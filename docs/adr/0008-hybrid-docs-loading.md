@@ -16,8 +16,10 @@ hover or completion stall.
 
 Use a **hybrid strategy**:
 
-1. **Eager catalog** — run `ansible-doc -l --json` at startup to get module names
-   and short descriptions.
+1. **Early background catalog** — schedule version probing, cache loading,
+   `ansible-doc -l --json`, and module discovery on the worker pool at
+   `initialized`. None of these subprocesses blocks initialization or the
+   Workspace scan.
 2. **Lazy batched docs** — when a feature needs a module's full docs, request it
    in a batch with other pending modules.
 3. **Background prefetch** — after startup, load all modules in the background
@@ -28,13 +30,24 @@ Workspaces ([ADR-0014](0014-multi-root-workspace.md)).
 
 This is implemented in `services/docs_service.zig` (orchestration),
 `services/docs_cache.zig` (JSON persistence), and `concurrency/pool.zig` (the
-worker pool). The catalog is loaded synchronously on `initialized` so
-`ansible/docsLibraryReady` fires promptly; prefetch and cache writes run on the
-pool and are cancelled on shutdown.
+worker pool). The main thread sends `ansible/docsLibraryReady` only after catalog bootstrap
+and module discovery finish. While bootstrap or Workspace scanning is pending,
+it waits for input in bounded 25 ms intervals, applies background results, and
+reports readiness even to an idle client. It returns to blocking input once
+both readiness events are consumed. Prefetch and cache writes run on the pool
+and are cancelled on shutdown.
+
+Navigation hovers for variables, fields, roles, and collections resolve before
+opening a contextual module library: they do not need module docs. Config dumps
+are lazy fallbacks, skipped when the environment or `ansible.cfg` supplies the
+requested search paths. Contextual module libraries remain isolated by ordered
+collection paths and working directory (ADR-0037); their first module-specific
+request can still wait for uncached documentation.
 
 ## Consequences
 
-- Startup is fast; the catalog is available almost immediately.
+- Startup and navigation replies do not depend on catalog bootstrap completing;
+  the catalog becomes available independently in the background.
 - The first hover/completion for an uncached module may wait on a batch, but
   batching amortizes the process cost.
 - The background prefetch warms the cache so later requests are instant.
