@@ -22,13 +22,18 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    // Vendored tree-sitter runtime + tree-sitter-yaml grammar (ADR-0004).
+    // The vendored parser dominates cold indexing when compiled at -O0.
+    // Optimize its C code even in Debug without defining NDEBUG or changing
+    // the requested Zig debug checks. Keep release-mode flags unchanged.
     const ts = b.addLibrary(.{
         .name = "tree_sitter",
         .root_module = b.createModule(.{ .target = target, .optimize = optimize }),
         .linkage = .static,
     });
-    ts.addCSourceFiles(.{ .files = &tree_sitter_c, .flags = &.{"-std=gnu11"} });
+    ts.addCSourceFiles(.{
+        .files = &tree_sitter_c,
+        .flags = if (optimize == .Debug) &.{ "-std=gnu11", "-O2" } else &.{"-std=gnu11"},
+    });
     ts.addIncludePath(b.path("vendor/tree-sitter/include"));
     ts.addIncludePath(b.path("vendor/tree-sitter/src"));
     ts.addIncludePath(b.path("vendor/tree-sitter-yaml/src"));
