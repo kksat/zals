@@ -114,7 +114,8 @@ release page and put `zals` on your `PATH`.
 make build           # build the server into zig-out/bin/zals
 make test            # run unit tests
 make e2e             # run all stdio E2E suites (requires ansible-core on PATH)
-make smoke           # run the existing stdio smoke tests
+make smoke           # run stdio smoke tests, including the latency matrix
+make benchmark-operations # generate checked editor-operation latency tables
 make run ARGS=--version
 ```
 
@@ -134,6 +135,12 @@ also runs the collection-symbol, file-URI, unsaved-argument-spec, and
 suite requires `ansible` and `ansible-doc` from `ansible-core` on PATH; CI uses
 Python 3.12 and `ansible-core==2.19.2`. No suite installs collections or executes
 playbooks. Unit, E2E, and smoke targets run in separate CI jobs.
+
+[Editor operation benchmarks](docs/performance/README.md) cover navigation,
+completion, symbols, tokens and code actions, with Debug/ReleaseSafe example
+tables and optional raw JSON samples. `make test` also runs the benchmark's
+Python statistics/validation checks using `python3`; `zig build test` runs
+only the Zig unit tests.
 
 > **macOS 26 + Xcode 26.5 SDK:** Zig 0.15.1's bundled lld fails to link against
 > the SDK's `libSystem.B.tbd` (it lists `arm64e-macos` but not `arm64-macos`),

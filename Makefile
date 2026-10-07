@@ -13,13 +13,14 @@ endif
 
 ARGS ?=
 
-.PHONY: build test e2e neovim-test run fmt clean parity smoke
+.PHONY: build test e2e neovim-test run fmt clean parity smoke benchmark-operations
 
 build:
 	zig build
 
 test:
 	zig build test
+	python3 -m unittest discover -s test -p 'test_benchmark_operations.py'
 
 e2e:
 	zig build e2e
@@ -41,6 +42,11 @@ smoke: build
 	python3 test/smoke_role_navigation.py
 	python3 test/smoke_workspace.py
 	python3 test/smoke_cold_start.py
+	python3 test/benchmark_operations.py --files 2 --tasks 2 --sessions 1 --samples 1 --warmup 0 > /dev/null
+
+# End-to-end request latency tables; pass output paths/load via ARGS.
+benchmark-operations: build
+	python3 test/benchmark_operations.py --label Debug $(ARGS)
 
 run: build
 	./zig-out/bin/zals $(ARGS)

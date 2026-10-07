@@ -1,5 +1,8 @@
 # Cold Workspace indexing performance
 
+For definition, implementation, references, hover and other request latency
+matrices, see [Editor operation benchmarks](performance/README.md).
+
 Measure initialization through `ansible/workspaceIndexReady`, not module-docs
 prefetch. The benchmark starts a new server for every sample, isolates its docs
 cache, disables Ansible subprocesses by using an empty `PATH`, and waits for
