@@ -18,15 +18,26 @@ SUITE ?=
 FILE ?=
 FILTER ?=
 
-.PHONY: help build test e2e zig-test zig neovim-test run fmt clean parity smoke benchmark-operations
+.PHONY: help check lint hooks build test e2e zig-test zig neovim-test run fmt clean parity smoke benchmark-operations
 
 help:
+	@echo 'make check                          lint + build + unit tests; run before committing'
 	@echo 'make build [OPTIMIZE=ReleaseFast]   build zig-out/bin/zals'
 	@echo 'make test                           unit tests'
 	@echo 'make e2e [SUITE=navigation-e2e]     all stdio E2E suites, or one (see zig build -l)'
 	@echo 'make zig-test FILE=test/x.zig [FILTER=name]  build, then run one Zig test root'
 	@echo 'make zig ARGS="build -l"            any zig command with the macOS workaround'
-	@echo 'make smoke | parity | fmt | run ARGS=--version'
+	@echo 'make smoke | parity | fmt | hooks | run ARGS=--version'
+
+# Pre-commit gate; CI runs lint, test, e2e, and smoke as separate jobs.
+check: lint build test
+
+lint:
+	zig fmt --check src build.zig build.zig.zon test
+
+# Point git at the tracked hooks (fmt + whitespace, Conventional Commit subject).
+hooks:
+	git config core.hooksPath .githooks
 
 build:
 	zig build $(if $(OPTIMIZE),-Doptimize=$(OPTIMIZE))
@@ -74,7 +85,7 @@ run: build
 	./zig-out/bin/zals $(ARGS)
 
 fmt:
-	zig fmt src build.zig test
+	zig fmt src build.zig build.zig.zon test
 
 clean:
 	rm -rf zig-out .zig-cache

@@ -1,0 +1,12 @@
+#!/bin/sh
+# Checks the staged snapshot: whitespace errors and `zig fmt` on staged Zig files.
+# Install with `make hooks`.
+status=0
+git diff --cached --check || status=1
+for f in $(git diff --cached --name-only --diff-filter=ACMR -- '*.zig' '*.zon'); do
+	if ! git show ":$f" | zig fmt --stdin --check >/dev/null 2>&1; then
+		echo "pre-commit: $f is not zig-fmt formatted (run: make fmt)" >&2
+		status=1
+	fi
+done
+exit $status

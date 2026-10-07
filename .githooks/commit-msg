@@ -1,0 +1,13 @@
+#!/bin/sh
+# Releases are derived from Conventional Commits (docs/adr/0026-release-process.md).
+# Install with `make hooks`.
+subject=$(grep -v '^#' "$1" | head -n 1)
+case "$subject" in
+	Merge\ *|Revert\ *|fixup!\ *|squash!\ *|amend!\ *) exit 0 ;;
+esac
+if printf '%s\n' "$subject" | grep -Eq '^(feat|fix|docs|test|refactor|perf|build|ci|chore|style|revert)(\([a-z0-9._/-]+\))?!?: .+'; then
+	exit 0
+fi
+echo "commit-msg: subject is not a Conventional Commit: $subject" >&2
+echo "  expected: <type>(<scope>)?: <summary>, type one of feat fix docs test refactor perf build ci chore style revert" >&2
+exit 1

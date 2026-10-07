@@ -111,6 +111,8 @@ release page and put `zals` on your `PATH`.
 ## Build
 
 ```sh
+make check           # lint (zig fmt --check) + build + unit tests
+make hooks           # install the tracked pre-commit and commit-msg hooks
 make build           # build the server into zig-out/bin/zals
 make test            # run unit tests
 make e2e             # run all stdio E2E suites (requires ansible-core on PATH)

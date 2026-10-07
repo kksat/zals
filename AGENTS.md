@@ -8,4 +8,4 @@ Run Zig through `make` (`make help`); it carries the macOS SDK link workaround (
 
 Use [Conventional Commits](https://www.conventionalcommits.org/). Releases are derived from these messages ([ADR-0026](docs/adr/0026-release-process.md)).
 
-After making changes, validate and commit each completed logical change separately. Each commit must have one reason to change and be reviewable on its own.
+After making changes, run `make check` and commit each completed logical change separately. Each commit must have one reason to change and be reviewable on its own.
