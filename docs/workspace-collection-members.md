@@ -81,12 +81,10 @@ files require a save or restart as in ADR-0031.
 Run from the repository root:
 
 ```sh
-make build
-DEVELOPER_DIR=/nonexistent zig test test/collection_symbols_e2e.zig
+make zig-test FILE=test/collection_symbols_e2e.zig
 ```
 
-The environment override is the repository's macOS SDK workaround (on
-other platforms it is unnecessary). Tests start a real stdio zals process,
+Tests start a real stdio zals process,
 isolate HOME, use static explicit collection paths, and wait for the
 Workspace index readiness notification. They neither install dependencies
 nor edit fixture files on disk. Unsaved changes use only LSP notifications.

@@ -12,18 +12,40 @@ export DEVELOPER_DIR := /nonexistent
 endif
 
 ARGS ?=
+# Optional knobs: OPTIMIZE (build), SUITE (e2e), FILE and FILTER (zig-test).
+OPTIMIZE ?=
+SUITE ?=
+FILE ?=
+FILTER ?=
 
-.PHONY: build test e2e neovim-test run fmt clean parity smoke benchmark-operations
+.PHONY: help build test e2e zig-test zig neovim-test run fmt clean parity smoke benchmark-operations
+
+help:
+	@echo 'make build [OPTIMIZE=ReleaseFast]   build zig-out/bin/zals'
+	@echo 'make test                           unit tests'
+	@echo 'make e2e [SUITE=navigation-e2e]     all stdio E2E suites, or one (see zig build -l)'
+	@echo 'make zig-test FILE=test/x.zig [FILTER=name]  build, then run one Zig test root'
+	@echo 'make zig ARGS="build -l"            any zig command with the macOS workaround'
+	@echo 'make smoke | parity | fmt | run ARGS=--version'
 
 build:
-	zig build
+	zig build $(if $(OPTIMIZE),-Doptimize=$(OPTIMIZE))
 
 test:
 	zig build test
 	python3 -m unittest discover -s test -p 'test_benchmark_operations.py'
 
 e2e:
-	zig build e2e
+	zig build $(or $(SUITE),e2e)
+
+# Stdio test roots spawn zig-out/bin/zals, so build it first.
+zig-test:
+	@test -n "$(FILE)" || { echo 'usage: make zig-test FILE=test/<root>.zig [FILTER=<test name>]'; exit 2; }
+	zig build
+	zig test $(FILE) $(if $(FILTER),--test-filter '$(FILTER)')
+
+zig:
+	zig $(ARGS)
 
 # Optional editor integration test; requires Neovim 0.11+.
 neovim-test: build

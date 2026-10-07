@@ -14,9 +14,8 @@ make benchmark-operations
 # Save the table and raw data. Parent directories are created automatically.
 make benchmark-operations ARGS="--markdown /tmp/zals-perf/debug.md --json /tmp/zals-perf/debug.json"
 
-# ReleaseSafe is the mode used for release artifacts. On macOS the SDK
-# workaround from Makefile/ADR-0019 is needed for a direct zig invocation.
-DEVELOPER_DIR=/nonexistent zig build -Doptimize=ReleaseSafe
+# ReleaseSafe is the mode used for release artifacts.
+make build OPTIMIZE=ReleaseSafe
 python3 test/benchmark_operations.py --label ReleaseSafe \
   --markdown /tmp/zals-perf/release-safe.md --json /tmp/zals-perf/release-safe.json
 

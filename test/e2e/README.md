@@ -1,6 +1,6 @@
 # Navigation E2E suite
 
-Run `zig build navigation-e2e` to build zals and run **one** Zig E2E test over
+Run `make e2e SUITE=navigation-e2e` to build zals and run **one** Zig E2E test over
 the named cases (`make e2e` runs this and the independent suites listed below). It starts one stdio server with an isolated HOME and the checked-in
 collections/roles paths, waits for `ansible/workspaceIndexReady`, then opens
 source files with
@@ -73,5 +73,5 @@ The build tracks the server and every relevant fixture/dependency file as run
 inputs. The module-docs suite always runs because changes to the external
 Ansible installation are not represented by those file inputs. These suites
 remain separate from `make test` and the existing Python smoke targets.
-On macOS, direct Zig invocations may need `DEVELOPER_DIR=/nonexistent`, as
-explained in the root README.
+Run one suite with `make e2e SUITE=<step>` (`make zig ARGS="build -l"` lists
+the steps).

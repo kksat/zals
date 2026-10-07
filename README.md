@@ -114,18 +114,15 @@ release page and put `zals` on your `PATH`.
 make build           # build the server into zig-out/bin/zals
 make test            # run unit tests
 make e2e             # run all stdio E2E suites (requires ansible-core on PATH)
+make e2e SUITE=navigation-e2e                 # run one E2E suite
+make zig-test FILE=test/navigation_uris_e2e.zig FILTER='stdio navigation'
 make smoke           # run stdio smoke tests, including the latency matrix
 make benchmark-operations # generate checked editor-operation latency tables
 make run ARGS=--version
 ```
 
-Or invoke Zig directly:
-
-```sh
-zig build
-zig build test
-zig build e2e
-```
+`make help` lists every target; `make zig ARGS="..."` runs any other Zig
+command.
 
 The [navigation E2E suite](test/e2e/README.md) uses a static Ansible Workspace
 and an explicitly written location oracle; `zig build navigation-e2e` needs no
@@ -145,8 +142,8 @@ only the Zig unit tests.
 > **macOS 26 + Xcode 26.5 SDK:** Zig 0.15.1's bundled lld fails to link against
 > the SDK's `libSystem.B.tbd` (it lists `arm64e-macos` but not `arm64-macos`),
 > producing undefined libc symbols. The `Makefile` works around this by setting
-> `DEVELOPER_DIR=/nonexistent`, which makes Zig use its bundled libc stubs. If
-> you call `zig build` directly, export that variable first. See
+> `DEVELOPER_DIR=/nonexistent`, which makes Zig use its bundled libc stubs. Run
+> Zig through `make` (`make help`; `make zig ARGS=...` for anything else). See
 > [ADR-0019](docs/adr/0019-toolchain-build-and-platforms.md).
 
 ## Usage

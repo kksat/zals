@@ -18,10 +18,8 @@ locations, explicit escaped URI suffixes, and exact existing targets.
 Run from the repository root:
 
 ```sh
-make build
-DEVELOPER_DIR=/nonexistent zig test test/navigation_uris_e2e.zig --test-filter 'stdio navigation'
+make zig-test FILE=test/navigation_uris_e2e.zig FILTER='stdio navigation'
 ```
 
-`DEVELOPER_DIR` is the macOS SDK workaround from ADR-0019; other platforms may
-omit it. The root suite imports only test-side LSP transport/anchor helpers,
+The root suite imports only test-side LSP transport/anchor helpers,
 never server providers or URI-conversion code.

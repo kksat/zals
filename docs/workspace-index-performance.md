@@ -14,8 +14,8 @@ silently improve the result.
 make build
 python3 test/benchmark_workspace.py --files 1000 --runs 5 --max-ms 1000
 
-# Optimized production-like build (the Makefile's macOS SDK workaround applies).
-DEVELOPER_DIR=/nonexistent zig build -Doptimize=ReleaseFast
+# Optimized production-like build.
+make build OPTIMIZE=ReleaseFast
 python3 test/benchmark_workspace.py --files 8000 --runs 5 --max-ms 1000
 
 # Use the actual Workspace that feels slow; leave its sources unchanged.
