@@ -46,7 +46,7 @@ callee's `include_vars` target and its loaded dictionary, checking the exact
 load/vars/default implementation order. These are preservation oracles for the
 index-reuse refactor, not artificially failing tests. A JSON dependency scenario
 locks down extension-independent loads and original-source buffer ranges;
-load-looking data controls must not widen callee scope. Post-review evidence is
-[recorded separately](../../test/field_navigation_review_e2e.md).
+load-looking data controls must not widen callee scope. The post-review
+contracts are [listed separately](../../test/field_navigation_review_e2e.md).
 No playbook execution, loop tracing,
 YAML alias expansion, or fixture mutation is involved.

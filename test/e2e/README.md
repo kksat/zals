@@ -55,12 +55,11 @@ files on disk.
 | `navigation-uris-e2e` | `test/navigation_uris_e2e.zig` | Absolute and escaped targets from relative/absolute search paths |
 | `selected-venv-e2e` | `test/selected_venv_e2e.zig` | Selected installations, per-file module docs, discovery, and cache isolation |
 
-Field-expression RED/GREEN evidence and literal-escape limitations are recorded
-in [`test/field_expressions_e2e.md`](../field_expressions_e2e.md). Raw/assignment
-boundary evidence is in
-[`test/field_lexical_boundaries_e2e.md`](../field_lexical_boundaries_e2e.md).
-Post-review binding/load boundaries, JSON dependencies, index reuse, and final
-aggregate evidence are in
+Field-expression coverage and literal-escape limitations are in
+[`test/field_expressions_e2e.md`](../field_expressions_e2e.md); raw/assignment
+boundaries in
+[`test/field_lexical_boundaries_e2e.md`](../field_lexical_boundaries_e2e.md);
+post-review binding/load boundaries, JSON dependencies, and index reuse in
 [`test/field_navigation_review_e2e.md`](../field_navigation_review_e2e.md).
 
 The last suite requires `ansible` and `ansible-doc` on PATH (see

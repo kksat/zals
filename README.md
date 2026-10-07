@@ -127,7 +127,7 @@ make run ARGS=--version
 command.
 
 The [navigation E2E suite](test/e2e/README.md) uses a static Ansible Workspace
-and an explicitly written location oracle; `zig build navigation-e2e` needs no
+and an explicitly written location oracle; `make e2e SUITE=navigation-e2e` needs no
 Galaxy installation, virtual environment, or Ansible execution. `make e2e`
 also runs the collection-symbol, file-URI, unsaved-argument-spec, and
 [selected-venv/module-docs](test/selected_venv_e2e.md) suites. The module-docs
