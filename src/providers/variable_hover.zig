@@ -17,43 +17,24 @@ const Facts = @import("../workspace/facts.zig").Facts;
 const max_listed = 20;
 const max_value_lines = 12;
 
-/// Hover for the variable under the cursor, or null.
+const navigation = @import("../queries/variable_navigation.zig");
+
 pub fn hover(self: *Server, a: Allocator, params: Value) !?types.Hover {
     const loc = util.cursorAt(self, params) orelse return null;
-    var cache = descriptions.Cache.init(self, a);
-    defer cache.deinit();
-    var index = variables.Index.init(a, cache.source());
-    const cur = (try index.occurrenceAt(a, loc.doc.uri, loc.offset)) orelse return null;
-    const range = loc.doc.rangeFromOffsets(cur.start, cur.end);
-    return try hoverNameCaptured(self, a, &cache, loc.doc.uri, cur.name, range);
+    var query = navigation.Query.init(self, a);
+    defer query.deinit();
+    var subject = query.subjectAt(.{ .uri = loc.doc.uri, .offset = loc.offset }) orelse return null;
+    defer subject.deinit();
+    return query.rootHover(&subject);
 }
 
-/// Hover text for variable `name` as seen from `uri`.
+/// Compatibility entry point for a named root hover.
 pub fn hoverName(self: *Server, a: Allocator, uri: []const u8, name: []const u8, range: types.Range) !?types.Hover {
-    var cache = descriptions.Cache.init(self, a);
-    defer cache.deinit();
-    return hoverNameCaptured(self, a, &cache, uri, name, range);
-}
-
-fn hoverNameCaptured(self: *Server, a: Allocator, cache: *descriptions.Cache, uri: []const u8, name: []const u8, range: types.Range) !?types.Hover {
-    const path = try paths.uriToPath(a, uri);
-    var entries: []const Entry = &.{};
-    var root: ?[]const u8 = null;
-
-    if (try wv.View.forUri(self, a, uri)) |found| {
-        var v = found;
-        root = v.root;
-        const reach = try v.reachableFiles(path);
-        entries = try workspaceEntries(a, cache, try wv.view.definitions(a, v.files, name, reach), v.files);
-    } else {
-        var index = variables.Index.init(a, cache.source());
-        entries = try fallbackEntries(a, cache, try index.definitions(a, uri, name));
-    }
-    if (entries.len == 0) {
-        const text = try std.fmt.allocPrint(a, "**Variable** `{s}`\n\nNo definition found in the Workspace.", .{name});
-        return .{ .contents = .{ .kind = .markdown, .value = text }, .range = range };
-    }
-    return .{ .contents = .{ .kind = .markdown, .value = try render(a, name, entries, root) }, .range = range };
+    var query = navigation.Query.init(self, a);
+    defer query.deinit();
+    var subject = query.subjectAt(.{ .uri = uri, .offset = 0 }) orelse return null;
+    defer subject.deinit();
+    return try query.hoverName(&subject, name, range, .root);
 }
 
 pub const Entry = struct {
