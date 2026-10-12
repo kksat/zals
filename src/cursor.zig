@@ -330,10 +330,7 @@ fn libHas(ptr: *anyopaque, name: []const u8) bool {
 
 fn libFqcns(ptr: *anyopaque, out: *std.array_list.Managed([]const u8)) !void {
     const lib: *docs.DocsLibrary = @ptrCast(@alignCast(ptr));
-    lib.mutex.lock();
-    defer lib.mutex.unlock();
-    var it = lib.module_fqcns.iterator();
-    while (it.next()) |e| try out.append(e.key_ptr.*);
+    try lib.writeModuleFqcns(out);
 }
 
 const library_vtable = Docs.VTable{

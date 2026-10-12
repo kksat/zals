@@ -7,6 +7,8 @@ const exec = @import("../exec/root.zig");
 const json_util = @import("../lsp/json_util.zig");
 const AnsibleConfig = @import("ansible_config.zig").AnsibleConfig;
 
+/// Options returned by a library lookup are immutable borrowed views; all
+/// strings and nested slices remain valid until that library is deinitialized.
 pub const Option = struct {
     name: []const u8,
     description: []const u8,
@@ -19,6 +21,10 @@ pub const Option = struct {
     elements: []const u8 = "",
 };
 
+/// A library lookup returns an immutable borrowed view. Do not mutate or
+/// deinitialize options (including through a copied map). All backing storage
+/// remains valid until library deinit, even when later ingestion replaces this
+/// name. Library teardown requires readers to finish and workers to be joined.
 pub const Module = struct {
     name: []const u8,
     /// Short description (one line).
@@ -37,6 +43,13 @@ pub const CatalogEntry = struct {
     description: []const u8,
 };
 
+/// Startup disk-cache format, owned with the docs codec rather than the file
+/// adapter. Keep the existing version-3 representation compatible.
+pub const cache_format_version = 3;
+
+/// Owns synchronized docs storage. Strings/nested slices are append-only in the
+/// arena; replaced option maps are retained until teardown for borrowed views.
+/// Callers use operations below, not the storage fields or mutex.
 pub const DocsLibrary = struct {
     allocator: Allocator,
     runner: exec.Runner,
@@ -46,13 +59,14 @@ pub const DocsLibrary = struct {
     /// Short-name / FQCN → catalog description. Keys and values owned by `arena`.
     catalog: std.StringHashMap(CatalogEntry),
     modules: std.StringHashMap(Module),
+    retained_options: std.ArrayList(std.StringHashMap(Option)) = .empty,
     /// All module FQCNs discovered on disk (builtin + collections + redirects).
     /// Used for completion; keys are owned by `arena`.
     module_fqcns: std.StringHashMap(void),
     arena: std.heap.ArenaAllocator,
     ready: bool = false,
-    /// Guards `catalog` and `modules`. Held only while mutating/reading the
-    /// maps, never across an `ansible-doc` subprocess.
+    /// Guards all maps, arena allocation, readiness, and version. Never held
+    /// across a subprocess or disk I/O; cache encoding stays under the lock.
     mutex: std.Thread.Mutex = .{},
     /// Ansible version string used as part of the on-disk cache fingerprint.
     ansible_version: []const u8 = "",
@@ -74,6 +88,8 @@ pub const DocsLibrary = struct {
         var it = self.modules.iterator();
         while (it.next()) |e| e.value_ptr.options.deinit();
         self.modules.deinit();
+        for (self.retained_options.items) |*options| options.deinit();
+        self.retained_options.deinit(self.allocator);
         self.module_fqcns.deinit();
         self.arena.deinit();
     }
@@ -126,6 +142,7 @@ pub const DocsLibrary = struct {
         self.ready = true;
     }
 
+    /// Fetch on a miss; return an immutable view borrowing for library lifetime.
     pub fn findModule(self: *DocsLibrary, name: []const u8) ?Module {
         self.mutex.lock();
         if (self.modules.get(name)) |m| {
@@ -193,6 +210,153 @@ pub const DocsLibrary = struct {
         return self.module_fqcns.contains(name) or self.catalog.contains(name);
     }
 
+    /// Append filesystem-discovered FQCNs, including redirects, not catalog
+    /// names. The output list owns its storage; strings borrow until deinit.
+    pub fn writeModuleFqcns(self: *DocsLibrary, out: *std.array_list.Managed([]const u8)) !void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        var it = self.module_fqcns.iterator();
+        while (it.next()) |e| try out.append(e.key_ptr.*);
+    }
+
+    /// Snapshot catalog names without fetched docs. Caller frees the slice;
+    /// its immutable strings borrow until library deinit. Discovery-only names
+    /// are intentionally excluded. Concurrent fetches may make it redundant.
+    pub fn missingCatalogNames(self: *DocsLibrary, allocator: Allocator) ![][]const u8 {
+        var names = std.ArrayList([]const u8).empty;
+        errdefer names.deinit(allocator);
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        var it = self.catalog.iterator();
+        while (it.next()) |e| {
+            if (!self.modules.contains(e.key_ptr.*))
+                try names.append(allocator, e.key_ptr.*);
+        }
+        return names.toOwnedSlice(allocator);
+    }
+
+    /// Loader-only: retain an owned version for startup cache diagnostics.
+    pub fn recordAnsibleVersion(self: *DocsLibrary, version: []const u8) !void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        self.ansible_version = try self.arena.allocator().dupe(u8, version);
+    }
+
+    /// Startup-cache capability: return caller-owned encoded bytes from one
+    /// coherent library revision. No borrowed storage escapes and no disk I/O
+    /// happens here; the cache adapter writes only after this returns.
+    pub fn encodeCache(self: *DocsLibrary, allocator: Allocator) ![]u8 {
+        // Build the JSON tree in a scratch arena so nested maps are freed at once.
+        var arena = std.heap.ArenaAllocator.init(allocator);
+        defer arena.deinit();
+        const a = arena.allocator();
+
+        var root = std.json.ObjectMap.init(a);
+        try root.put("version", .{ .integer = cache_format_version });
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        try root.put("ansible_version", .{ .string = self.ansible_version });
+
+        var cat = std.json.ObjectMap.init(a);
+        var it = self.catalog.iterator();
+        while (it.next()) |e| try cat.put(e.key_ptr.*, .{ .string = e.value_ptr.description });
+        try root.put("catalog", .{ .object = cat });
+
+        var mods = std.json.ObjectMap.init(a);
+        var mit = self.modules.iterator();
+        while (mit.next()) |e| {
+            const m = e.value_ptr.*;
+            var mo = std.json.ObjectMap.init(a);
+            try mo.put("description", .{ .string = m.description });
+            try mo.put("long_description", try stringArray(a, m.long_description));
+            try mo.put("requirements", try stringArray(a, m.requirements));
+            try mo.put("notes", try stringArray(a, m.notes));
+            try mo.put("deprecated", .{ .bool = m.deprecated });
+            try mo.put("filename", .{ .string = m.filename });
+            var opts = std.json.ObjectMap.init(a);
+            var oit = m.options.iterator();
+            while (oit.next()) |oe| {
+                try opts.put(oe.key_ptr.*, try cacheOptionToJson(a, oe.value_ptr.*));
+            }
+            try mo.put("options", .{ .object = opts });
+            try mods.put(e.key_ptr.*, .{ .object = mo });
+        }
+        try root.put("modules", .{ .object = mods });
+
+        return std.json.Stringify.valueAlloc(allocator, Value{ .object = root }, .{});
+    }
+
+    /// Startup-cache capability: parse/validate before ingestion. Returns false
+    /// for invalid JSON or an incompatible format without modifying the library.
+    /// Retains copied docs just like subprocess ingestion; never shares them
+    /// with per-file contextual libraries.
+    pub fn restoreCache(self: *DocsLibrary, allocator: Allocator, bytes: []const u8) !bool {
+        const parsed = std.json.parseFromSlice(Value, allocator, bytes, .{}) catch return false;
+        defer parsed.deinit();
+        const v = json_util.integer(parsed.value, "version") orelse return false;
+        if (v != cache_format_version) return false;
+
+        const a = self.arena.allocator();
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        if (json_util.string(parsed.value, "ansible_version")) |ver| {
+            self.ansible_version = try a.dupe(u8, ver);
+        }
+
+        if (json_util.object(parsed.value, "catalog")) |cat| {
+            var it = cat.iterator();
+            while (it.next()) |e| {
+                const name = try a.dupe(u8, e.key_ptr.*);
+                const desc = switch (e.value_ptr.*) {
+                    .string => |s| s,
+                    else => "",
+                };
+                try self.catalog.put(name, .{ .name = name, .description = try a.dupe(u8, desc) });
+            }
+        }
+
+        if (json_util.object(parsed.value, "modules")) |mods| {
+            var it = mods.iterator();
+            while (it.next()) |e| {
+                const name = try a.dupe(u8, e.key_ptr.*);
+                var options = std.StringHashMap(Option).init(self.allocator);
+                errdefer options.deinit();
+                if (json_util.object(e.value_ptr.*, "options")) |opts| {
+                    var oi = opts.iterator();
+                    while (oi.next()) |oe| {
+                        const opt_name = try a.dupe(u8, oe.key_ptr.*);
+                        var opt = try cacheOptionFromJson(a, oe.value_ptr.*);
+                        opt.name = opt_name;
+                        try options.put(opt_name, opt);
+                    }
+                }
+                try self.storeModule(.{
+                    .name = name,
+                    .description = try a.dupe(u8, json_util.string(e.value_ptr.*, "description") orelse ""),
+                    .long_description = try cacheStringList(a, json_util.field(e.value_ptr.*, "long_description") orelse Value.null),
+                    .requirements = try cacheStringList(a, json_util.field(e.value_ptr.*, "requirements") orelse Value.null),
+                    .notes = try cacheStringList(a, json_util.field(e.value_ptr.*, "notes") orelse Value.null),
+                    .deprecated = json_util.boolean(e.value_ptr.*, "deprecated") orelse false,
+                    .filename = try a.dupe(u8, json_util.string(e.value_ptr.*, "filename") orelse ""),
+                    .options = options,
+                });
+            }
+        }
+
+        self.ready = true;
+        return true;
+    }
+
+    /// Caller holds the lock and transfers options ownership on success.
+    /// Replacements retain old map storage for previously borrowed Modules.
+    fn storeModule(self: *DocsLibrary, module: Module) !void {
+        const replacing = self.modules.contains(module.name);
+        if (replacing) try self.retained_options.ensureUnusedCapacity(self.allocator, 1);
+        if (try self.modules.fetchPut(module.name, module)) |old|
+            self.retained_options.appendAssumeCapacity(old.value.options);
+    }
+
     fn fetchOne(self: *DocsLibrary, name: []const u8) !void {
         const argv = [_][]const u8{ self.ansible_doc, "--json", "-t", "module", name };
         const result = try self.runner.runWithOptions(self.allocator, &argv, self.execution);
@@ -231,6 +395,7 @@ pub const DocsLibrary = struct {
             const doc = json_util.field(e.value_ptr.*, "doc") orelse continue;
             const filename = json_util.string(doc, "filename") orelse "";
             var options = std.StringHashMap(Option).init(self.allocator);
+            errdefer options.deinit();
             if (json_util.object(doc, "options")) |opts| {
                 var oi = opts.iterator();
                 while (oi.next()) |opt| {
@@ -247,7 +412,7 @@ pub const DocsLibrary = struct {
                 }
             }
             const stored_name = try a.dupe(u8, e.key_ptr.*);
-            try self.modules.put(stored_name, .{
+            try self.storeModule(.{
                 .name = stored_name,
                 .description = try a.dupe(u8, shortDescriptionOf(doc) orelse ""),
                 .long_description = try stringList(a, json_util.field(doc, "description") orelse Value.null),
@@ -260,6 +425,66 @@ pub const DocsLibrary = struct {
         }
     }
 };
+
+fn cacheOptionToJson(a: Allocator, o: Option) !Value {
+    var oo = std.json.ObjectMap.init(a);
+    try oo.put("description", .{ .string = o.description });
+    try oo.put("type", .{ .string = o.type });
+    try oo.put("required", .{ .bool = o.required });
+    try oo.put("default", if (o.default) |d| .{ .string = d } else .null);
+    try oo.put("elements", .{ .string = o.elements });
+    if (o.suboptions.len > 0) {
+        var subs = std.json.ObjectMap.init(a);
+        for (o.suboptions) |s| try subs.put(s.name, try cacheOptionToJson(a, s));
+        try oo.put("suboptions", .{ .object = subs });
+    }
+    return .{ .object = oo };
+}
+
+fn cacheOptionFromJson(a: Allocator, v: Value) !Option {
+    var sub: []const Option = &.{};
+    if (json_util.object(v, "suboptions")) |subs| {
+        var list = std.ArrayList(Option).empty;
+        var it = subs.iterator();
+        while (it.next()) |e| {
+            var o = try cacheOptionFromJson(a, e.value_ptr.*);
+            o.name = try a.dupe(u8, e.key_ptr.*);
+            try list.append(a, o);
+        }
+        sub = try list.toOwnedSlice(a);
+    }
+    return .{
+        .name = "",
+        .description = try a.dupe(u8, json_util.string(v, "description") orelse ""),
+        .type = try a.dupe(u8, json_util.string(v, "type") orelse ""),
+        .required = json_util.boolean(v, "required") orelse false,
+        .suboptions = sub,
+        .default = if (json_util.string(v, "default")) |d| try a.dupe(u8, d) else null,
+        .elements = try a.dupe(u8, json_util.string(v, "elements") orelse ""),
+    };
+}
+
+fn stringArray(a: Allocator, items: []const []const u8) !Value {
+    var arr = std.json.Array.init(a);
+    for (items) |s| try arr.append(.{ .string = s });
+    return .{ .array = arr };
+}
+
+fn cacheStringList(a: Allocator, v: Value) ![]const []const u8 {
+    switch (v) {
+        .array => |arr| {
+            var list = std.ArrayList([]const u8).empty;
+            for (arr.items) |item| {
+                switch (item) {
+                    .string => |s| try list.append(a, try a.dupe(u8, s)),
+                    else => {},
+                }
+            }
+            return try list.toOwnedSlice(a);
+        },
+        else => return &.{},
+    }
+}
 
 fn parseSuboptions(a: Allocator, opt: Value) ![]const Option {
     const subs = json_util.object(opt, "suboptions") orelse return &.{};

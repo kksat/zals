@@ -79,9 +79,7 @@ pub const DocsService = struct {
             defer self.allocator.free(fp.hash);
             defer self.allocator.free(fp.version);
             self.cache_path = docs_cache.cachePath(self.allocator, fp.hash) catch null;
-            self.lib.mutex.lock();
-            self.lib.ansible_version = self.lib.arena.allocator().dupe(u8, fp.version) catch "";
-            self.lib.mutex.unlock();
+            self.lib.recordAnsibleVersion(fp.version) catch {};
         }
         if (self.shutdown.load(.acquire)) return;
         var loaded = false;
@@ -106,23 +104,14 @@ pub const DocsService = struct {
     }
 
     fn prefetch(self: *DocsService) void {
-        var names = std.ArrayList([]const u8).empty;
-        defer names.deinit(self.allocator);
-        {
-            self.lib.mutex.lock();
-            defer self.lib.mutex.unlock();
-            var it = self.lib.catalog.iterator();
-            while (it.next()) |e| {
-                if (!self.lib.modules.contains(e.key_ptr.*))
-                    names.append(self.allocator, e.key_ptr.*) catch {};
-            }
-        }
+        const names = self.lib.missingCatalogNames(self.allocator) catch return;
+        defer self.allocator.free(names);
 
         var i: usize = 0;
-        while (i < names.items.len) : (i += batch_size) {
+        while (i < names.len) : (i += batch_size) {
             if (self.shutdown.load(.acquire)) return;
-            const end = @min(i + batch_size, names.items.len);
-            self.lib.fetchMany(names.items[i..end]) catch {};
+            const end = @min(i + batch_size, names.len);
+            self.lib.fetchMany(names[i..end]) catch {};
             if ((i / batch_size) % write_every == write_every - 1) self.scheduleCacheWrite();
         }
         self.scheduleCacheWrite();
