@@ -51,6 +51,27 @@ The `jinja2` entry lets zals navigate variables in role templates without
 pretending that templates are YAML. zals does not require `languageId` to be
 literally `ansible`.
 
+### Standalone role repositories
+
+A repository can itself be a Role: `tasks/`, `defaults/`, `vars/`, `handlers/`,
+`meta/`, and `templates/` are at its root, with no `roles/<name>/` path segment.
+The path-only rules above do not cover this layout. Install the additional
+[role filetype detector](examples/neovim-role-filetypes.lua) in your Neovim
+`ftdetect/` directory, or source it from `init.lua` before opening buffers:
+
+```lua
+dofile("/path/to/zals/docs/examples/neovim-role-filetypes.lua")
+```
+
+The detector recognizes conventional Role directories when their parent has
+`meta/main.yml` or `meta/main.yaml` (or is under `roles/`). It covers both YAML
+extensions, nested task/handler files, directory-style `defaults/main/` and
+`vars/main/`, and nested `templates/*.j2`. Directory names alone do not classify
+unrelated YAML as Ansible; CI and other YAML outside Role directories are left
+alone. Roles without metadata and outside `roles/` need an explicit project
+filetype rule. Keep `jinja2` in zals's `filetypes` if you want template navigation.
+The detector only changes filetypes; it does not configure any other LSP/plugin.
+
 Use **one** Ansible server configuration: if `ansiblels` is already enabled in
 `nvim-lspconfig`, disable it or adapt its `cmd`, `filetypes`, and `root_markers`
 instead of running both. Ansible search paths come from `ANSIBLE_*`, the
@@ -101,15 +122,17 @@ augroup END
 ```
 
 The ready-to-source [Vimscript example](examples/neovim-filetypes.vim) contains
-these rules. They cover collection YAML only; the Lua configuration above also
-covers standalone roles, playbooks, and templates. After fixing an existing
+these rules. They cover collection YAML only; the Lua configuration above covers
+`roles/<name>/`, playbooks, and templates. Add the role detector for repositories
+whose root is the Role itself. After fixing an existing
 detector, reopen the buffer or run `:set filetype=yaml.ansible` to trigger LSP
 attachment for an already-open variable file.
 
 `make neovim-test` (Neovim 0.11+ required) tests the example with real filetype
 detection and a real zals process: references from folded-value vars keys in
-both YAML extensions, with and without declarations, plus an ordinary YAML
-buffer that must not attach. A direct stdio provider test cannot detect missing
+both YAML extensions, with and without declarations; standalone Role repositories
+with nested defaults, vars, tasks, handlers, and Jinja templates; and unrelated
+YAML buffers that must not attach. A direct stdio provider test cannot detect missing
 editor attachment.
 
 ## Trying the checked-in E2E fixture
