@@ -42,9 +42,11 @@ pub const Result = struct {
 /// removed on success and error (deletion is best-effort).
 ///
 /// Disabled lint retains the existing policy: syntax-check runs only when
-/// schema diagnostics are empty. Enabled lint currently never falls back;
-/// clean/findings, unavailable and failed outcomes remain distinct. Tool and
-/// schema allocation errors propagate rather than masquerading as absence.
+/// schema diagnostics are empty. Enabled-but-unavailable lint runs syntax-check
+/// regardless of schema findings (ADR-0015), merging schema diagnostics first.
+/// Only executable/spawn unavailability triggers that fallback: clean/findings,
+/// invalid output, abnormal termination and other execution failures do not.
+/// Tool/schema allocation errors propagate rather than masquerading as absence.
 pub fn validate(
     arena: Allocator,
     snapshot: Snapshot,
@@ -60,15 +62,17 @@ pub fn validate(
     if (document_schema) |sch| {
         result.diagnostics = try schemaDiags(arena, snapshot, sch);
     }
+    var syntax_fallback = !options.lint_enabled and result.diagnostics.len == 0;
     if (options.lint_enabled) {
         const outcome = try lint.lintFile(arena, runner, options.lint_path, options.lint_arguments, target.path);
         result.lint_status = outcome.status;
         result.diagnostics = try concatDiags(arena, result.diagnostics, outcome.diagnostics);
+        syntax_fallback = outcome.status == .unavailable;
     }
-    if (result.diagnostics.len == 0 and !options.lint_enabled) {
+    if (syntax_fallback) {
         const outcome = try lint.syntaxCheck(arena, runner, "ansible-playbook", target.path, snapshot.document_range);
         result.syntax_status = outcome.status;
-        result.diagnostics = outcome.diagnostics;
+        result.diagnostics = try concatDiags(arena, result.diagnostics, outcome.diagnostics);
     }
     return result;
 }
