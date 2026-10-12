@@ -418,3 +418,48 @@ fewer files, or a lines-of-code ratio.
   measurements, output interleaving reproduction, and index-lifetime
   reproduction were not performed. Proposed tests above are future work,
   not claimed test results.
+
+## Implementation follow-through
+
+The findings above describe the reviewed baseline. All eight numbered findings
+have since received focused implementation changes on `deepmodules-review`,
+through runtime commit `c843c43`; their original line references are historical.
+
+| Finding | Integrated changes |
+| --- | --- |
+| 1. Output ownership | `77b9cda`: outgoing helpers require the queued writer; handler errors use it |
+| 2. Query lifetime | `e387a82`: handler-owned, lazily prepared request lease freezes indexed facts |
+| 3. Semantic queries | `67efe1e`: initial root slice; `76d40fe` and `c843c43`: shared root/field operations and typed navigation dispatch, including docs-last fallback |
+| 4. Docs ownership | `3e54f6b`: library-owned enumeration, ingestion and encoded snapshots; disk I/O after unlocking |
+| 5. Callee bindings | `64a8385`: shared indexed root/full-path selection, concrete-only filtering and one-level dependency hydration |
+| 6. YAML paths | `036ef1c`: forest-owned document selection, editor-gap policy and truthful source borrowing |
+| 7. Validation | `fe12f11`: document operation and explicit outcomes; `d0e96e7`: separate unavailable-lint fallback correction |
+| 8. Binding descriptions | `d33572e`: request-local source interpretation, revision guards and displayed-only descriptions |
+
+`src/queries/navigation.zig` now supplies typed subjects and explicit
+`definition`, `implementation`, `references`, and `hover` operations. Protocol
+adapters decode and encode; queries own search and action-specific precedence.
+The initial `root_navigation.zig` slice has been replaced, not layered beneath
+another forwarding interface. The handler remains the sole query-lease owner.
+
+The implementation preserves name-based root and separate leaf-name field
+references, applicable-empty stops, selected-entrypoint contracts, unsaved
+precedence, bounded callee loads, and navigation-before-docs hover. It does not
+introduce a full Ansible execution model or redesign completion and symbols.
+Docs replacement storage is retained for library-long immutable borrowing;
+encoding still holds the lock, but disk writes do not. Stale indexed hover
+values are withheld when captured bytes fail their source-fingerprint check.
+
+Each logical runtime change passed `make check`, full `make e2e`, and
+`make smoke` before its commit. Completed branches were reviewed, rebased onto
+verified integration tips, checked independently, and fast-forwarded. Final
+runtime checks also passed `make neovim-test`; navigation reported **560 cases,
+0 failures**, and existing standalone-role and lexical suites passed.
+
+No tests or fixtures were created, removed, or changed, at the user's request.
+The complete `test/` tree and all 53 existing Zig inline-test-containing suffixes
+were verified byte-for-byte unchanged. These existing suites establish
+preservation, not exhaustive new coverage of the proposed regressions above.
+No new blocked-write, tool-status-matrix, stale-source, parse-count, or
+multi-document oracle was introduced; snapshot memory and lock duration were
+not measured. Nothing was pushed.
