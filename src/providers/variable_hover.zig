@@ -10,8 +10,9 @@ const util = @import("util.zig");
 const yaml = @import("../yaml/root.zig");
 const variables = @import("../variables/root.zig");
 const paths = @import("../paths.zig");
-const vs = @import("variable_source.zig");
 const wv = @import("workspace_view.zig");
+const descriptions = @import("../queries/binding_descriptions.zig");
+const Facts = @import("../workspace/facts.zig").Facts;
 
 const max_listed = 20;
 const max_value_lines = 12;
@@ -19,45 +20,40 @@ const max_value_lines = 12;
 /// Hover for the variable under the cursor, or null.
 pub fn hover(self: *Server, a: Allocator, params: Value) !?types.Hover {
     const loc = util.cursorAt(self, params) orelse return null;
-    var src = vs.ServerSource{ .server = self };
-    var index = variables.Index.init(a, src.source());
+    var cache = descriptions.Cache.init(self, a);
+    defer cache.deinit();
+    var index = variables.Index.init(a, cache.source());
     const cur = (try index.occurrenceAt(a, loc.doc.uri, loc.offset)) orelse return null;
     const range = loc.doc.rangeFromOffsets(cur.start, cur.end);
-    return try hoverName(self, a, loc.doc.uri, cur.name, range);
+    return try hoverNameCaptured(self, a, &cache, loc.doc.uri, cur.name, range);
 }
 
 /// Hover text for variable `name` as seen from `uri`.
 pub fn hoverName(self: *Server, a: Allocator, uri: []const u8, name: []const u8, range: types.Range) !?types.Hover {
+    var cache = descriptions.Cache.init(self, a);
+    defer cache.deinit();
+    return hoverNameCaptured(self, a, &cache, uri, name, range);
+}
+
+fn hoverNameCaptured(self: *Server, a: Allocator, cache: *descriptions.Cache, uri: []const u8, name: []const u8, range: types.Range) !?types.Hover {
     const path = try paths.uriToPath(a, uri);
-    var entries = std.array_list.Managed(Entry).init(a);
+    var entries: []const Entry = &.{};
     var root: ?[]const u8 = null;
 
     if (try wv.View.forUri(self, a, uri)) |found| {
         var v = found;
         root = v.root;
         const reach = try v.reachableFiles(path);
-        for (try wv.view.definitions(a, v.files, name, reach)) |d| {
-            try entries.append(try describe(a, &v, d.uri, d.start, d.site, d.reachable));
-        }
+        entries = try workspaceEntries(a, cache, try wv.view.definitions(a, v.files, name, reach), v.files);
     } else {
-        var src = vs.ServerSource{ .server = self };
-        var index = variables.Index.init(a, src.source());
-        for (try index.definitions(a, uri, name)) |d| {
-            const text = (try index.fileText(a, d.uri)) orelse "";
-            try entries.append(.{
-                .uri = d.uri,
-                .line = lineOf(text, d.start),
-                .site = d.site,
-                .value = valueAt(a, text, d.start),
-                .reachable = true,
-            });
-        }
+        var index = variables.Index.init(a, cache.source());
+        entries = try fallbackEntries(a, cache, try index.definitions(a, uri, name));
     }
-    if (entries.items.len == 0) {
+    if (entries.len == 0) {
         const text = try std.fmt.allocPrint(a, "**Variable** `{s}`\n\nNo definition found in the Workspace.", .{name});
         return .{ .contents = .{ .kind = .markdown, .value = text }, .range = range };
     }
-    return .{ .contents = .{ .kind = .markdown, .value = try render(a, name, entries.items, root) }, .range = range };
+    return .{ .contents = .{ .kind = .markdown, .value = try render(a, name, entries, root) }, .range = range };
 }
 
 pub const Entry = struct {
@@ -68,15 +64,53 @@ pub const Entry = struct {
     reachable: bool,
 };
 
-fn describe(a: Allocator, v: *wv.View, uri: []const u8, start: usize, site: ?variables.Site, reachable: bool) !Entry {
-    const text = try v.text(uri);
-    return .{
-        .uri = uri,
-        .line = lineOf(text, start),
-        .site = site,
-        .value = valueAt(a, text, start),
-        .reachable = reachable,
+const Candidate = struct {
+    uri: []const u8,
+    start: usize,
+    site: ?variables.Site,
+    reachable: bool,
+    facts: ?*const Facts = null,
+};
+
+/// Presentation selects candidates before any source reads or descriptions.
+/// Keep all metadata entries so render's totals and truncation remain exact.
+pub fn workspaceEntries(a: Allocator, cache: *descriptions.Cache, defs: []const wv.view.Occurrence, files: []const wv.File) ![]const Entry {
+    const candidates = try a.alloc(Candidate, defs.len);
+    for (defs, 0..) |def, i| {
+        const file = wv.view.find(files, def.path) orelse unreachable;
+        candidates[i] = .{ .uri = def.uri, .start = def.start, .site = def.site, .reachable = def.reachable, .facts = &file.facts };
+    }
+    return listedEntries(a, cache, candidates);
+}
+
+/// Fallback offsets must have been discovered through cache.source().
+pub fn fallbackEntries(a: Allocator, cache: *descriptions.Cache, defs: []const variables.Occurrence) ![]const Entry {
+    const candidates = try a.alloc(Candidate, defs.len);
+    for (defs, 0..) |def, i| candidates[i] = .{ .uri = def.uri, .start = def.start, .site = def.site, .reachable = true };
+    return listedEntries(a, cache, candidates);
+}
+
+fn listedEntries(a: Allocator, cache: *descriptions.Cache, candidates: []const Candidate) ![]const Entry {
+    var reachable: usize = 0;
+    for (candidates) |candidate| if (candidate.reachable) {
+        reachable += 1;
     };
+    const entries = try a.alloc(Entry, candidates.len);
+    for (candidates, 0..) |candidate, i| {
+        entries[i] = .{ .uri = candidate.uri, .line = 1, .site = candidate.site, .value = null, .reachable = candidate.reachable };
+        // Active + twenty shadowed, and twenty elsewhere. Hidden entries are
+        // count-only placeholders and are never passed to line().
+        const listed = if (i < reachable) i == 0 or i - 1 < max_listed else i - reachable < max_listed;
+        if (!listed) continue;
+        const binding = if (candidate.facts) |facts|
+            descriptions.Binding.indexed(candidate.uri, candidate.start, facts.*)
+        else
+            descriptions.Binding{ .uri = candidate.uri, .start = candidate.start };
+        const description = try cache.describe(binding);
+        entries[i].line = description.line;
+        if (description.value) |raw| entries[i].value = dedentValue(a, raw, 0, raw.len) catch null;
+    }
+    return entries;
 }
 
 /// Markdown for the definitions of `name`, reachable ones first.
@@ -140,11 +174,6 @@ fn display(a: Allocator, uri: []const u8, root: ?[]const u8) ![]const u8 {
         if (p.len > r.len + 1 and std.mem.startsWith(u8, p, r) and p[r.len] == '/') return p[r.len + 1 ..];
     }
     return p;
-}
-
-/// 1-based line of `offset`.
-fn lineOf(text: []const u8, offset: usize) usize {
-    return std.mem.count(u8, text[0..@min(offset, text.len)], "\n") + 1;
 }
 
 /// The unrendered value bound at the definition key starting at `start`, or

@@ -1,8 +1,8 @@
 //! Per-file navigation facts stored in the Workspace index (ADR-0031).
 //!
-//! `extract` parses one file and records names and byte ranges only, so an
-//! entry never keeps a parse tree. Every string is allocated with the caller's
-//! allocator (an entry arena).
+//! `extract` parses one file and records names, byte ranges and compact source
+//! revision/line metadata, never source text or a parse tree. Every string is
+//! allocated with the caller's allocator (an entry arena).
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -17,6 +17,21 @@ pub const FileRef = file_refs.FileRef;
 const Node = yaml.Node;
 
 pub const Definition = variables.definitions.Definition;
+
+/// Exact source revision proof for on-demand descriptions. No source text or
+/// parse tree is retained in the index.
+pub const SourceFingerprint = [std.crypto.hash.sha2.Sha256.digest_length]u8;
+
+pub fn sourceFingerprint(text: []const u8) SourceFingerprint {
+    var fingerprint: SourceFingerprint = undefined;
+    std.crypto.hash.sha2.Sha256.hash(text, &fingerprint, .{});
+    return fingerprint;
+}
+
+pub const BindingLine = struct {
+    start: usize,
+    line: usize,
+};
 
 /// A named occurrence and its byte range.
 pub const Span = struct {
@@ -34,6 +49,12 @@ pub const RoleRef = struct {
 };
 
 pub const Facts = struct {
+    /// Null for manually assembled facts without source-revision evidence.
+    source_fingerprint: ?SourceFingerprint = null,
+    /// Sorted binding offsets and their source-revision lines, including
+    /// fields. Stale descriptions can retain locations without reading newer
+    /// bytes at old offsets. These do not change binding/reference identities.
+    binding_lines: []const BindingLine = &.{},
     var_defs: []const Definition = &.{},
     var_refs: []const Span = &.{},
     /// Nested mapping keys in recognized variable values.
@@ -113,6 +134,8 @@ fn extractDependencyWithParser(a: Allocator, parser_allocator: Allocator, root: 
     const var_loads = variables.scope.varFileLoads(a, &forest, path, root) catch &.{};
 
     return .{
+        .source_fingerprint = sourceFingerprint(text),
+        .binding_lines = try bindingLines(a, text, defs.items, field_defs.items),
         .var_defs = try defs.toOwnedSlice(),
         .var_refs = refs,
         .field_defs = try field_defs.toOwnedSlice(),
@@ -124,6 +147,26 @@ fn extractDependencyWithParser(a: Allocator, parser_allocator: Allocator, root: 
         .shape = sym.shape,
         .symbols = sym.symbols,
     };
+}
+
+fn bindingLines(a: Allocator, text: []const u8, defs: []const Definition, fields: []const variables.fields.Definition) ![]const BindingLine {
+    const lines = try a.alloc(BindingLine, defs.len + fields.len);
+    for (defs, 0..) |def, i| lines[i] = .{ .start = def.start, .line = 1 };
+    for (fields, defs.len..) |def, i| lines[i] = .{ .start = def.start, .line = 1 };
+    std.mem.sort(BindingLine, lines, {}, struct {
+        fn less(_: void, left: BindingLine, right: BindingLine) bool {
+            return left.start < right.start;
+        }
+    }.less);
+    var offset: usize = 0;
+    var line: usize = 1;
+    for (lines) |*binding| {
+        const end = @min(binding.start, text.len);
+        line += std.mem.count(u8, text[offset..end], "\n");
+        binding.line = line;
+        offset = end;
+    }
+    return lines;
 }
 
 fn collectionSpans(a: Allocator, forest: *const yaml.Forest, path: []const u8) ![]const Span {

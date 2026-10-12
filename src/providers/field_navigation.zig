@@ -10,6 +10,7 @@ const vs = @import("variable_source.zig");
 const wv = @import("workspace_view.zig");
 const json_util = @import("../lsp/json_util.zig");
 const paths = @import("../paths.zig");
+const descriptions = @import("../queries/binding_descriptions.zig");
 
 pub fn locations(self: *Server, a: Allocator, params: Value, target: @import("variable_navigation.zig").Target) !?[]const types.Location {
     const loc = util.cursorAt(self, params) orelse return null;
@@ -39,43 +40,26 @@ pub fn locations(self: *Server, a: Allocator, params: Value, target: @import("va
 
 pub fn hover(self: *Server, a: Allocator, params: Value) !?types.Hover {
     const loc = util.cursorAt(self, params) orelse return null;
-    var source = vs.ServerSource{ .server = self };
-    var index = variables.Index.init(a, source.source());
+    var cache = descriptions.Cache.init(self, a);
+    defer cache.deinit();
+    var index = variables.Index.init(a, cache.source());
     const cur = (try index.fieldOccurrenceAt(a, loc.doc.uri, loc.offset)) orelse return null;
     if (try @import("field_parameter_navigation.zig").hover(self, a, params)) |found| return found;
     const variable_hover = @import("variable_hover.zig");
-    var entries = std.array_list.Managed(variable_hover.Entry).init(a);
+    var entries: []const variable_hover.Entry = &.{};
     var root: ?[]const u8 = null;
     if (try wv.View.forUri(self, a, loc.doc.uri)) |found| {
         var view = found;
         root = view.root;
         const reachable = try view.reachableFiles(try paths.uriToPath(a, loc.doc.uri));
-        for (try wv.view.fieldDefinitions(a, view.files, cur.name, reachable)) |def| {
-            const text = try view.text(def.uri);
-            try entries.append(.{
-                .uri = def.uri,
-                .line = std.mem.count(u8, text[0..@min(def.start, text.len)], "\n") + 1,
-                .site = def.site,
-                .value = variable_hover.valueAt(a, text, def.start),
-                .reachable = def.reachable,
-            });
-        }
+        entries = try variable_hover.workspaceEntries(a, &cache, try wv.view.fieldDefinitions(a, view.files, cur.name, reachable), view.files);
     } else {
-        for (try index.fieldDefinitions(a, loc.doc.uri, cur.name)) |def| {
-            const text = (try index.fileText(a, def.uri)) orelse "";
-            try entries.append(.{
-                .uri = def.uri,
-                .line = std.mem.count(u8, text[0..@min(def.start, text.len)], "\n") + 1,
-                .site = def.site,
-                .value = variable_hover.valueAt(a, text, def.start),
-                .reachable = true,
-            });
-        }
+        entries = try variable_hover.fallbackEntries(a, &cache, try index.fieldDefinitions(a, loc.doc.uri, cur.name));
     }
-    const text = if (entries.items.len == 0)
+    const text = if (entries.len == 0)
         try std.fmt.allocPrint(a, "**Variable field** `{s}`\n\nNo definition found in the searched files.", .{cur.name})
     else
-        try variable_hover.renderField(a, cur.name, entries.items, root);
+        try variable_hover.renderField(a, cur.name, entries, root);
     return .{ .contents = .{ .kind = .markdown, .value = text }, .range = loc.doc.rangeFromOffsets(cur.start, cur.end) };
 }
 
