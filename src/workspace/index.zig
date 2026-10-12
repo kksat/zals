@@ -349,11 +349,30 @@ pub const WorkspaceIndex = struct {
     /// Entries of the Workspace rooted at `root`, sorted by path. The pointer
     /// list belongs to `a`; entries are borrowed with the lifetime of `get`.
     pub fn entriesOf(self: *WorkspaceIndex, a: Allocator, root: []const u8) ![]const *const Entry {
+        return self.collectEntries(a, root, null);
+    }
+
+    /// Entries below `directory` in this Workspace, with entriesOf's ordering
+    /// and borrowing lifetime. Filter before allocating/sorting the pointer
+    /// list so a directory-local query need not sort the whole Workspace.
+    pub fn entriesWithin(self: *WorkspaceIndex, a: Allocator, root: []const u8, directory: []const u8) ![]const *const Entry {
+        return self.collectEntries(a, root, directory);
+    }
+
+    fn collectEntries(self: *WorkspaceIndex, a: Allocator, root: []const u8, directory: ?[]const u8) ![]const *const Entry {
         self.prepareEntries();
         var out = std.array_list.Managed(*const Entry).init(a);
         var it = self.entries.valueIterator();
         while (it.next()) |e| {
-            if (std.mem.eql(u8, e.*.root, root)) try out.append(e.*);
+            if (!std.mem.eql(u8, e.*.root, root)) continue;
+            if (directory) |dir| {
+                const path = e.*.path;
+                if (path.len <= dir.len or !std.mem.startsWith(u8, path, dir)) continue;
+                // A trailing separator already delimits the directory; without
+                // one, reject sibling names sharing its textual prefix.
+                if (dir.len > 0 and dir[dir.len - 1] != '/' and dir[dir.len - 1] != '\\' and path[dir.len] != '/' and path[dir.len] != '\\') continue;
+            }
+            try out.append(e.*);
         }
         std.mem.sort(*const Entry, out.items, {}, lessEntry);
         return out.toOwnedSlice();

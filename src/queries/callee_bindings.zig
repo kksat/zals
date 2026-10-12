@@ -61,10 +61,11 @@ pub const Query = struct {
             try open.put(path, doc.*);
         }
 
-        // Borrow entry facts but retain only callee-local descriptors. Do not
-        // build/copy a whole Workspace view just to hydrate a few dependencies.
+        // Borrow a directory-local sorted list, not a whole-Workspace list
+        // sorted only to discard unrelated entries. The index still owns
+        // freshness/lease preparation; conventional-source filtering stays here.
         var files = std.array_list.Managed(view.File).init(a);
-        for (try server.indexEntries(a, root)) |entry| {
+        for (try server.index.entriesWithin(a, root, role_dir)) |entry| {
             if (!view.isCalleeSource(entry.path, role_dir)) continue;
             const file = if (open.get(entry.path)) |doc|
                 try self.fromDocument(root, entry.path, doc)
