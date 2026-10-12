@@ -3,8 +3,9 @@
 //! One entry per discovered Ansible file, keyed by absolute path and carrying
 //! its mtime and navigation facts. Scans run on the worker pool and hand
 //! finished entries to a mutex-guarded pending queue; the main thread drains
-//! that queue before it handles a message, so it stays the sole writer of the
-//! entry map (ADR-0011).
+//! that queue between messages, so it stays the sole writer of the entry map
+//! (ADR-0011). A query lease keeps entry and root-info arenas alive throughout
+//! a request; worker results remain pending until the lease is released.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -83,6 +84,11 @@ pub const WorkspaceIndex = struct {
     generations: std.StringHashMap(u64),
     next_generation: u64 = 1,
     active_scans: usize = 0,
+    /// A request's refresh policy, or null outside a request. Preparation is
+    /// lazy so document-local requests do not re-stat the whole Workspace.
+    query_refresh_stale: ?bool = null,
+    /// Once any entry or root info is read, its arenas are frozen until release.
+    query_borrowed: bool = false,
     /// Set when the last active scan finished and not yet reported.
     ready_event: bool = false,
     /// Worker → main handoff.
@@ -101,9 +107,47 @@ pub const WorkspaceIndex = struct {
         return self;
     }
 
+    /// A main-thread request lease, not an independently owned snapshot. The
+    /// first entry or discovery read prepares and freezes the revision; release
+    /// once after all borrows have been consumed. Workers may keep queuing
+    /// results, but cannot change the borrowed revision.
+    pub const QueryLease = struct {
+        index: ?*WorkspaceIndex,
+
+        pub fn release(self: *QueryLease) void {
+            const index = self.index orelse unreachable;
+            std.debug.assert(index.query_refresh_stale != null);
+            index.query_borrowed = false;
+            index.query_refresh_stale = null;
+            self.index = null;
+        }
+    };
+
+    /// Start a request. Its first entry or discovery read applies available
+    /// scan results and, without watching, refreshes known disk entries before
+    /// borrowing. Never waits for startup. Nested reads share this preparation;
+    /// requests that only use document-local facts never refresh the index.
+    pub fn acquireQuery(self: *WorkspaceIndex, refresh_stale: bool) QueryLease {
+        std.debug.assert(self.query_refresh_stale == null);
+        self.query_refresh_stale = refresh_stale;
+        return .{ .index = self };
+    }
+
+    /// All arena-borrowing getters pass here, including discovery-only reads.
+    /// Preparing again after RootInfo was borrowed could drain and invalidate
+    /// that storage, just as doing so after Entry was borrowed could free facts.
+    fn prepareQuery(self: *WorkspaceIndex) void {
+        const refresh = self.query_refresh_stale orelse return;
+        if (self.query_borrowed) return;
+        self.drain();
+        if (refresh) self.refreshStale();
+        self.query_borrowed = true;
+    }
+
     /// Free everything. Background scans must already be stopped (the pool
-    /// joined) before this runs.
+    /// joined) and all query borrows released before this runs.
     pub fn destroy(self: *WorkspaceIndex) void {
+        std.debug.assert(self.query_refresh_stale == null);
         for (self.pending.items) |p| self.freePending(p);
         self.pending.deinit(self.gpa);
         var it = self.entries.valueIterator();
@@ -121,6 +165,7 @@ pub const WorkspaceIndex = struct {
     /// Keep exactly `roots` indexed: scan roots that are new (or all of them
     /// when `rescan`), and drop entries of roots no longer in the session.
     pub fn syncRoots(self: *WorkspaceIndex, pool: *concurrency.ThreadPool, roots: []const []const u8, marker: []const u8, rescan: bool) !void {
+        std.debug.assert(self.query_refresh_stale == null);
         // Drop removed roots.
         var removed = std.array_list.Managed([]const u8).init(self.gpa);
         defer removed.deinit();
@@ -179,6 +224,7 @@ pub const WorkspaceIndex = struct {
     /// Scan `root` on the calling thread. Tests and callers without a pool use
     /// this; it still goes through the pending queue.
     pub fn scanNow(self: *WorkspaceIndex, root: []const u8, marker: []const u8) !void {
+        std.debug.assert(self.query_refresh_stale == null);
         const generation = self.next_generation;
         self.next_generation += 1;
         if (self.generations.getPtr(root)) |g| {
@@ -192,7 +238,10 @@ pub const WorkspaceIndex = struct {
     }
 
     /// Move finished scan output into the entry map. Main thread only.
+    /// After the first query borrow, leave output queued for the next message
+    /// or idle drain. Before that borrow, preparation may still apply it.
     pub fn drain(self: *WorkspaceIndex) void {
+        if (self.query_borrowed) return;
         self.mutex.lock();
         const items = self.pending.toOwnedSlice(self.gpa) catch {
             self.mutex.unlock();
@@ -233,8 +282,11 @@ pub const WorkspaceIndex = struct {
     }
 
     /// Re-index one file on the main thread (save, watched-file change).
-    /// `root` is the Workspace that owns it.
+    /// `root` is the Workspace that owns it. Also used by lazy preparation,
+    /// before any arena is borrowed. Explicit mutations must never be skipped:
+    /// save/watch notifications run outside the request lease instead.
     pub fn reindex(self: *WorkspaceIndex, root: []const u8, path: []const u8) void {
+        std.debug.assert(!self.query_borrowed);
         const st = std.fs.cwd().statFile(path) catch {
             self.remove(path);
             return;
@@ -244,12 +296,14 @@ pub const WorkspaceIndex = struct {
     }
 
     pub fn remove(self: *WorkspaceIndex, path: []const u8) void {
+        std.debug.assert(!self.query_borrowed);
         if (self.entries.fetchRemove(path)) |kv| kv.value.destroy(self.gpa);
     }
 
     /// Re-stat every entry and re-parse those whose mtime changed; drop the
     /// ones that disappeared. Used when the client cannot watch files.
     pub fn refreshStale(self: *WorkspaceIndex) void {
+        if (self.query_borrowed) return;
         var stale = std.array_list.Managed(*Entry).init(self.gpa);
         defer stale.deinit();
         var it = self.entries.valueIterator();
@@ -269,22 +323,28 @@ pub const WorkspaceIndex = struct {
         }
     }
 
-    pub fn get(self: *const WorkspaceIndex, path: []const u8) ?*Entry {
+    /// Borrowed until the next mutation, or through release of an active lease.
+    pub fn get(self: *WorkspaceIndex, path: []const u8) ?*const Entry {
+        self.prepareQuery();
         return self.entries.get(path);
     }
 
-    pub fn info(self: *const WorkspaceIndex, root: []const u8) ?*RootInfo {
+    /// Discovery storage has the same borrowing lifetime as entries.
+    pub fn info(self: *WorkspaceIndex, root: []const u8) ?*const RootInfo {
+        self.prepareQuery();
         return self.infos.get(root);
     }
 
-    /// Entries of the Workspace rooted at `root`, sorted by path.
-    pub fn entriesOf(self: *const WorkspaceIndex, a: Allocator, root: []const u8) ![]const *Entry {
-        var out = std.array_list.Managed(*Entry).init(a);
+    /// Entries of the Workspace rooted at `root`, sorted by path. The pointer
+    /// list belongs to `a`; entries are borrowed with the lifetime of `get`.
+    pub fn entriesOf(self: *WorkspaceIndex, a: Allocator, root: []const u8) ![]const *const Entry {
+        self.prepareQuery();
+        var out = std.array_list.Managed(*const Entry).init(a);
         var it = self.entries.valueIterator();
         while (it.next()) |e| {
             if (std.mem.eql(u8, e.*.root, root)) try out.append(e.*);
         }
-        std.mem.sort(*Entry, out.items, {}, lessEntry);
+        std.mem.sort(*const Entry, out.items, {}, lessEntry);
         return out.toOwnedSlice();
     }
 
@@ -293,6 +353,7 @@ pub const WorkspaceIndex = struct {
     }
 
     fn putEntry(self: *WorkspaceIndex, e: *Entry) void {
+        std.debug.assert(!self.query_borrowed);
         if (self.entries.fetchRemove(e.path)) |kv| kv.value.destroy(self.gpa);
         self.entries.put(e.path, e) catch e.destroy(self.gpa);
     }
@@ -429,7 +490,7 @@ fn contains(list: []const []const u8, item: []const u8) bool {
     return false;
 }
 
-fn lessEntry(_: void, x: *Entry, y: *Entry) bool {
+fn lessEntry(_: void, x: *const Entry, y: *const Entry) bool {
     return std.mem.order(u8, x.path, y.path) == .lt;
 }
 

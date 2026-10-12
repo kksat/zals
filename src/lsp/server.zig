@@ -279,10 +279,9 @@ pub const Server = struct {
         self.index.reindex(root, path);
     }
 
-    /// Index entries of the Workspace rooted at `root`, current as of now.
-    pub fn indexEntries(self: *Server, a: Allocator, root: []const u8) ![]const *workspace_index.Entry {
-        self.index.drain();
-        if (!self.watching_files) self.index.refreshStale();
+    /// Entries from the request's leased revision, borrowed through release.
+    /// Index-owned preparation lets nested Workspace views share one revision.
+    pub fn indexEntries(self: *Server, a: Allocator, root: []const u8) ![]const *const workspace_index.Entry {
         return self.index.entriesOf(a, root);
     }
 
@@ -305,19 +304,17 @@ pub const Server = struct {
         return self.venv_override orelse self.settings.venv_path;
     }
 
-    /// Every `roles/` directory in the Workspace rooted at `root`.
+    /// Every `roles/` directory in the request's leased Workspace revision.
     pub fn workspaceRolesDirs(self: *Server, root: ?[]const u8) []const []const u8 {
         const r = root orelse return &.{};
-        self.index.drain();
         const info = self.index.info(r) orelse return &.{};
         return info.roles_dirs;
     }
 
-    /// Directories in the Workspace rooted at `root` that hold
-    /// `ansible_collections/`.
+    /// Directories in the request's leased Workspace revision that hold
+    /// `ansible_collections/`. Discovery arenas live as long as entry arenas.
     pub fn workspaceCollectionPaths(self: *Server, root: ?[]const u8) []const []const u8 {
         const r = root orelse return &.{};
-        self.index.drain();
         const info = self.index.info(r) orelse return &.{};
         return info.collection_paths;
     }

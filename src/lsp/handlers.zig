@@ -18,6 +18,21 @@ pub fn handleRequest(self: *Server, a: Allocator, id: Value, method: []const u8,
         self.shutdown_requested = true;
         return self.sendResult(a, id, Value.null);
     }
+    if (std.mem.eql(u8, method, "ansible/refreshConfiguration")) {
+        self.settings.reload();
+        try self.rebuildWorkspaces();
+        try self.warnMissingWorkspace(a);
+        return self.sendResult(a, id, Value.null);
+    }
+
+    // Lifecycle/configuration requests above are writers. Remaining requests
+    // share a lazy lease through response encoding and enqueueing; nested
+    // Workspace/role/collection reads borrow one revision. Notifications
+    // run separately, so documents, roots, settings and the selected venv also
+    // remain stable without copying them into a second snapshot.
+    var query = self.index.acquireQuery(!self.watching_files);
+    defer query.release();
+
     if (std.mem.eql(u8, method, "textDocument/completion"))
         return self.sendResult(a, id, try completionResult(self, a, params));
     if (std.mem.eql(u8, method, "completionItem/resolve"))
@@ -38,12 +53,6 @@ pub fn handleRequest(self: *Server, a: Allocator, id: Value, method: []const u8,
         return self.sendResult(a, id, try providers.workspace_symbols.workspaceSymbol(self, a, params));
     if (std.mem.eql(u8, method, "textDocument/codeAction"))
         return self.sendResult(a, id, try providers.code_actions.codeActions(self, a, params));
-    if (std.mem.eql(u8, method, "ansible/refreshConfiguration")) {
-        self.settings.reload();
-        try self.rebuildWorkspaces();
-        try self.warnMissingWorkspace(a);
-        return self.sendResult(a, id, Value.null);
-    }
     return self.sendError(a, id, -32601, "method not found");
 }
 
