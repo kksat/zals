@@ -1,0 +1,4 @@
+---
+- name: Reload service
+  ansible.builtin.debug:
+    msg: "Reload on {{ hardening_config.port }}"

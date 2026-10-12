@@ -105,6 +105,12 @@ pub fn build(b: *std.Build) void {
             .inputs = &.{ "test/fixtures/e2e-workspace", "test/dependencies" },
         },
         .{
+            .name = "standalone-role-e2e",
+            .source = "test/standalone_role_e2e.zig",
+            .description = "Run standalone Role repository navigation tests",
+            .inputs = &.{"test/fixtures/standalone-role"},
+        },
+        .{
             .name = "field-expressions-e2e",
             .source = "test/field_expressions_e2e.zig",
             .description = "Run field-expression syntax and non-match navigation tests",

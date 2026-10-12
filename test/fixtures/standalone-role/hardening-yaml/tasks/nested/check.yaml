@@ -1,0 +1,8 @@
+---
+- name: Audit system
+  when: audit_enabled
+  ansible.builtin.debug:
+    msg: Audit enabled
+
+- name: Include shared tasks
+  ansible.builtin.import_tasks: shared.yaml

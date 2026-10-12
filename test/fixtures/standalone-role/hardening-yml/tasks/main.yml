@@ -1,0 +1,8 @@
+---
+- name: Check OS
+  when: os_check
+  ansible.builtin.debug:
+    msg: "Listening on {{ hardening_config.port }}"
+
+- name: Include checks
+  ansible.builtin.include_tasks: nested/check.yml

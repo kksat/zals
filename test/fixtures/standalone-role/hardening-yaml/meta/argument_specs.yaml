@@ -1,0 +1,10 @@
+---
+argument_specs:
+  main:
+    options:
+      hardening_config:
+        type: dict
+        options:
+          port:
+            type: int
+            description: Port used by the standalone Role.

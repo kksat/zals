@@ -1,0 +1,7 @@
+---
+galaxy_info:
+  role_name: hardening
+  author: Test fixture
+  description: Standalone hardening Role
+  license: MIT
+dependencies: []

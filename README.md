@@ -117,6 +117,7 @@ make build           # build the server into zig-out/bin/zals
 make test            # run unit tests
 make e2e             # run all stdio E2E suites (requires ansible-core on PATH)
 make e2e SUITE=navigation-e2e                 # run one E2E suite
+make e2e SUITE=standalone-role-e2e            # repository root is one Role
 make zig-test FILE=test/navigation_uris_e2e.zig FILTER='stdio navigation'
 make smoke           # run stdio smoke tests, including the latency matrix
 make benchmark-operations # generate checked editor-operation latency tables
@@ -129,7 +130,9 @@ command.
 The [navigation E2E suite](test/e2e/README.md) uses a static Ansible Workspace
 and an explicitly written location oracle; `make e2e SUITE=navigation-e2e` needs no
 Galaxy installation, virtual environment, or Ansible execution. `make e2e`
-also runs the collection-symbol, file-URI, unsaved-argument-spec, and
+also runs standalone Role repositories (both YAML extensions, directory-style
+defaults/vars, and Role-relative task includes), plus the collection-symbol,
+file-URI, unsaved-argument-spec, and
 [selected-venv/module-docs](test/selected_venv_e2e.md) suites. The module-docs
 suite requires `ansible` and `ansible-doc` from `ansible-core` on PATH; CI uses
 Python 3.12 and `ansible-core==2.19.2`. No suite installs collections or executes

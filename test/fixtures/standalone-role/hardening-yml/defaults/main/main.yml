@@ -1,0 +1,4 @@
+---
+os_check: true
+hardening_config:
+  port: 80

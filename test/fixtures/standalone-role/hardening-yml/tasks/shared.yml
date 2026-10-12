@@ -1,0 +1,4 @@
+---
+- name: Shared task
+  ansible.builtin.debug:
+    msg: Shared tasks found relative to the Role tasks directory
