@@ -151,7 +151,7 @@ pub const Resolver = struct {
 
 /// The role directory that contains `path`: the parent of the nearest
 /// ancestor named like a conventional role subdirectory, when that parent sits
-/// in a `roles/` directory or has `meta/main.yml`. Null outside a role.
+/// in a `roles/` directory or has `meta/main.yml`/`.yaml`. Null outside a role.
 pub fn enclosingRole(path: []const u8) ?[]const u8 {
     var dir = std.fs.path.dirname(path) orelse return null;
     while (true) {
@@ -172,10 +172,13 @@ fn isRoleDir(dir: []const u8) bool {
         if (std.mem.eql(u8, std.fs.path.basename(parent), "roles")) return true;
     }
     var buf: [std.fs.max_path_bytes]u8 = undefined;
-    const meta = std.fmt.bufPrint(&buf, "{s}/meta/main.yml", .{dir}) catch return false;
-    const f = std.fs.cwd().openFile(meta, .{}) catch return false;
-    f.close();
-    return true;
+    for ([_][]const u8{ "main.yml", "main.yaml" }) |name| {
+        const meta = std.fmt.bufPrint(&buf, "{s}/meta/{s}", .{ dir, name }) catch continue;
+        const f = std.fs.cwd().openFile(meta, .{}) catch continue;
+        f.close();
+        return true;
+    }
+    return false;
 }
 
 fn dotCount(name: []const u8) usize {

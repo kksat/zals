@@ -61,12 +61,19 @@ fn isRoleRoot(allocator: Allocator, source: FileSource, dir: []const u8) bool {
 /// defaults, or vars. A playbook's `vars/` directory is a loaded vars file.
 pub fn fileKind(path: []const u8, role_root: ?[]const u8) FileKind {
     const role = role_root orelse return .general;
-    const dir = std.fs.path.dirname(path) orelse return .general;
-    if (!std.mem.eql(u8, std.fs.path.dirname(dir) orelse return .general, role)) return .general;
+    const file_dir = std.fs.path.dirname(path) orelse return .general;
+    var dir = file_dir;
+    while (!std.mem.eql(u8, std.fs.path.dirname(dir) orelse return .general, role)) {
+        const parent = std.fs.path.dirname(dir) orelse return .general;
+        if (std.mem.eql(u8, parent, dir)) return .general;
+        dir = parent;
+    }
     const parent = std.fs.path.basename(dir);
+    // Ansible permits directory entry points such as defaults/main/*.yml
+    // and vars/main/**/*.yml. Keep their intrinsic Role precedence.
     if (std.mem.eql(u8, parent, "defaults")) return .role_defaults;
     if (std.mem.eql(u8, parent, "vars")) return .role_vars;
-    if (std.mem.eql(u8, parent, "meta")) return .role_meta;
+    if (std.mem.eql(u8, parent, "meta") and std.mem.eql(u8, dir, file_dir)) return .role_meta;
     return .general;
 }
 
@@ -244,6 +251,11 @@ test "file kind is based on the actual Role root, not the directory name alone" 
     try testing.expectEqual(FileKind.role_meta, fileKind("/w/roles/r/meta/main.yml", "/w/roles/r"));
     try testing.expectEqual(FileKind.general, fileKind("/w/roles/r/tasks/main.yml", "/w/roles/r"));
     try testing.expectEqual(FileKind.general, fileKind("/w/playbooks/vars/release.yml", null));
+    try testing.expectEqual(FileKind.role_defaults, fileKind("/w/standalone/defaults/main/settings.yml", "/w/standalone"));
+    try testing.expectEqual(FileKind.role_vars, fileKind("/w/standalone/vars/main/nested/settings.yaml", "/w/standalone"));
+    try testing.expectEqual(FileKind.general, fileKind("/w/standalone-other/defaults/main.yml", "/w/standalone"));
+    try testing.expectEqual(FileKind.general, fileKind("/w/standalone/tasks/vars/data.yml", "/w/standalone"));
+    try testing.expectEqual(FileKind.general, fileKind("/w/standalone/meta/nested/data.yml", "/w/standalone"));
 }
 
 test "vars_files and include_vars targets" {

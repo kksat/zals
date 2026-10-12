@@ -321,6 +321,44 @@ test "reachable definitions exclude unrelated roles" {
     try testing.expect(!defs[2].reachable and !defs[3].reachable);
 }
 
+test "standalone Role directory-style defaults and vars retain precedence" {
+    for ([_][]const u8{ "yml", "yaml" }) |ext| {
+        var tmp = testing.tmpDir(.{});
+        defer tmp.cleanup();
+        var arena = std.heap.ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+        const a = arena.allocator();
+        try tmp.dir.makePath("meta");
+        try tmp.dir.writeFile(.{ .sub_path = try std.fmt.allocPrint(a, "meta/main.{s}", .{ext}), .data = "galaxy_info: {}\n" });
+        const root = try tmp.dir.realpathAlloc(a, ".");
+        const default_path = try std.fmt.allocPrint(a, "{s}/defaults/main/settings.{s}", .{ root, ext });
+        const vars_path = try std.fmt.allocPrint(a, "{s}/vars/main/nested/settings.{s}", .{ root, ext });
+        const task_path = try std.fmt.allocPrint(a, "{s}/tasks/main.{s}", .{ root, ext });
+        const play_path = try std.fmt.allocPrint(a, "{s}/site.{s}", .{ root, ext });
+        const files = [_]File{
+            try file(a, default_path, "config:\n  port: 80\n"),
+            try file(a, vars_path, "config:\n  port: 8080\n"),
+            try file(a, task_path, "- debug:\n    msg: '{{ config.port }}'\n"),
+            try file(a, play_path, "- hosts: all\n  vars:\n    config:\n      port: 8000\n"),
+        };
+        const role_dir = @import("../roles/resolve.zig").enclosingRole(task_path);
+        try testing.expect(role_dir != null);
+        try testing.expectEqualStrings(root, role_dir.?);
+        const reach = try reachableFiles(a, &files, task_path, role_dir, &.{play_path});
+        const defs = try definitions(a, &files, "config", reach);
+        try testing.expectEqual(@as(usize, 3), defs.len);
+        try testing.expectEqualStrings(vars_path, defs[0].path);
+        try testing.expectEqual(Site.role_vars, defs[0].site.?);
+        try testing.expectEqualStrings(play_path, defs[1].path);
+        try testing.expectEqual(Site.play_vars, defs[1].site.?);
+        try testing.expectEqualStrings(default_path, defs[2].path);
+        try testing.expectEqual(Site.role_defaults, defs[2].site.?);
+        // Structured fields use the same intrinsic sites as their bindings.
+        try testing.expectEqual(Site.role_defaults, files[0].facts.field_defs[0].site);
+        try testing.expectEqual(Site.role_vars, files[1].facts.field_defs[0].site);
+    }
+}
+
 test "a playbook reaches itself and its vars files" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();

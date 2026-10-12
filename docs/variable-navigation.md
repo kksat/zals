@@ -11,7 +11,12 @@ The cursor may be on a read (`{{ app_port }}`, `when: app_port > 0`) **or a
 binding**: a defaults/vars key, an argument-spec option, a role parameter,
 `set_fact` key, `register` value, or another recognized definition site.
 Argument specs in `meta/argument_specs.yml`, `.yaml`, and `meta/main.yml`,
-`.yaml` are included.
+`.yaml` are included. Standalone Role repositories are recognized by
+`meta/main.yml` or `meta/main.yaml`, without needing a `roles/<name>/` path.
+Directory-style defaults and vars (for example `defaults/main/main.yml` and
+`vars/main/settings.yaml`) retain Role defaults/vars precedence, including
+structured field bindings. See the [Neovim setup](neovim.md#standalone-role-repositories)
+for attaching zals to these buffers.
 
 | Request | Answer |
 | --- | --- |

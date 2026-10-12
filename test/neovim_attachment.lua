@@ -123,6 +123,22 @@ local ok, err = xpcall(function()
         client:request_sync("workspace/symbol", { query = "__neovim_test_wait__" }, 1000, bufnr)
         return ready[client.id]
       end), "standalone Role index did not become ready")
+      if path == task_file then
+        local params = {
+          textDocument = { uri = vim.uri_from_fname(path) },
+          position = { line = 1, character = 15 },
+        }
+        local response = client:request_sync("textDocument/definition", params, 10000, bufnr)
+        assert(response and not response.err, vim.inspect(response))
+        assert(#response.result == 2, vim.inspect(response.result))
+        assert(response.result[1].uri == vim.uri_from_fname(var_file), vim.inspect(response.result))
+        assert(response.result[2].uri == vim.uri_from_fname(default_file), vim.inspect(response.result))
+        local hover = client:request_sync("textDocument/hover", params, 10000, bufnr)
+        assert(hover and not hover.err and hover.result, vim.inspect(hover))
+        local value = hover.result.contents.value
+        assert(value:find("(role_vars)", 1, true), value)
+        assert(value:find("(role_defaults)", 1, true), value)
+      end
       if path == default_file then
         local response = client:request_sync("textDocument/references", {
           textDocument = { uri = vim.uri_from_fname(path) },
