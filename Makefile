@@ -18,7 +18,7 @@ SUITE ?=
 FILE ?=
 FILTER ?=
 
-.PHONY: help check lint hooks build test e2e zig-test zig neovim-test run fmt clean parity smoke benchmark-operations
+.PHONY: help check lint hooks build test e2e zig-test zig neovim-test run fmt clean parity smoke benchmark-operations performance-ci
 
 help:
 	@echo 'make check                          lint + build + unit tests; run before committing'
@@ -27,6 +27,7 @@ help:
 	@echo 'make e2e [SUITE=navigation-e2e]     all stdio E2E suites, or one (see zig build -l)'
 	@echo 'make zig-test FILE=test/x.zig [FILTER=name]  build, then run one Zig test root'
 	@echo 'make zig ARGS="build -l"            any zig command with the macOS workaround'
+	@echo 'make performance-ci ARGS="run --baseline-tree <path> --output <path>"  optimized CI comparison'
 	@echo 'make smoke | parity | fmt | hooks | run ARGS=--version'
 
 # Pre-commit gate; CI runs lint, test, e2e, and smoke as separate jobs.
@@ -80,6 +81,10 @@ smoke: build
 # End-to-end request latency tables; pass output paths/load via ARGS.
 benchmark-operations: build
 	python3 test/benchmark_operations.py --label Debug $(ARGS)
+
+# Dedicated tooling owns both ReleaseSafe builds; no implicit Debug dependency.
+performance-ci:
+	python3 tools/performance/gate.py $(ARGS)
 
 run: build
 	./zig-out/bin/zals $(ARGS)

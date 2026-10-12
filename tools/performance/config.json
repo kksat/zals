@@ -1,0 +1,660 @@
+{
+  "schema_version": 1,
+  "baseline_sha": "c0c7ae384a12a747ca2596f53bbbb121b1c16ba0",
+  "optimize": "ReleaseSafe",
+  "zig_version": "0.15.1",
+  "ci_python": "3.12",
+  "seeds": [
+    42,
+    1042
+  ],
+  "thresholds": {
+    "pooled_relative": 0.1,
+    "pooled_absolute_ms": 0.5,
+    "round_relative": 0.05,
+    "round_absolute_ms": 0.25
+  },
+  "workloads": {
+    "matrix": {
+      "files": 1000,
+      "tasks": 20,
+      "sessions": 3,
+      "samples": 10,
+      "warmup": 2,
+      "filter": "",
+      "indexed_files": 1027
+    },
+    "semantic-small": {
+      "files": 10,
+      "tasks": 20,
+      "sessions": 3,
+      "samples": 20,
+      "warmup": 2,
+      "filter": "semantic tokens",
+      "indexed_files": 37
+    },
+    "semantic-large": {
+      "files": 8000,
+      "tasks": 20,
+      "sessions": 3,
+      "samples": 20,
+      "warmup": 2,
+      "filter": "semantic tokens",
+      "indexed_files": 8027
+    }
+  },
+  "harness_sha256": {
+    "test/benchmark_operations.py": "216d9c26dc73874596f67ec5a789c56685d8b578564f04bebea0a0141e720628",
+    "test/smoke_cold_start.py": "7affa09e471bd21e91b113a943bbbb1d76451c86132d0823ae51bd9d6e535e66",
+    "test/smoke_workspace.py": "f31594957b17daf64cba8e36e31b12db441a385379fe7f353b0b89244756b732"
+  },
+  "matrix_scenarios": [
+    {
+      "target": "Variable (role read)",
+      "operation": "definition",
+      "method": "textDocument/definition",
+      "status": "measured",
+      "results": 4
+    },
+    {
+      "target": "Variable (role read)",
+      "operation": "implementation",
+      "method": "textDocument/implementation",
+      "status": "measured",
+      "results": 3
+    },
+    {
+      "target": "Variable (role read)",
+      "operation": "references",
+      "method": "textDocument/references",
+      "status": "measured",
+      "results": 5
+    },
+    {
+      "target": "Variable (role read)",
+      "operation": "hover",
+      "method": "textDocument/hover",
+      "status": "measured",
+      "results": 1
+    },
+    {
+      "target": "Variable (binding)",
+      "operation": "definition",
+      "method": "textDocument/definition",
+      "status": "measured",
+      "results": 4
+    },
+    {
+      "target": "Variable (binding)",
+      "operation": "implementation",
+      "method": "textDocument/implementation",
+      "status": "measured",
+      "results": 3
+    },
+    {
+      "target": "Variable (binding)",
+      "operation": "references",
+      "method": "textDocument/references",
+      "status": "measured",
+      "results": 5
+    },
+    {
+      "target": "Variable (binding)",
+      "operation": "hover",
+      "method": "textDocument/hover",
+      "status": "measured",
+      "results": 1
+    },
+    {
+      "target": "Variable (Jinja template)",
+      "operation": "definition",
+      "method": "textDocument/definition",
+      "status": "measured",
+      "results": 1
+    },
+    {
+      "target": "Variable (Jinja template)",
+      "operation": "implementation",
+      "method": "textDocument/implementation",
+      "status": "measured",
+      "results": 1
+    },
+    {
+      "target": "Variable (Jinja template)",
+      "operation": "references",
+      "method": "textDocument/references",
+      "status": "measured",
+      "results": 2
+    },
+    {
+      "target": "Variable (Jinja template)",
+      "operation": "hover",
+      "method": "textDocument/hover",
+      "status": "measured",
+      "results": 1
+    },
+    {
+      "target": "Variable field (read)",
+      "operation": "definition",
+      "method": "textDocument/definition",
+      "status": "measured",
+      "results": 3
+    },
+    {
+      "target": "Variable field (read)",
+      "operation": "implementation",
+      "method": "textDocument/implementation",
+      "status": "measured",
+      "results": 2
+    },
+    {
+      "target": "Variable field (read)",
+      "operation": "references",
+      "method": "textDocument/references",
+      "status": "measured",
+      "results": 4
+    },
+    {
+      "target": "Variable field (read)",
+      "operation": "hover",
+      "method": "textDocument/hover",
+      "status": "measured",
+      "results": 1
+    },
+    {
+      "target": "Role parameter",
+      "operation": "definition",
+      "method": "textDocument/definition",
+      "status": "measured",
+      "results": 1
+    },
+    {
+      "target": "Role parameter",
+      "operation": "implementation",
+      "method": "textDocument/implementation",
+      "status": "measured",
+      "results": 1
+    },
+    {
+      "target": "Role parameter",
+      "operation": "references",
+      "method": "textDocument/references",
+      "status": "measured",
+      "results": 4
+    },
+    {
+      "target": "Role parameter",
+      "operation": "hover",
+      "method": "textDocument/hover",
+      "status": "measured",
+      "results": 1
+    },
+    {
+      "target": "Role parameter field",
+      "operation": "definition",
+      "method": "textDocument/definition",
+      "status": "measured",
+      "results": 1
+    },
+    {
+      "target": "Role parameter field",
+      "operation": "implementation",
+      "method": "textDocument/implementation",
+      "status": "measured",
+      "results": 1
+    },
+    {
+      "target": "Role parameter field",
+      "operation": "references",
+      "method": "textDocument/references",
+      "status": "measured",
+      "results": 4
+    },
+    {
+      "target": "Role parameter field",
+      "operation": "hover",
+      "method": "textDocument/hover",
+      "status": "measured",
+      "results": 1
+    },
+    {
+      "target": "Role (local)",
+      "operation": "definition",
+      "method": "textDocument/definition",
+      "status": "measured",
+      "results": 1
+    },
+    {
+      "target": "Role (local)",
+      "operation": "implementation",
+      "method": "textDocument/implementation",
+      "status": "measured",
+      "results": 1
+    },
+    {
+      "target": "Role (local)",
+      "operation": "references",
+      "method": "textDocument/references",
+      "status": "measured",
+      "results": 2
+    },
+    {
+      "target": "Role (local)",
+      "operation": "hover",
+      "method": "textDocument/hover",
+      "status": "measured",
+      "results": 1
+    },
+    {
+      "target": "Role (collection FQCN)",
+      "operation": "definition",
+      "method": "textDocument/definition",
+      "status": "measured",
+      "results": 1
+    },
+    {
+      "target": "Role (collection FQCN)",
+      "operation": "implementation",
+      "method": "textDocument/implementation",
+      "status": "measured",
+      "results": 1
+    },
+    {
+      "target": "Role (collection FQCN)",
+      "operation": "references",
+      "method": "textDocument/references",
+      "status": "measured",
+      "results": 1
+    },
+    {
+      "target": "Role (collection FQCN)",
+      "operation": "hover",
+      "method": "textDocument/hover",
+      "status": "measured",
+      "results": 1
+    },
+    {
+      "target": "Role (Galaxy)",
+      "operation": "definition",
+      "method": "textDocument/definition",
+      "status": "measured",
+      "results": 1
+    },
+    {
+      "target": "Role (Galaxy)",
+      "operation": "implementation",
+      "method": "textDocument/implementation",
+      "status": "measured",
+      "results": 1
+    },
+    {
+      "target": "Role (Galaxy)",
+      "operation": "references",
+      "method": "textDocument/references",
+      "status": "measured",
+      "results": 2
+    },
+    {
+      "target": "Role (Galaxy)",
+      "operation": "hover",
+      "method": "textDocument/hover",
+      "status": "measured",
+      "results": 1
+    },
+    {
+      "target": "Role (installed collection)",
+      "operation": "definition",
+      "method": "textDocument/definition",
+      "status": "measured",
+      "results": 1
+    },
+    {
+      "target": "Role (installed collection)",
+      "operation": "implementation",
+      "method": "textDocument/implementation",
+      "status": "measured",
+      "results": 1
+    },
+    {
+      "target": "Role (installed collection)",
+      "operation": "references",
+      "method": "textDocument/references",
+      "status": "measured",
+      "results": 1
+    },
+    {
+      "target": "Role (installed collection)",
+      "operation": "hover",
+      "method": "textDocument/hover",
+      "status": "measured",
+      "results": 1
+    },
+    {
+      "target": "Collection (Workspace)",
+      "operation": "definition",
+      "method": "textDocument/definition",
+      "status": "measured",
+      "results": 1
+    },
+    {
+      "target": "Collection (Workspace)",
+      "operation": "implementation",
+      "method": "textDocument/implementation",
+      "status": "N/A"
+    },
+    {
+      "target": "Collection (Workspace)",
+      "operation": "references",
+      "method": "textDocument/references",
+      "status": "measured",
+      "results": 3
+    },
+    {
+      "target": "Collection (Workspace)",
+      "operation": "hover",
+      "method": "textDocument/hover",
+      "status": "measured",
+      "results": 1
+    },
+    {
+      "target": "Collection (installed)",
+      "operation": "definition",
+      "method": "textDocument/definition",
+      "status": "measured",
+      "results": 1
+    },
+    {
+      "target": "Collection (installed)",
+      "operation": "implementation",
+      "method": "textDocument/implementation",
+      "status": "N/A"
+    },
+    {
+      "target": "Collection (installed)",
+      "operation": "references",
+      "method": "textDocument/references",
+      "status": "measured",
+      "results": 3
+    },
+    {
+      "target": "Collection (installed)",
+      "operation": "hover",
+      "method": "textDocument/hover",
+      "status": "measured",
+      "results": 1
+    },
+    {
+      "target": "Task file",
+      "operation": "definition",
+      "method": "textDocument/definition",
+      "status": "measured",
+      "results": 1
+    },
+    {
+      "target": "Task file",
+      "operation": "implementation",
+      "method": "textDocument/implementation",
+      "status": "N/A"
+    },
+    {
+      "target": "Task file",
+      "operation": "references",
+      "method": "textDocument/references",
+      "status": "measured",
+      "results": 2
+    },
+    {
+      "target": "Task file",
+      "operation": "hover",
+      "method": "textDocument/hover",
+      "status": "N/A"
+    },
+    {
+      "target": "Vars file",
+      "operation": "definition",
+      "method": "textDocument/definition",
+      "status": "measured",
+      "results": 1
+    },
+    {
+      "target": "Vars file",
+      "operation": "implementation",
+      "method": "textDocument/implementation",
+      "status": "N/A"
+    },
+    {
+      "target": "Vars file",
+      "operation": "references",
+      "method": "textDocument/references",
+      "status": "measured",
+      "results": 1
+    },
+    {
+      "target": "Vars file",
+      "operation": "hover",
+      "method": "textDocument/hover",
+      "status": "N/A"
+    },
+    {
+      "target": "Module (builtin fixture docs)",
+      "operation": "definition",
+      "method": "textDocument/definition",
+      "status": "measured",
+      "results": 1
+    },
+    {
+      "target": "Module (builtin fixture docs)",
+      "operation": "implementation",
+      "method": "textDocument/implementation",
+      "status": "N/A"
+    },
+    {
+      "target": "Module (builtin fixture docs)",
+      "operation": "references",
+      "method": "textDocument/references",
+      "status": "N/A"
+    },
+    {
+      "target": "Module (builtin fixture docs)",
+      "operation": "hover",
+      "method": "textDocument/hover",
+      "status": "measured",
+      "results": 1
+    },
+    {
+      "target": "Module (Workspace fixture docs)",
+      "operation": "definition",
+      "method": "textDocument/definition",
+      "status": "measured",
+      "results": 1
+    },
+    {
+      "target": "Module (Workspace fixture docs)",
+      "operation": "implementation",
+      "method": "textDocument/implementation",
+      "status": "N/A"
+    },
+    {
+      "target": "Module (Workspace fixture docs)",
+      "operation": "references",
+      "method": "textDocument/references",
+      "status": "N/A"
+    },
+    {
+      "target": "Module (Workspace fixture docs)",
+      "operation": "hover",
+      "method": "textDocument/hover",
+      "status": "measured",
+      "results": 1
+    },
+    {
+      "target": "Module option",
+      "operation": "definition",
+      "method": "textDocument/definition",
+      "status": "N/A"
+    },
+    {
+      "target": "Module option",
+      "operation": "implementation",
+      "method": "textDocument/implementation",
+      "status": "N/A"
+    },
+    {
+      "target": "Module option",
+      "operation": "references",
+      "method": "textDocument/references",
+      "status": "N/A"
+    },
+    {
+      "target": "Module option",
+      "operation": "hover",
+      "method": "textDocument/hover",
+      "status": "measured",
+      "results": 1
+    },
+    {
+      "target": "Play keyword",
+      "operation": "definition",
+      "method": "textDocument/definition",
+      "status": "N/A"
+    },
+    {
+      "target": "Play keyword",
+      "operation": "implementation",
+      "method": "textDocument/implementation",
+      "status": "N/A"
+    },
+    {
+      "target": "Play keyword",
+      "operation": "references",
+      "method": "textDocument/references",
+      "status": "N/A"
+    },
+    {
+      "target": "Play keyword",
+      "operation": "hover",
+      "method": "textDocument/hover",
+      "status": "measured",
+      "results": 1
+    },
+    {
+      "target": "Variable (high fan-out)",
+      "operation": "references",
+      "method": "textDocument/references",
+      "status": "measured",
+      "results": 20001
+    },
+    {
+      "target": "Variable (reads only)",
+      "operation": "references",
+      "method": "textDocument/references",
+      "status": "measured",
+      "results": 1
+    },
+    {
+      "target": "Collections",
+      "operation": "completion",
+      "method": "textDocument/completion",
+      "status": "measured",
+      "results": 2
+    },
+    {
+      "target": "Play keywords",
+      "operation": "completion",
+      "method": "textDocument/completion",
+      "status": "measured",
+      "results": 41
+    },
+    {
+      "target": "Module options",
+      "operation": "completion",
+      "method": "textDocument/completion",
+      "status": "measured",
+      "results": 3
+    },
+    {
+      "target": "Module (fixture docs)",
+      "operation": "completion resolve",
+      "method": "completionItem/resolve",
+      "status": "measured",
+      "results": 1
+    },
+    {
+      "target": "Roles",
+      "operation": "workspace symbols",
+      "method": "workspace/symbol",
+      "status": "measured",
+      "results": 1
+    },
+    {
+      "target": "Collections",
+      "operation": "workspace symbols",
+      "method": "workspace/symbol",
+      "status": "measured",
+      "results": 4
+    },
+    {
+      "target": "Modules",
+      "operation": "workspace symbols",
+      "method": "workspace/symbol",
+      "status": "measured",
+      "results": 1
+    },
+    {
+      "target": "Plugins",
+      "operation": "workspace symbols",
+      "method": "workspace/symbol",
+      "status": "measured",
+      "results": 1
+    },
+    {
+      "target": "Playbooks / plays",
+      "operation": "workspace symbols",
+      "method": "workspace/symbol",
+      "status": "measured",
+      "results": 3
+    },
+    {
+      "target": "Task files",
+      "operation": "workspace symbols",
+      "method": "workspace/symbol",
+      "status": "measured",
+      "results": 3
+    },
+    {
+      "target": "Playbook",
+      "operation": "document symbols",
+      "method": "textDocument/documentSymbol",
+      "status": "measured",
+      "results": 1
+    },
+    {
+      "target": "Playbook",
+      "operation": "semantic tokens",
+      "method": "textDocument/semanticTokens/full",
+      "status": "measured",
+      "results": 6
+    },
+    {
+      "target": "Variable",
+      "operation": "code actions",
+      "method": "textDocument/codeAction",
+      "status": "measured",
+      "results": 4
+    },
+    {
+      "target": "Debug task",
+      "operation": "code actions",
+      "method": "textDocument/codeAction",
+      "status": "measured",
+      "results": 3
+    },
+    {
+      "target": "Task extraction",
+      "operation": "code actions",
+      "method": "textDocument/codeAction",
+      "status": "measured",
+      "results": 3
+    }
+  ]
+}

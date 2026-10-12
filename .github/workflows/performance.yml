@@ -1,0 +1,69 @@
+name: performance
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: performance-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ZIG_VERSION: "0.15.1"
+
+jobs:
+  regression:
+    name: ReleaseSafe regression gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - name: Initialize failure artifact
+        run: |
+          mkdir -p perf-results
+          printf '# Performance gate incomplete\n\n**FAIL: setup or execution did not finish.**\n' > perf-results/ci-status.md
+      - uses: actions/checkout@v4
+        with:
+          path: current
+          persist-credentials: false
+      # Deliberate policy pin, never PR base, merge-base, latest tag or cached data.
+      - uses: actions/checkout@v4
+        with:
+          ref: c0c7ae384a12a747ca2596f53bbbb121b1c16ba0
+          path: baseline
+          persist-credentials: false
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check performance guard logic (no server execution)
+        working-directory: current
+        run: python3 -m unittest discover -s tools/performance -p test_gate.py
+      - name: Build and compare optimized endpoints on this runner
+        working-directory: current
+        timeout-minutes: 35
+        run: make performance-ci ARGS="run --baseline-tree ../baseline --output ../perf-results/gate"
+      - name: Publish performance summary even on failure
+        if: always()
+        shell: bash
+        run: |
+          if [ -f perf-results/gate/summary.md ]; then
+            cat perf-results/gate/summary.md >> "$GITHUB_STEP_SUMMARY"
+          elif [ -f perf-results/ci-status.md ]; then
+            cat perf-results/ci-status.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            printf '**FAIL: no performance evidence was produced.**\n' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: optimized-performance-evidence
+          path: perf-results/
+          if-no-files-found: error
+          retention-days: 14
