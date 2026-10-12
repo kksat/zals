@@ -280,6 +280,32 @@ class GuardTests(unittest.TestCase):
             self.assertTrue((root / "regression/comparison.json").is_file())
             self.assertIn("FAIL", (root / "regression/summary.md").read_text())
 
+    def test_make_child_environment_clears_only_inherited_darwin_override(self):
+        for system, executable, override in (("Darwin", "make", "/nonexistent"),
+                                              ("Darwin", "/usr/bin/make", "/nonexistent"),
+                                              ("Darwin", "make", None),
+                                              ("Darwin", "python3", "/nonexistent"),
+                                              ("Linux", "make", "/nonexistent")):
+            inherited = {"PATH": "/mock/path", "PERF_ENV_MARKER": "preserved"}
+            if override is not None:
+                inherited["DEVELOPER_DIR"] = override
+            with self.subTest(system=system, executable=executable, override=override), \
+                    tempfile.TemporaryDirectory() as tmp, \
+                    patch.dict(gate.os.environ, inherited, clear=True), \
+                    patch.object(gate.platform, "system", return_value=system), \
+                    patch.object(gate.subprocess, "Popen") as spawn:
+                root = Path(tmp)
+                spawn.return_value.wait.return_value = 0
+                gate.execute([executable, "-s", "zig", "ARGS=version"], root, root / "command.log", 1,
+                             gate.time.monotonic() + 10, {"commands": []}, root / "manifest.json")
+                child_env = spawn.call_args.kwargs.get("env")
+                if system == "Darwin" and Path(executable).name == "make":
+                    self.assertIsNotNone(child_env)
+                    self.assertEqual(child_env, {key: value for key, value in inherited.items() if key != "DEVELOPER_DIR"})
+                else:
+                    self.assertIsNone(child_env)  # Other children inherit the original environment.
+                self.assertEqual(dict(gate.os.environ), inherited)  # Never mutate the gate's own environment.
+
     def test_timeout_kills_process_group_and_fails_not_passes(self):
         # Mock the process boundary: this never starts a binary or server.
         with tempfile.TemporaryDirectory() as tmp, patch.object(gate.subprocess, "Popen") as spawn, \

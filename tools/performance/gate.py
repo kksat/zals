@@ -341,7 +341,14 @@ def execute(command, cwd, log, timeout, deadline, manifest, manifest_path):
     write_json(manifest_path, manifest)
     print("+ " + shlex.join(command), flush=True)
     with log.open("w") as stream:
-        proc = subprocess.Popen(command, cwd=cwd, stdout=stream, stderr=subprocess.STDOUT, start_new_session=True)
+        child_env = None
+        if platform.system() == "Darwin" and Path(command[0]).name == "make":
+            # Apple's make shim needs a valid SDK lookup before the Makefile can
+            # reapply /nonexistent for Zig. Do not change non-make children.
+            child_env = dict(os.environ)
+            child_env.pop("DEVELOPER_DIR", None)
+        proc = subprocess.Popen(command, cwd=cwd, stdout=stream, stderr=subprocess.STDOUT,
+                                start_new_session=True, env=child_env)
         try:
             code = proc.wait(timeout=remaining)
         except subprocess.TimeoutExpired as exc:

@@ -34,7 +34,13 @@ The tool verifies the baseline HEAD exactly, requires clean tracked trees,
 builds both endpoints explicitly in ReleaseSafe, saves each executable and its
 digest, and always executes the current `test/benchmark_operations.py` for both.
 It does not execute a baseline-local copy of the harness or select a moving
-merge-base/PR base. Existing harness/helper digests are pinned in
+merge-base/PR base. On Darwin, only `make` child processes receive a copy of the
+environment with inherited `DEVELOPER_DIR` removed: Apple's make launcher must
+resolve its tool before loading the Makefile. The Makefile then reapplies the
+`/nonexistent` SDK link workaround for Zig ([ADR-0019](../adr/0019-toolchain-build-and-platforms.md)).
+The gate's own environment, non-make children and Linux behavior are unchanged;
+Zig is still invoked exclusively through make with the same version/mode checks.
+Existing harness/helper digests are pinned in
 [`config.json`](../../tools/performance/config.json).
 
 There is deliberately no baseline-update input, build-mode override or partial
