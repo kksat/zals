@@ -7,6 +7,10 @@ stale-file check. Variable navigation and role references became faster in
 that mode. A separate role-parameter implementation regression appears in
 Debug, not in ReleaseSafe.
 
+The regressions described here have since been diagnosed and corrected; see
+[the repaired comparison and CI follow-through](deep-modules-repaired.md).
+This report and its CSV retain the original pre-fix evidence.
+
 ## Comparison and method
 
 - Before: `c0c7ae384a12a747ca2596f53bbbb121b1c16ba0`, before all deep-module runtime changes.

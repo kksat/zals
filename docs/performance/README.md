@@ -133,6 +133,29 @@ to query-lease stale-file preparation, a separate Debug role-parameter
 implementation slowdown, operations that improved, and startup measurements.
 The linked CSV includes the complete measured operation matrix.
 
+The [diagnosis and repaired comparison](deep-modules-repaired.md) records the
+lease-preparation and callee-sorting fixes. Its CSV preserves all 150 final
+optimized workload/mode/scenario comparisons against the pre-refactor baseline.
+
+## Optimized regression CI
+
+The dedicated [performance gate](ci-gate.md) builds the pinned pre-refactor
+`c0c7ae3` and current checkout in ReleaseSafe, then runs the same existing
+harness on both sequentially on one runner. It covers the full matrix in both
+watcher modes and discovery-only scaling at 37 and 8,027 indexed files.
+Repeated, reversed-order median comparisons fail confirmed regressions;
+first/p95/startup remain separate reporting-only observations. Missing or
+incorrect results fail rather than count as fast responses.
+
+```sh
+make performance-ci ARGS="run --baseline-tree /path/to/pinned-baseline --output /tmp/new-perf-results"
+python3 -m unittest discover -s tools/performance -p test_gate.py
+```
+
+The baseline must be a separate clean checkout at the exact pinned SHA; the
+output directory must be new/empty and outside both checkouts. Do not use
+historical Mac absolute medians as cross-platform CI thresholds.
+
 Benchmark statistics/coverage safeguards run under `make test`. The complete
 matrix is exercised with a tiny fixture under `make smoke`, without asserting
 wall-clock budgets. For first-start indexing measurements against a real

@@ -463,3 +463,23 @@ preservation, not exhaustive new coverage of the proposed regressions above.
 No new blocked-write, tool-status-matrix, stale-source, parse-count, or
 multi-document oracle was introduced; snapshot memory and lock duration were
 not measured. Nothing was pushed.
+
+### Performance follow-through
+
+A subsequent [before/after measurement](../performance/deep-modules-comparison.md)
+found two runtime costs introduced by the first implementation. `a6bea14`
+separates discovery-storage preparation from entry revalidation inside the
+existing request lease: metadata-only reads no longer stat the entire index,
+while entry reads still refresh before their first borrow. `9e685f6` selects
+callee-directory entries before sorting, avoiding a redundant Workspace-sized
+sort without changing callee source/overlay/load policy.
+
+The [repaired comparison](../performance/deep-modules-repaired.md) records commit
+isolation, causal probes, original red/green feedback and final optimized
+results. The dedicated CI gate (`55bbba6`, with Darwin launcher correction
+`f2b96a8`) compares both endpoints in ReleaseSafe on one runner against the
+pinned pre-refactor `c0c7ae3`. Its complete local live suite passed 150 measured
+scenarios with zero confirmed or unconfirmed candidates. Existing tests,
+fixtures and inline blocks remain unchanged; new tests cover the dedicated
+performance guard outside the existing test tree. These bounded measurements
+are not a claim about all user Workspaces, memory or concurrency.
