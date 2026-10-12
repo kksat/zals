@@ -124,6 +124,15 @@ and Role references (roughly 50–55 ms here), plus high-fan-out references
 (roughly 243 ms). These are measurements, not diagnoses or new optimization
 claims. Profile the relevant request before changing it.
 
+## Deep-module before/after comparison
+
+The [deep-module regression report](deep-modules-comparison.md) compares
+`c0c7ae3` with `a8013c6` using repeated, reversed-order runs of the same
+benchmarks. It records a no-watcher document-feature regression attributable
+to query-lease stale-file preparation, a separate Debug role-parameter
+implementation slowdown, operations that improved, and startup measurements.
+The linked CSV includes the complete measured operation matrix.
+
 Benchmark statistics/coverage safeguards run under `make test`. The complete
 matrix is exercised with a tiny fixture under `make smoke`, without asserting
 wall-clock budgets. For first-start indexing measurements against a real
