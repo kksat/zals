@@ -1,4 +1,4 @@
-//! Publish diagnostics from ansible-lint / syntax-check.
+//! Adapt open documents/settings to validation and publish diagnostics.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -6,9 +6,7 @@ const Value = std.json.Value;
 const json_util = @import("../lsp/json_util.zig");
 const types = @import("../lsp/types.zig");
 const Server = @import("../lsp/server.zig").Server;
-const lint = @import("../services/lint.zig");
-const schema = @import("../services/schema.zig");
-const yaml = @import("../yaml/root.zig");
+const validation = @import("../services/validation.zig");
 
 pub fn publish(self: *Server, a: Allocator, uri: []const u8) !void {
     if (!self.settings.validation_enabled) {
@@ -16,64 +14,16 @@ pub fn publish(self: *Server, a: Allocator, uri: []const u8) !void {
         return;
     }
     const doc = self.documents.get(uri) orelse return;
-    const path = try lint.uriToPath(a, uri);
-    const lint_path, const tmp = try existingOrTemp(a, path, doc.bytes());
-    defer if (tmp) std.fs.deleteFileAbsolute(lint_path) catch {};
-
-    var diags: []const types.Diagnostic = &.{};
-    if (self.schemas.schemaForUri(uri)) |sch| {
-        diags = schemaDiags(a, doc, sch) catch &.{};
-    }
-    if (self.settings.lint_enabled) {
-        const lint_diags = lint.lintFile(a, self.runner, self.settings.lint_path, self.settings.lint_arguments, lint_path) catch &.{};
-        diags = try concatDiags(a, diags, lint_diags);
-    }
-    if (diags.len == 0 and !self.settings.lint_enabled) {
-        diags = lint.syntaxCheck(a, self.runner, "ansible-playbook", lint_path, doc) catch &.{};
-    }
-
-    try send(self, a, uri, diags);
-}
-
-fn concatDiags(a: Allocator, left: []const types.Diagnostic, right: []const types.Diagnostic) ![]const types.Diagnostic {
-    if (left.len == 0) return right;
-    if (right.len == 0) return left;
-    const out = try a.alloc(types.Diagnostic, left.len + right.len);
-    @memcpy(out[0..left.len], left);
-    @memcpy(out[left.len..], right);
-    return out;
-}
-
-fn schemaDiags(a: Allocator, doc: *const @import("../workspace/document.zig").Document, sch: Value) ![]types.Diagnostic {
-    var forest = yaml.parse(a, doc.bytes()) catch return &.{};
-    defer forest.deinit();
-    if (forest.roots.len == 0) return &.{};
-    const instance = yaml.jsonify.toJson(a, forest.roots[0]) catch return &.{};
-    const found = try schema.validate(a, sch, instance);
-    if (found.len == 0) return &.{};
-    const root_range = doc.rangeFromOffsets(0, doc.bytes().len);
-    var out = try a.alloc(types.Diagnostic, found.len);
-    for (found, 0..) |d, i| {
-        out[i] = .{
-            .range = root_range,
-            .severity = .err,
-            .source = "ansible-schema",
-            .message = d.message,
-        };
-    }
-    return out;
-}
-
-fn existingOrTemp(a: Allocator, path: []const u8, bytes: []const u8) !struct { []const u8, bool } {
-    if (std.fs.openFileAbsolute(path, .{})) |f| {
-        f.close();
-        return .{ path, false };
-    } else |_| {}
-    const tmp = try std.fmt.allocPrint(a, "/tmp/zals-{d}.yml", .{std.crypto.random.int(u32)});
-    var file = try std.fs.createFileAbsolute(tmp, .{});
-    defer file.close();
-    try file.writeAll(bytes);
-    return .{ tmp, true };
+    const result = try validation.validate(a, .{
+        .uri = uri,
+        .bytes = doc.bytes(),
+        .document_range = doc.rangeFromOffsets(0, doc.bytes().len),
+    }, .{
+        .lint_enabled = self.settings.lint_enabled,
+        .lint_path = self.settings.lint_path,
+        .lint_arguments = self.settings.lint_arguments,
+    }, self.runner, self.schemas.schemaForUri(uri));
+    try send(self, a, uri, result.diagnostics);
 }
 
 fn send(self: *Server, a: Allocator, uri: []const u8, diags: []const types.Diagnostic) !void {
