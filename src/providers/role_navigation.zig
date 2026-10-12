@@ -13,6 +13,7 @@ const wv = @import("workspace_view.zig");
 const RoleRef = @import("../workspace/facts.zig").RoleRef;
 const variables = @import("../variables/root.zig");
 const vs = @import("variable_source.zig");
+const callee_bindings = @import("../queries/callee_bindings.zig");
 
 /// Every Role reference in the Workspace that can resolve to the same role
 /// directory as the cursor. Null when the cursor is not on a role reference.
@@ -241,15 +242,10 @@ pub fn parameterImplementation(self: *Server, a: Allocator, params: Value) !?[]c
     const param = parameterAt(cur.path) orelse return null;
     const path = try paths.uriToPath(a, cur.doc.uri);
     const declared = try yaml.collections.getRoleDeclaredCollections(cur.forest.allocator(), path, cur.path);
-    var src = vs.ServerSource{ .server = self };
-    var index = variables.Index.init(a, src.source());
+    var query = callee_bindings.Query.init(self, a);
     var locs = std.array_list.Managed(types.Location).init(a);
     for (util.resolveRoleAll(self, a, param.role, path, declared)) |dir| {
-        const uri = try paths.pathToUri(a, try std.fs.path.join(a, &.{ dir, "tasks", "main.yml" }));
-        for (try index.definitions(a, uri, param.name)) |d| {
-            if (d.site == .argument_specs) continue;
-            try locs.append(try vs.location(a, self, &index, d));
-        }
+        try locs.appendSlice(try query.calleeBindings(dir, .{ .root_name = param.name }));
     }
     return try locs.toOwnedSlice();
 }

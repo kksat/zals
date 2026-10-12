@@ -10,9 +10,7 @@ const variables = @import("../variables/root.zig");
 const util = @import("util.zig");
 const vs = @import("variable_source.zig");
 const role_navigation = @import("role_navigation.zig");
-const wv = @import("workspace_view.zig");
-const facts = @import("../workspace/facts.zig");
-const discover = @import("../workspace/discover.zig");
+const callee_bindings = @import("../queries/callee_bindings.zig");
 
 const Context = struct {
     names: []const []const u8,
@@ -78,46 +76,10 @@ pub fn definition(self: *Server, a: Allocator, params: Value) !?[]const types.Lo
 /// not merely share its final field name. An unresolved callee yields no target.
 pub fn implementation(self: *Server, a: Allocator, params: Value) !?[]const types.Location {
     const context = (try contextAt(self, a, params)) orelse return null;
-    var source = vs.ServerSource{ .server = self };
-    var index = variables.Index.init(a, source.source());
+    var query = callee_bindings.Query.init(self, a);
     var out = std.array_list.Managed(types.Location).init(a);
-    const loc = util.cursorAt(self, params) orelse return null;
-    var workspace = try wv.View.forUri(self, a, loc.doc.uri);
     for (context.directories) |dir| {
-        if (workspace) |*view| {
-            if (try wv.view.calleeFiles(a, view.files, dir)) |set| {
-                // Indexed role sources stay immutable facts. A vars load with
-                // no index entry is a bounded dependency fallback, not a
-                // reason to enumerate and reparse the entire role again.
-                var files = std.array_list.Managed(wv.File).init(a);
-                try files.appendSlice(view.files);
-                for (set.loads) |load| {
-                    const existing = wv.view.find(files.items, load.path);
-                    if (existing != null and discover.isAnsibleFile(std.fs.path.basename(load.path))) continue;
-                    const uri = try paths.pathToUri(a, load.path);
-                    const text = (try source.source().read(a, uri)) orelse continue;
-                    const dependency = try facts.extractDependencyIn(a, view.root, load.path, text);
-                    if (existing != null) {
-                        // Non-Ansible source candidates have deliberately
-                        // empty facts; an explicit vars load supplies context.
-                        for (files.items) |*file| {
-                            if (std.mem.eql(u8, file.path, load.path)) file.facts = dependency;
-                        }
-                    } else {
-                        try files.append(.{ .path = load.path, .uri = uri, .facts = dependency });
-                    }
-                }
-                for (try wv.view.calleeFieldDefinitions(a, files.items, set, context.names)) |def| {
-                    try out.append(try view.location(def.uri, def.start, def.end));
-                }
-                continue;
-            }
-        }
-        const uri = try paths.pathToUri(a, try std.fs.path.join(a, &.{ dir, "tasks", "main.yml" }));
-        for (try index.fieldDefinitions(a, uri, context.names[context.names.len - 1])) |def| {
-            if (def.site == .argument_specs or !equalPath(def.field_path, context.names)) continue;
-            try out.append(try vs.location(a, self, &index, def));
-        }
+        try out.appendSlice(try query.calleeBindings(dir, .{ .full_path = context.names }));
     }
     return try out.toOwnedSlice();
 }
@@ -132,10 +94,4 @@ pub fn hover(self: *Server, a: Allocator, params: Value) !?types.Hover {
         return .{ .contents = .{ .kind = .markdown, .value = text }, .range = context.range };
     }
     return null;
-}
-
-fn equalPath(left: []const []const u8, right: []const []const u8) bool {
-    if (left.len != right.len) return false;
-    for (left, right) |x, y| if (!std.mem.eql(u8, x, y)) return false;
-    return true;
 }

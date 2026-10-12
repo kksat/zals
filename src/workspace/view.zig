@@ -131,21 +131,25 @@ pub fn fieldDefinitions(a: Allocator, files: []const File, name: []const u8, rea
     return near.toOwnedSlice();
 }
 
+/// Whether a path is a conventional source of this callee, without admitting
+/// callers or other roles whose directory merely shares the same prefix.
+pub fn isCalleeSource(path: []const u8, dir: []const u8) bool {
+    if (!std.mem.startsWith(u8, path, dir) or path.len <= dir.len + 1) return false;
+    if (path[dir.len] != '/' and path[dir.len] != '\\') return false;
+    var components = std.mem.tokenizeAny(u8, path[dir.len + 1 ..], "/\\");
+    const first = components.next() orelse return false;
+    for ([_][]const u8{ "defaults", "vars", "tasks", "handlers", "templates", "meta" }) |name| {
+        if (std.mem.eql(u8, first, name)) return true;
+    }
+    return false;
+}
+
 /// An indexed callee's conventional sources and one level of their vars loads.
 /// No invokers join this file set. Null means this callee is not indexed here.
 pub fn calleeFiles(a: Allocator, files: []const File, dir: []const u8) !?Reachability {
     var base = std.array_list.Managed([]const u8).init(a);
     for (files) |f| {
-        if (!std.mem.startsWith(u8, f.path, dir) or f.path.len <= dir.len + 1) continue;
-        if (f.path[dir.len] != '/' and f.path[dir.len] != '\\') continue;
-        var components = std.mem.tokenizeAny(u8, f.path[dir.len + 1 ..], "/\\");
-        const first = components.next() orelse continue;
-        for ([_][]const u8{ "defaults", "vars", "tasks", "handlers", "templates", "meta" }) |name| {
-            if (std.mem.eql(u8, first, name)) {
-                try appendUnique(&base, f.path);
-                break;
-            }
-        }
+        if (isCalleeSource(f.path, dir)) try appendUnique(&base, f.path);
     }
     if (base.items.len == 0) return null;
     const conventional = try a.dupe([]const u8, base.items);
@@ -158,6 +162,25 @@ pub fn calleeFiles(a: Allocator, files: []const File, dir: []const u8) !?Reachab
         }
     }
     return .{ .paths = try base.toOwnedSlice(), .loads = try loads.toOwnedSlice() };
+}
+
+/// Concrete root bindings from the same callee file set used for fields.
+/// Explicit loads can outrank the file's intrinsic definition site.
+pub fn calleeRootDefinitions(a: Allocator, files: []const File, set: Reachability, name: []const u8) ![]Occurrence {
+    var out = std.array_list.Managed(Occurrence).init(a);
+    for (files) |f| {
+        if (!contains(set.paths, f.path)) continue;
+        for (f.facts.var_defs) |def| {
+            if (def.site == .argument_specs or !std.mem.eql(u8, def.name, name)) continue;
+            var site = def.site;
+            if (set.loadSite(f.path)) |load| if (load.rank() < site.rank()) {
+                site = load;
+            };
+            try out.append(.{ .uri = f.uri, .path = f.path, .start = def.start, .end = def.end, .kind = .definition, .site = site, .reachable = true });
+        }
+    }
+    std.mem.sort(Occurrence, out.items, {}, lessRank);
+    return try out.toOwnedSlice();
 }
 
 /// Concrete full-path field bindings from the selected callee file set.
