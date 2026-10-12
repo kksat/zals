@@ -85,10 +85,12 @@ pub const WorkspaceIndex = struct {
     next_generation: u64 = 1,
     active_scans: usize = 0,
     /// A request's refresh policy, or null outside a request. Preparation is
-    /// lazy so document-local requests do not re-stat the whole Workspace.
+    /// lazy so discovery-only requests do not re-stat the whole Workspace.
     query_refresh_stale: ?bool = null,
-    /// Once any entry or root info is read, its arenas are frozen until release.
-    query_borrowed: bool = false,
+    /// Discovery preparation freezes pending drains and root-info storage.
+    query_discovery_prepared: bool = false,
+    /// Entry preparation refreshes disk facts once, then freezes entry storage.
+    query_entries_borrowed: bool = false,
     /// Set when the last active scan finished and not yet reported.
     ready_event: bool = false,
     /// Worker → main handoff.
@@ -107,41 +109,50 @@ pub const WorkspaceIndex = struct {
         return self;
     }
 
-    /// A main-thread request lease, not an independently owned snapshot. The
-    /// first entry or discovery read prepares and freezes the revision; release
-    /// once after all borrows have been consumed. Workers may keep queuing
-    /// results, but cannot change the borrowed revision.
+    /// A main-thread request lease, not an independently owned snapshot. Each
+    /// storage class is prepared before its first borrow and remains alive until
+    /// release. Workers may keep queuing results, but cannot replace borrowed
+    /// storage; disk facts are refreshed only when entries are first needed.
     pub const QueryLease = struct {
         index: ?*WorkspaceIndex,
 
         pub fn release(self: *QueryLease) void {
             const index = self.index orelse unreachable;
             std.debug.assert(index.query_refresh_stale != null);
-            index.query_borrowed = false;
+            index.query_entries_borrowed = false;
+            index.query_discovery_prepared = false;
             index.query_refresh_stale = null;
             self.index = null;
         }
     };
 
     /// Start a request. Its first entry or discovery read applies available
-    /// scan results and, without watching, refreshes known disk entries before
-    /// borrowing. Never waits for startup. Nested reads share this preparation;
-    /// requests that only use document-local facts never refresh the index.
+    /// scan results without waiting for startup. Without watching, the first
+    /// entry read also refreshes known disk files. Nested reads share preparation;
+    /// discovery-only requests never refresh entries.
     pub fn acquireQuery(self: *WorkspaceIndex, refresh_stale: bool) QueryLease {
         std.debug.assert(self.query_refresh_stale == null);
         self.query_refresh_stale = refresh_stale;
         return .{ .index = self };
     }
 
-    /// All arena-borrowing getters pass here, including discovery-only reads.
-    /// Preparing again after RootInfo was borrowed could drain and invalidate
-    /// that storage, just as doing so after Entry was borrowed could free facts.
-    fn prepareQuery(self: *WorkspaceIndex) void {
-        const refresh = self.query_refresh_stale orelse return;
-        if (self.query_borrowed) return;
+    /// Drain once before any borrow. Further drains could replace both entry
+    /// and root-info arenas, so even discovery-only reads freeze the queue.
+    fn prepareDiscovery(self: *WorkspaceIndex) void {
+        if (self.query_refresh_stale == null or self.query_discovery_prepared) return;
         self.drain();
+        self.query_discovery_prepared = true;
+    }
+
+    /// Disk refresh changes only entry storage, never RootInfo. It may therefore
+    /// follow a discovery borrow, but must precede the first entry borrow. Do not
+    /// drain again here: pending root-info replacements must stay queued.
+    fn prepareEntries(self: *WorkspaceIndex) void {
+        const refresh = self.query_refresh_stale orelse return;
+        if (self.query_entries_borrowed) return;
+        self.prepareDiscovery();
         if (refresh) self.refreshStale();
-        self.query_borrowed = true;
+        self.query_entries_borrowed = true;
     }
 
     /// Free everything. Background scans must already be stopped (the pool
@@ -241,7 +252,7 @@ pub const WorkspaceIndex = struct {
     /// After the first query borrow, leave output queued for the next message
     /// or idle drain. Before that borrow, preparation may still apply it.
     pub fn drain(self: *WorkspaceIndex) void {
-        if (self.query_borrowed) return;
+        if (self.query_discovery_prepared) return;
         self.mutex.lock();
         const items = self.pending.toOwnedSlice(self.gpa) catch {
             self.mutex.unlock();
@@ -283,10 +294,10 @@ pub const WorkspaceIndex = struct {
 
     /// Re-index one file on the main thread (save, watched-file change).
     /// `root` is the Workspace that owns it. Also used by lazy preparation,
-    /// before any arena is borrowed. Explicit mutations must never be skipped:
-    /// save/watch notifications run outside the request lease instead.
+    /// before any entry arena is borrowed; root-info storage is unaffected.
+    /// Explicit save/watch notifications run outside the request lease.
     pub fn reindex(self: *WorkspaceIndex, root: []const u8, path: []const u8) void {
-        std.debug.assert(!self.query_borrowed);
+        std.debug.assert(!self.query_entries_borrowed);
         const st = std.fs.cwd().statFile(path) catch {
             self.remove(path);
             return;
@@ -296,14 +307,14 @@ pub const WorkspaceIndex = struct {
     }
 
     pub fn remove(self: *WorkspaceIndex, path: []const u8) void {
-        std.debug.assert(!self.query_borrowed);
+        std.debug.assert(!self.query_entries_borrowed);
         if (self.entries.fetchRemove(path)) |kv| kv.value.destroy(self.gpa);
     }
 
     /// Re-stat every entry and re-parse those whose mtime changed; drop the
     /// ones that disappeared. Used when the client cannot watch files.
     pub fn refreshStale(self: *WorkspaceIndex) void {
-        if (self.query_borrowed) return;
+        if (self.query_entries_borrowed) return;
         var stale = std.array_list.Managed(*Entry).init(self.gpa);
         defer stale.deinit();
         var it = self.entries.valueIterator();
@@ -325,20 +336,20 @@ pub const WorkspaceIndex = struct {
 
     /// Borrowed until the next mutation, or through release of an active lease.
     pub fn get(self: *WorkspaceIndex, path: []const u8) ?*const Entry {
-        self.prepareQuery();
+        self.prepareEntries();
         return self.entries.get(path);
     }
 
     /// Discovery storage has the same borrowing lifetime as entries.
     pub fn info(self: *WorkspaceIndex, root: []const u8) ?*const RootInfo {
-        self.prepareQuery();
+        self.prepareDiscovery();
         return self.infos.get(root);
     }
 
     /// Entries of the Workspace rooted at `root`, sorted by path. The pointer
     /// list belongs to `a`; entries are borrowed with the lifetime of `get`.
     pub fn entriesOf(self: *WorkspaceIndex, a: Allocator, root: []const u8) ![]const *const Entry {
-        self.prepareQuery();
+        self.prepareEntries();
         var out = std.array_list.Managed(*const Entry).init(a);
         var it = self.entries.valueIterator();
         while (it.next()) |e| {
@@ -353,7 +364,7 @@ pub const WorkspaceIndex = struct {
     }
 
     fn putEntry(self: *WorkspaceIndex, e: *Entry) void {
-        std.debug.assert(!self.query_borrowed);
+        std.debug.assert(!self.query_entries_borrowed);
         if (self.entries.fetchRemove(e.path)) |kv| kv.value.destroy(self.gpa);
         self.entries.put(e.path, e) catch e.destroy(self.gpa);
     }
