@@ -144,7 +144,7 @@ pub const Server = struct {
 
         if (id) |req_id| {
             handlers.handleRequest(self, a, req_id, method, params) catch |err| {
-                try out.sendError(&self.transport, a, req_id, -32603, @errorName(err));
+                try self.sendError(a, req_id, -32603, @errorName(err));
             };
         } else {
             try handlers.handleNotification(self, a, method, params);
