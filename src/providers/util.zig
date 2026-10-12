@@ -32,13 +32,7 @@ pub fn cursorAt(self: *Server, params: Value) ?struct { doc: *Document, offset: 
 pub fn parseAt(self: *Server, a: Allocator, params: Value) ?Cursor {
     const loc = cursorAt(self, params) orelse return null;
     var forest = yaml.parse(a, loc.doc.bytes()) catch return null;
-    var found: []*yaml.Node = &.{};
-    for (forest.roots) |root| {
-        if (yaml.getPathAt(forest.allocator(), root, loc.offset, true) catch null) |p| {
-            found = p;
-            break;
-        }
-    }
+    const found: []*yaml.Node = (forest.pathAt(loc.offset, true) catch null) orelse &.{};
     return .{ .doc = loc.doc, .offset = loc.offset, .forest = forest, .path = found };
 }
 

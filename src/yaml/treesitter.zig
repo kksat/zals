@@ -32,16 +32,27 @@ pub fn parse(allocator: Allocator, text: []const u8) !dom.Forest {
     // structure entirely. Fall back to the subset parser in that case.
     if (c.ts_node_has_error(root)) return error.ParseError;
     var roots = std.ArrayList(*Node).empty;
+    var document_starts = std.ArrayList(usize).empty;
     const n = c.ts_node_named_child_count(root);
     var i: u32 = 0;
     while (i < n) : (i += 1) {
         const child = c.ts_node_named_child(root, i);
         if (isType(child, "document")) {
-            if (try convert(a, text, child)) |node| try roots.append(a, node);
+            if (try convert(a, text, child)) |node| {
+                try roots.append(a, node);
+                // The document range includes markers/directives that its
+                // lowered content root does not necessarily contain.
+                try document_starts.append(a, start(child));
+            }
         }
     }
 
-    return .{ .arena = arena, .text = text, .roots = try roots.toOwnedSlice(a) };
+    return .{
+        .arena = arena,
+        .text = text,
+        .roots = try roots.toOwnedSlice(a),
+        .document_starts = try document_starts.toOwnedSlice(a),
+    };
 }
 
 fn typeName(node: c.TSNode) []const u8 {

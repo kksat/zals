@@ -126,14 +126,7 @@ pub const Doc = struct {
 
     /// Classify the node under `offset`.
     pub fn at(self: *Doc, uri: []const u8, offset: usize, lookup: Docs) !?Cursor {
-        const arena = self.forest.allocator();
-        var found: []*yaml.Node = &.{};
-        for (self.forest.roots) |root| {
-            if (yaml.getPathAt(arena, root, offset, true) catch null) |p| {
-                found = p;
-                break;
-            }
-        }
+        const found: []*yaml.Node = (self.forest.pathAt(offset, true) catch null) orelse &.{};
         return classify(&self.forest, uri, found, offset, lookup);
     }
 

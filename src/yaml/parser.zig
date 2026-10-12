@@ -23,6 +23,7 @@ const Line = struct {
     body: []const u8,
     /// Byte offset of `body`.
     body_start: usize,
+    marker: enum { none, start, end } = .none,
 };
 
 const Parser = struct {
@@ -32,7 +33,7 @@ const Parser = struct {
     i: usize,
 
     fn peek(self: *Parser) ?Line {
-        if (self.i >= self.lines.len) return null;
+        if (self.i >= self.lines.len or self.lines[self.i].marker != .none) return null;
         return self.lines[self.i];
     }
 
@@ -56,6 +57,7 @@ pub fn parse(allocator: Allocator, text: []const u8) !Forest {
         .arena = std.heap.ArenaAllocator.init(allocator),
         .text = text,
         .roots = &.{},
+        .document_starts = &.{},
     };
     errdefer forest.deinit();
     const arena = forest.arena.allocator();
@@ -64,13 +66,26 @@ pub fn parse(allocator: Allocator, text: []const u8) !Forest {
     var p = Parser{ .arena = arena, .text = text, .lines = lines, .i = 0 };
 
     var roots = std.array_list.Managed(*Node).init(arena);
-    while (p.peek() != null) {
-        const root = try parseNode(&p, 0) orelse break;
+    var document_starts = std.array_list.Managed(usize).init(arena);
+    while (p.i < lines.len) {
+        const line = lines[p.i];
+        if (line.marker == .end) {
+            p.bump();
+            continue;
+        }
+        if (line.marker == .start) p.bump();
+        // Markers stop recursive parsing, so maps and sequences cannot consume
+        // another document. Retain an empty root for an explicit empty document.
+        const root = try parseNode(&p, 0) orelse blk: {
+            const empty = try emptyScalar(&p, line.start);
+            empty.end = line.end;
+            break :blk empty;
+        };
         try roots.append(root);
-        // Skip a following document-end / document-start if present; collectLines
-        // already dropped `---` / `...` lines, so the next node is the next doc.
+        try document_starts.append(if (line.marker == .start) line.start else root.start);
     }
     forest.roots = try roots.toOwnedSlice();
+    forest.document_starts = try document_starts.toOwnedSlice();
     return forest;
 }
 
@@ -91,7 +106,27 @@ fn collectLines(arena: Allocator, text: []const u8) ![]Line {
         const trimmed = std.mem.trimRight(u8, rest, " \t");
         if (trimmed.len == 0) continue;
         if (trimmed[0] == '#') continue;
-        if (std.mem.eql(u8, trimmed, "---") or std.mem.eql(u8, trimmed, "...")) continue;
+        // Only column-zero, standalone markers (optionally commented) delimit
+        // documents. Indented marker-looking text can be scalar content.
+        if (indent == 0 and trimmed.len >= 3) {
+            const tail = std.mem.trimLeft(u8, trimmed[3..], " \t");
+            if (tail.len == 0 or (trimmed.len > 3 and (trimmed[3] == ' ' or trimmed[3] == '\t') and tail[0] == '#')) {
+                const opening = std.mem.eql(u8, trimmed[0..3], "---");
+                const closing = std.mem.eql(u8, trimmed[0..3], "...");
+                if (opening or closing) {
+                    try lines.append(.{
+                        .indent = 0,
+                        .has_dash = false,
+                        .start = line_start,
+                        .end = line_start + 3,
+                        .body = trimmed[0..3],
+                        .body_start = line_start,
+                        .marker = if (opening) .start else .end,
+                    });
+                    continue;
+                }
+            }
+        }
 
         var has_dash = false;
         var body = trimmed;

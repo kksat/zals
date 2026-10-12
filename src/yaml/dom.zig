@@ -63,12 +63,35 @@ pub const Document = struct {
     }
 };
 
-/// A parsed YAML source: an arena owning the nodes, the source text, and one
-/// root node per YAML document. Produced by any `YamlParser` backend.
+/// A parsed YAML source with arena-owned nodes and query paths. `text` is
+/// borrowed: the caller must keep its bytes alive and unchanged until deinit.
+/// Produced by any `YamlParser` backend.
 pub const Forest = struct {
     arena: std.heap.ArenaAllocator,
     text: []const u8,
     roots: []*Node,
+    /// Document starts in source order, parallel to `roots`. Unlike root ranges,
+    /// these include a document's opening marker (or directives, when parsed).
+    document_starts: []const usize,
+
+    /// Select a document and find its cursor path, allocated for forest lifetime.
+    /// `inclusive` includes descendant end positions, as in the root-level helper.
+    /// Leading gaps select the first document; other gaps and trailing whitespace
+    /// (including EOF) select the preceding document until the next recorded start.
+    /// Markers follow the backend's document starts, not content-root containment:
+    /// an opening marker selects its document, and a closing marker remains with
+    /// the document containing it. Empty documents retain their own roots.
+    /// Missing descendants retain editor placeholders. No roots or an offset past
+    /// the source returns null; `inclusive` does not change document selection.
+    pub fn pathAt(self: *Forest, offset: usize, inclusive: bool) !?[]*Node {
+        if (self.roots.len == 0 or offset > self.text.len) return null;
+        var selected: usize = 0;
+        for (self.document_starts, 0..) |start, i| {
+            if (start > offset) break;
+            selected = i;
+        }
+        return @import("path.zig").getPathAt(self.allocator(), self.roots[selected], offset, inclusive);
+    }
 
     pub fn deinit(self: *Forest) void {
         self.arena.deinit();
