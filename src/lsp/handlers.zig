@@ -150,18 +150,11 @@ fn resolveResult(self: *Server, a: Allocator, params: Value) !Value {
 
 fn hoverResult(self: *Server, a: Allocator, params: Value) !Value {
     const loc = documentOffset(self, params) orelse return Value.null;
-    if (try providers.field_navigation.hover(self, a, params)) |h| return encode.hover(a, h);
-    // Navigation hovers need YAML and Workspace facts, not a module catalog.
-    // Resolve them before docsForUri, whose cold library loads subprocesses.
-    if (try providers.collections.hover(self, a, params)) |h| return encode.hover(a, h);
-    if (try providers.role_navigation.hover(self, a, params)) |h| return encode.hover(a, h);
-    if (try providers.role_navigation.parameterHover(self, a, params)) |h| return encode.hover(a, h);
-    if (try providers.variable_hover.hover(self, a, params)) |h| return encode.hover(a, h);
-    var opened = cursor.Doc.open(a, loc.doc.bytes()) catch return Value.null;
-    defer opened.deinit();
-    const lib = try self.docsForUri(a, loc.doc.uri);
-    const cur = try opened.at(loc.doc.uri, loc.offset, cursor.fromLibrary(lib));
-    return encode.hover(a, try providers.hover.format(a, loc.doc, cur));
+    var navigation = @import("../queries/navigation.zig").Query.init(self, a);
+    defer navigation.deinit();
+    var subject = navigation.subjectAt(.{ .uri = loc.doc.uri, .offset = loc.offset }) orelse return Value.null;
+    defer subject.deinit();
+    return encode.hover(a, try navigation.hover(&subject));
 }
 
 fn definitionResult(self: *Server, a: Allocator, params: Value) !Value {

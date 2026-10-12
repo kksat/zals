@@ -96,7 +96,7 @@ pub fn roleResolver(
     const ctx = self.projectContext(a, referencing_path);
     const workspace_collections = if (ctx.workspace_root) |root| blk: {
         var v = @import("workspace_view.zig").View.init(self, a, root) catch break :blk &.{};
-        break :blk @import("collections.zig").workspaceCollections(a, &v) catch &.{};
+        break :blk @import("../queries/collection_navigation.zig").workspaceCollections(a, &v) catch &.{};
     } else &.{};
     return .{
         .allocator = a,

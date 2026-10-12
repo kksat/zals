@@ -9,84 +9,25 @@ const util = @import("util.zig");
 const yaml = @import("../yaml/root.zig");
 const roles = @import("../roles/root.zig");
 const paths = @import("../paths.zig");
-const wv = @import("workspace_view.zig");
 const RoleRef = @import("../workspace/facts.zig").RoleRef;
 
-/// Every Role reference in the Workspace that can resolve to the same role
-/// directory as the cursor. Null when the cursor is not on a role reference.
+const Subject = @import("../queries/navigation_subject.zig").Subject;
+const role_query = @import("../queries/role_navigation.zig");
+pub const roleCard = role_query.roleCard;
+const roleRefMatches = role_query.roleRefMatches;
+
 pub fn references(self: *Server, a: Allocator, params: Value) !?[]const types.Location {
-    var cur = util.parseAt(self, a, params) orelse return null;
-    defer cur.forest.deinit();
-    const ref = roles.reference.detect(cur.path, cur.forest.text) orelse return null;
-    const own = types.Location{ .uri = cur.doc.uri, .range = cur.doc.rangeFromOffsets(ref.start, ref.end) };
-    const path = try paths.uriToPath(a, cur.doc.uri);
-    const declared = try yaml.collections.getRoleDeclaredCollections(cur.forest.allocator(), path, cur.path);
-    const targets = util.resolveRoleAll(self, a, ref.name, path, declared);
-    // Unresolved references have no identity to share, even with another
-    // unresolved occurrence of the same spelling.
-    if (targets.len == 0) return try a.dupe(types.Location, &.{own});
-
-    var v = (try wv.View.forUri(self, a, cur.doc.uri)) orelse return try a.dupe(types.Location, &.{own});
-    var locs = std.array_list.Managed(types.Location).init(a);
-    try locs.append(own);
-    for (v.files) |f| {
-        if (f.facts.role_refs.len == 0) continue;
-        // Build search paths once per file, not per reference. Facts already
-        // retain the collections visible at each site from the index/open doc.
-        const resolver = util.roleResolver(self, a, f.path, &.{});
-        for (f.facts.role_refs) |r| {
-            if (std.mem.eql(u8, f.uri, cur.doc.uri) and r.start == ref.start and r.end == ref.end) continue;
-            if (!roleRefMatches(resolver, f.path, r, targets)) continue;
-            try locs.append(try v.location(f.uri, r.start, r.end));
-        }
-    }
-    std.mem.sort(types.Location, locs.items, {}, lessLocation);
-    return try locs.toOwnedSlice();
+    const loc = util.cursorAt(self, params) orelse return null;
+    var subject = Subject.at(self, .{ .uri = loc.doc.uri, .offset = loc.offset }) orelse return null;
+    defer subject.deinit();
+    return role_query.references(self, a, &subject);
 }
 
-/// The file's search paths are shared; each site supplies its own collections.
-fn roleRefMatches(base: roles.Resolver, path: []const u8, ref: RoleRef, targets: []const []const u8) bool {
-    var resolver = base;
-    resolver.declared_collections = ref.declared_collections;
-    return overlaps(targets, resolver.resolveAll(ref.name, path));
-}
-
-fn overlaps(left: []const []const u8, right: []const []const u8) bool {
-    for (left) |x| for (right) |y| {
-        if (std.mem.eql(u8, x, y)) return true;
-    };
-    return false;
-}
-
-/// Hover on a role reference: the role's `README.md`, else its unrendered
-/// argument specs, else its unrendered `meta/main.yml`, else its name and
-/// resolved path. Null when the cursor is not on a role reference.
 pub fn hover(self: *Server, a: Allocator, params: Value) !?types.Hover {
-    var cur = util.parseAt(self, a, params) orelse return null;
-    defer cur.forest.deinit();
-    const ref = roles.reference.detect(cur.path, cur.forest.text) orelse return null;
-    const name = try a.dupe(u8, ref.name);
-    const path = try paths.uriToPath(a, cur.doc.uri);
-    const collections = yaml.collections.getRoleDeclaredCollections(cur.forest.allocator(), path, cur.path) catch &.{};
-    const range = cur.doc.rangeFromOffsets(ref.start, ref.end);
-
-    const dir = util.resolveRole(self, a, name, path, collections) orelse {
-        return markdown(range, try std.fmt.allocPrint(a, "**Role** `{s}`\n\nNot found on the role search path.", .{name}));
-    };
-    return markdown(range, try roleCard(a, name, dir));
-}
-
-/// Markdown for a resolved role directory.
-pub fn roleCard(a: Allocator, name: []const u8, dir: []const u8) ![]const u8 {
-    for ([_][]const u8{ "README.md", "readme.md", "Readme.md" }) |readme| {
-        if (readFile(a, &.{ dir, readme })) |text| return text;
-    }
-    for ([_][]const u8{ "argument_specs.yml", "argument_specs.yaml", "main.yml", "main.yaml" }) |meta| {
-        if (readFile(a, &.{ dir, "meta", meta })) |text| {
-            return std.fmt.allocPrint(a, "**Role** `{s}` — `meta/{s}`\n\n```yaml\n{s}\n```", .{ name, meta, trimEnd(text) });
-        }
-    }
-    return std.fmt.allocPrint(a, "**Role** `{s}`\n\n`{s}`", .{ name, dir });
+    const loc = util.cursorAt(self, params) orelse return null;
+    var subject = Subject.at(self, .{ .uri = loc.doc.uri, .offset = loc.offset }) orelse return null;
+    defer subject.deinit();
+    return role_query.hover(self, a, &subject);
 }
 
 const parameters = @import("../roles/parameters.zig");
@@ -125,28 +66,6 @@ pub fn parameterImplementation(self: *Server, a: Allocator, params: Value) !?[]c
 pub const OptionSpec = parameters.OptionSpec;
 pub const optionSpec = parameters.optionSpec;
 pub const optionSpecPathFrom = parameters.optionSpecPathFrom;
-
-fn markdown(range: types.Range, text: []const u8) types.Hover {
-    return .{ .contents = .{ .kind = .markdown, .value = text }, .range = range };
-}
-
-fn readFile(a: Allocator, parts: []const []const u8) ?[]const u8 {
-    const p = std.fs.path.join(a, parts) catch return null;
-    const f = std.fs.cwd().openFile(p, .{}) catch return null;
-    defer f.close();
-    return f.readToEndAlloc(a, 256 * 1024) catch null;
-}
-
-fn trimEnd(s: []const u8) []const u8 {
-    return std.mem.trimRight(u8, s, " \t\r\n");
-}
-
-fn lessLocation(_: void, x: types.Location, y: types.Location) bool {
-    const order = std.mem.order(u8, x.uri, y.uri);
-    if (order != .eq) return order == .lt;
-    if (x.range.start.line != y.range.start.line) return x.range.start.line < y.range.start.line;
-    return x.range.start.character < y.range.start.character;
-}
 
 const testing = std.testing;
 

@@ -32,9 +32,7 @@ pub fn hover(self: *Server, a: Allocator, params: Value) !?types.Hover {
 pub fn hoverName(self: *Server, a: Allocator, uri: []const u8, name: []const u8, range: types.Range) !?types.Hover {
     var query = navigation.Query.init(self, a);
     defer query.deinit();
-    var subject = query.subjectAt(.{ .uri = uri, .offset = 0 }) orelse return null;
-    defer subject.deinit();
-    return try query.hoverName(&subject, name, range, .root);
+    return try query.namedRootHover(uri, name, range);
 }
 
 pub const Entry = struct {

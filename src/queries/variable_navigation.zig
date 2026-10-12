@@ -163,19 +163,29 @@ pub const Query = struct {
     }
 
     pub fn hoverName(self: *Query, subject: *Subject, name: []const u8, range: types.Range, group: Group) !types.Hover {
+        return self.renderBindings(subject.doc.uri, name, range, group, try subject.workspace(self.cache.files.server, self.cache.allocator));
+    }
+
+    /// Legacy named-root callers need not have the referencing document open.
+    /// They still cross the same typed search/description implementation.
+    pub fn namedRootHover(self: *Query, uri: []const u8, name: []const u8, range: types.Range) !types.Hover {
+        var view = try workspace.View.forUri(self.cache.files.server, self.cache.allocator, uri);
+        return self.renderBindings(uri, name, range, .root, if (view) |*found| found else null);
+    }
+
+    fn renderBindings(self: *Query, uri: []const u8, name: []const u8, range: types.Range, group: Group, view: ?*workspace.View) !types.Hover {
         const a = self.cache.allocator;
-        const server = self.cache.files.server;
         var entries: []const presentation.Entry = &.{};
         var root: ?[]const u8 = null;
-        if (try subject.workspace(server, a)) |view| {
-            root = view.root;
-            const reachable = try view.reachableFiles(try paths.uriToPath(a, subject.doc.uri));
-            const defs = if (group == .root) try workspace.view.definitions(a, view.files, name, reachable) else try workspace.view.fieldDefinitions(a, view.files, name, reachable);
+        if (view) |found| {
+            root = found.root;
+            const reachable = try found.reachableFiles(try paths.uriToPath(a, uri));
+            const defs = if (group == .root) try workspace.view.definitions(a, found.files, name, reachable) else try workspace.view.fieldDefinitions(a, found.files, name, reachable);
             // Presentation selects the displayed subset before descriptions.
-            entries = try presentation.workspaceEntries(a, &self.cache, defs, view.files);
+            entries = try presentation.workspaceEntries(a, &self.cache, defs, found.files);
         } else {
             var index = variables.Index.init(a, self.cache.source());
-            const defs = if (group == .root) try index.definitions(a, subject.doc.uri, name) else try index.fieldDefinitions(a, subject.doc.uri, name);
+            const defs = if (group == .root) try index.definitions(a, uri, name) else try index.fieldDefinitions(a, uri, name);
             entries = try presentation.fallbackEntries(a, &self.cache, defs);
         }
         const text = if (entries.len == 0)
