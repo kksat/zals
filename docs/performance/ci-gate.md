@@ -2,7 +2,8 @@
 
 The dedicated [`performance` workflow](../../.github/workflows/performance.yml)
 compares the current checkout with optimized pre-refactor zals at
-**`c0c7ae384a12a747ca2596f53bbbb121b1c16ba0`**. Both endpoints are built via
+**`c0c7ae384a12a747ca2596f53bbbb121b1c16ba0`**, with the explicit one-declaration
+baseline build compatibility repair described below. Both endpoints are built via
 `make build OPTIMIZE=ReleaseSafe`, the release-artifact mode, and measured
 sequentially on the **same runner** with the **current existing benchmark
 harness**. Historical Apple Silicon absolute medians are not CI budgets.
@@ -15,7 +16,8 @@ count and the existing client's shutdown checks. Specifically, the inherited
 process exit status zero; it does not inspect a richer server teardown contract.
 The live tool refuses disabled Python assertions. Incorrect or missing results
 cannot pass by being fast. No existing benchmark, test, fixture, inline test or production source
-was changed to introduce the gate.
+was changed to introduce the gate. The later scanner prototype repair does not
+change benchmark/client assertions, workload contents or timing thresholds.
 
 ## Run the complete live suite
 
@@ -31,8 +33,10 @@ make performance-ci ARGS="run --baseline-tree ../baseline --output /tmp/zals-per
 
 `--output` must be a new or empty directory outside both source checkouts.
 The tool verifies the baseline HEAD exactly, requires clean tracked trees,
-builds both endpoints explicitly in ReleaseSafe, saves each executable and its
-digest, and always executes the current `test/benchmark_operations.py` for both.
+exports the pinned baseline into `--output/baseline-build`, applies only the
+checked compatibility repair there, builds both endpoints explicitly in
+ReleaseSafe, saves each executable and its digest, and always executes the current
+`test/benchmark_operations.py` for both. The historical checkout remains clean.
 It does not execute a baseline-local copy of the harness or select a moving
 merge-base/PR base. On Darwin, only `make` child processes receive a copy of the
 environment with inherited `DEVELOPER_DIR` removed: Apple's make launcher must
@@ -42,6 +46,52 @@ The gate's own environment, non-make children and Linux behavior are unchanged;
 Zig is still invoked exclusively through make with the same version/mode checks.
 Existing harness/helper digests are pinned in
 [`config.json`](../../tools/performance/config.json).
+
+### Pinned baseline build compatibility repair
+
+The pinned baseline's vendored YAML scanner defines
+`tree_sitter_yaml_external_scanner_create()` without a C prototype, while the
+runtime callback and generated grammar declare `create(void)`. On Linux,
+ReleaseSafe's C function-type sanitizer distinguishes these signatures and
+traps before parsing the first YAML file. The original failed CI executable
+contains expected signature hash `18fe98a0`, actual hash `06e4201f` and an x64
+`ud1` trap; native Linux arm64 reproduces the same failure with SIGTRAP. Debug
+readiness is not a substitute for the required ReleaseSafe measurement.
+
+The current vendored definition is fixed to `(void)`. To keep the historical
+performance baseline usable **without moving its SHA or disabling any
+sanitizer**, the gate applies that same declaration-only build compatibility
+repair to an exported snapshot, never to the baseline checkout:
+
+- Export exactly the pinned commit using `git archive`, retaining
+  `baseline-source.tar` and its SHA-256 under the result directory. Untracked
+  checkout files and build artifacts cannot enter this export.
+- Verify the original checkout and exported
+  `vendor/tree-sitter-yaml/src/scanner.c` SHA-256 is
+  `a510c0ca699cf3853bd2192bf103e11132414bc002fe952a88a7106ffb5d44e9`.
+- Require exactly one `void *tree_sitter_yaml_external_scanner_create() {`
+  declaration, no already-repaired declaration, and replace only that text with
+  `void *tree_sitter_yaml_external_scanner_create(void) {`. Require repaired
+  source SHA-256
+  `76cce2a10de4180864a43a820b3039d624a8dd3778f1bfcdc707f31c0e3ac4f9`.
+- Record the original commit, archive digest, original exported source-tree
+  digest, repaired build-input digest, source path, original/repaired source
+  digests and exact replacement in `manifest.json` (`baseline_build`). The
+  comparison provenance repeats this repair record. Tree digests hash a sorted
+  list of relative file paths and their SHA-256 values; only root-level
+  `.zig-cache` and `zig-out` are excluded as generated build outputs.
+- Build the exported tree with the unchanged ReleaseSafe command. Before
+  attesting completion, recheck both original checkout identities/cleanliness,
+  the repaired build-input digest and the retained source archive digest.
+
+This is an explicit reviewed exception for C callback ABI compatibility, not a
+new performance baseline or a generally configurable patch mechanism. The repair
+contract is pinned in code and config, and any mismatch fails closed. It changes
+no scanner body, runtime behavior, compiler flag, harness, workload, optimization
+mode, round order or threshold. A future repair requires separate policy review.
+The gate retains the exported source/build tree as evidence; its binaries and
+measurements must be identified as **pinned baseline plus prototype repair**, not
+an unmodified historical executable.
 
 There is deliberately no baseline-update input, build-mode override or partial
 workload option on `run`. Baseline/mode/round/workload/scenario changes require
@@ -94,8 +144,9 @@ untimed warmups. Redundant statistics are checked against raw samples; medians
 and nearest-rank p95 are recomputed. N/A rows may not contain timing/count data.
 JSON with duplicate object keys or nonstandard NaN/Infinity is refused.
 
-Live provenance records exact endpoint Git SHAs, build commands, binary
-digests, platform/machine, Python/Zig versions, harness/config digests, command
+Live provenance records exact endpoint Git SHAs, the explicit baseline build
+repair and source/build-input digests, build commands, binary digests,
+platform/machine, Python/Zig versions, harness/config digests, command
 order, raw-report digests and completion status. Live raw reports must match
 saved executable digests and runner identity. The complete live suite validates
 before making any timing decisions. Missing, malformed, truncated, mismatched,
@@ -146,7 +197,8 @@ status with `continue-on-error`.
 `summary.md` and `comparison.json` retain complete per-scenario warm median,
 p95/max, first medians, sample/result counts and per-round deltas. Live runs also
 retain `manifest.json`, per-command logs, raw benchmark JSON/Markdown and
-endpoint executables. Errors retain an explicit failure summary and
+endpoint executables, the pinned baseline source archive and its repaired build
+snapshot. Errors retain an explicit failure summary and
 `error.json`; unfinished runs are never marked complete. A setup/abrupt-failure
 fallback summary exists before checkout. Summary publication and artifact
 upload use `always()`; artifacts are retained for 14 days.
@@ -210,7 +262,10 @@ plus 0.10 ms, with raw summaries recomputed), detection of 12% slower navigation
 both-round confirmation, malformed/missing/nonfinite/changed-workload data,
 CLI failure codes/artifact retention, mocked process-group timeout cleanup and
 a fully mocked live orchestration loop (complete suite/order, missing final
-endpoint data and changed config/source digest). These test the guard, not
+endpoint data and changed config/source digest), plus refusal of changed baseline
+repair policy/source bytes, exact one-declaration replacement, clean original
+checkout preservation, export/build provenance and post-build source/archive
+integrity. These test the guard, not
 production behavior. Repaired performance must be
 validated by an attested same-host live run with the pinned baseline after the
 parent supplies the repaired endpoint; archived Mac results must not be used

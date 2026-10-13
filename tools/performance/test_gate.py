@@ -1,9 +1,11 @@
 """Offline guard coverage. Never imports fixtures, builds or launches a zals server."""
 import copy
 from datetime import datetime, timezone
+import io
 import json
 from pathlib import Path
 import subprocess
+import tarfile
 import tempfile
 import unittest
 from types import SimpleNamespace
@@ -47,6 +49,23 @@ def change_samples(data, relative=0., absolute=0., rows=None):
                 row[field] = [v * (1 + relative) + absolute for v in row[field]]
             row.update(gate.summarize(row))
     return changed
+
+
+def baseline_fixture(tree, cfg):
+    repair = cfg["baseline_build_repair"]
+    scanner = tree / repair["path"]
+    scanner.parent.mkdir(parents=True)
+    original = (gate.ROOT / repair["path"]).read_bytes().replace(
+        repair["after"].encode(), repair["before"].encode())
+    scanner.write_bytes(original)
+    (tree / "Makefile").write_text("mock source, never executed\n")
+    return scanner
+
+
+def export_fixture(argv, tree):
+    archive = Path(next(arg.removeprefix("--output=") for arg in argv if arg.startswith("--output=")))
+    with tarfile.open(archive, "w") as source:
+        source.add(tree, arcname=".")
 
 
 class GuardTests(unittest.TestCase):
@@ -217,6 +236,10 @@ class GuardTests(unittest.TestCase):
                          lambda c: c["workloads"]["matrix"].update(files=2),
                          lambda c: c["matrix_scenarios"].pop(),
                          lambda c: c["thresholds"].update(pooled_relative=.20),
+                         lambda c: c.pop("baseline_build_repair"),
+                         lambda c: c["baseline_build_repair"].update(path="src/main.zig"),
+                         lambda c: c["baseline_build_repair"].update(source_sha256="0" * 64),
+                         lambda c: c["baseline_build_repair"].update(after="arbitrary change"),
                          lambda c: c["harness_sha256"].update({"test/benchmark_operations.py": "0" * 64})]:
             altered = copy.deepcopy(self.cfg)
             mutation(altered)
@@ -349,14 +372,98 @@ class GuardTests(unittest.TestCase):
             gate.live_run(None, self.cfg, None)
         inspect.assert_not_called()
 
-    def test_mocked_complete_live_suite_order_and_fail_closed_final_evidence(self):
-        # All process/build/copy boundaries are mocked; no repo build artifact is touched.
-        for case in ("complete", "missing-large-endpoint", "changed-config"):
+    def test_baseline_repair_exports_only_one_checked_declaration_and_retains_provenance(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            baseline, output = root / "baseline", root / "output"
+            baseline.mkdir()
+            output.mkdir()
+            scanner = baseline_fixture(baseline, self.cfg)
+            original = scanner.read_bytes()
+            calls = []
+
+            def command(argv, cwd, name, timeout):
+                calls.append((argv, cwd, name, timeout))
+                export_fixture(argv, cwd)
+
+            build, provenance = gate.prepare_baseline(baseline, output, self.cfg, command)
+            repair = self.cfg["baseline_build_repair"]
+            self.assertEqual(scanner.read_bytes(), original)  # Historical checkout untouched.
+            self.assertEqual((build / repair["path"]).read_bytes(),
+                             original.replace(repair["before"].encode(), repair["after"].encode(), 1))
+            self.assertEqual((build / "Makefile").read_bytes(), (baseline / "Makefile").read_bytes())
+            self.assertEqual(calls, [(["git", "archive", "--format=tar",
+                                     "--output=" + str(output / "baseline-source.tar"), gate.BASELINE_SHA],
+                                    baseline, "baseline-export", 30)])
+            self.assertEqual(provenance["source_commit"], gate.BASELINE_SHA)
+            self.assertEqual(provenance["source_archive_sha256"], gate.digest(output / "baseline-source.tar"))
+            self.assertEqual(provenance["source_tree_sha256"], gate.source_digest(baseline))
+            self.assertEqual(provenance["build_input_sha256"], gate.source_digest(build))
+            self.assertNotEqual(provenance["source_tree_sha256"], provenance["build_input_sha256"])
+            self.assertEqual(provenance["repairs"], [repair])
+            # Build outputs may change; source bytes, paths and extra inputs may not.
+            for directory in (".zig-cache", "zig-out"):
+                (build / directory).mkdir()
+                (build / directory / "artifact").write_text("ignored build output")
+            self.assertEqual(provenance["build_input_sha256"], gate.source_digest(build))
+            (build / "extra-source.c").write_text("unexpected build input")
+            self.assertNotEqual(provenance["build_input_sha256"], gate.source_digest(build))
+
+    def test_baseline_repair_refuses_changed_original_export_or_policy(self):
+        for case in ("original", "export", "policy", "duplicate", "missing", "already-repaired"):
             with self.subTest(case=case), tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
                 baseline, output = root / "baseline", root / "output"
                 baseline.mkdir()
                 output.mkdir()
+                scanner = baseline_fixture(baseline, self.cfg)
+                original = scanner.read_bytes()
+                cfg = copy.deepcopy(self.cfg)
+                if case == "original":
+                    scanner.write_bytes(original + b"\n")
+                if case == "policy":
+                    cfg["baseline_build_repair"]["after"] = "arbitrary change"
+
+                def command(argv, cwd, name, timeout):
+                    export_fixture(argv, cwd)
+                    # Change only the exported bytes, never the source fixture.
+                    if case not in ("original", "policy"):
+                        replacement = original + b"\n"
+                        before, after = gate.BASELINE_BUILD_REPAIR["before"].encode(), gate.BASELINE_BUILD_REPAIR["after"].encode()
+                        if case == "duplicate":
+                            replacement = original + before
+                        elif case == "missing":
+                            replacement = original.replace(before, b"missing declaration")
+                        elif case == "already-repaired":
+                            replacement = original.replace(before, after)
+                        with tarfile.open(output / "baseline-source.tar", "w") as archive:
+                            item = tarfile.TarInfo(gate.BASELINE_BUILD_REPAIR["path"])
+                            item.size = len(replacement)
+                            archive.addfile(item, io.BytesIO(replacement))
+
+                real_digest = gate.digest
+
+                def digest(path):
+                    # Exercise the exact-replacement guard beyond the SHA guard.
+                    if case in ("duplicate", "missing", "already-repaired") and Path(path).name == "scanner.c":
+                        return gate.BASELINE_BUILD_REPAIR["source_sha256"]
+                    return real_digest(path)
+
+                with patch.object(gate, "digest", side_effect=digest), self.assertRaises(gate.GateError):
+                    gate.prepare_baseline(baseline, output, cfg, command)
+                self.assertEqual(scanner.read_bytes(), original + b"\n" if case == "original" else original)
+
+    def test_mocked_complete_live_suite_order_and_fail_closed_final_evidence(self):
+        # All process/build/copy boundaries are mocked; no repo build artifact is touched.
+        for case in ("complete", "missing-large-endpoint", "changed-config",
+                     "changed-baseline-build-input", "changed-baseline-archive"):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                baseline, output = root / "baseline", root / "output"
+                baseline.mkdir()
+                output.mkdir()
+                scanner = baseline_fixture(baseline, self.cfg)
+                original = scanner.read_bytes()
                 args = SimpleNamespace(baseline_tree=baseline)
                 order = []
 
@@ -369,6 +476,8 @@ class GuardTests(unittest.TestCase):
                 def execute(argv, cwd, log, timeout, deadline, manifest, manifest_path):
                     manifest["commands"].append({"argv": argv, "status": "success"})
                     log.write_text("0.15.1" if "ARGS=version" in argv else "mocked command, no server")
+                    if argv[:2] == ["git", "archive"]:
+                        export_fixture(argv, cwd)
                     if "--json" not in argv:
                         gate.write_json(manifest_path, manifest)
                         return
@@ -384,6 +493,11 @@ class GuardTests(unittest.TestCase):
                         report["rows"] = []
                     gate.write_json(path, report)
                     gate.write_json(manifest_path, manifest)
+                    if (seed, workload, endpoint) == (1042, "semantic-large", "baseline"):
+                        if case == "changed-baseline-build-input":
+                            (output / "baseline-build/Makefile").write_text("modified source")
+                        elif case == "changed-baseline-archive":
+                            (output / "baseline-source.tar").write_bytes(b"modified archive")
 
                 final_cfg = copy.deepcopy(self.cfg)
                 if case == "changed-config":
@@ -399,11 +513,16 @@ class GuardTests(unittest.TestCase):
                         manifest = gate.load_json(output / "manifest.json")
                         self.assertEqual(manifest["status"], "complete")
                         self.assertEqual(len(manifest["reports"]), 12)
+                        self.assertEqual(manifest["baseline_build"]["source_commit"], gate.BASELINE_SHA)
+                        self.assertEqual(manifest["baseline_build"]["repairs"], [gate.BASELINE_BUILD_REPAIR])
+                        self.assertEqual(result["provenance"]["baseline_build"], manifest["baseline_build"])
+                        self.assertIn("pinned baseline plus prototype repair", (output / "summary.md").read_text())
                     else:
                         with self.assertRaises(gate.GateError), patch.object(gate, "exceeds") as decide:
                             gate.live_run(args, self.cfg, output)
                         decide.assert_not_called()
                         self.assertFalse((output / "comparison.json").exists())
+                self.assertEqual(scanner.read_bytes(), original)
                 self.assertEqual(order, [(seed, workload, endpoint) for seed in gate.SEEDS
                                          for workload in gate.WORKLOADS
                                          for endpoint in (("baseline", "current") if seed == 42 else ("current", "baseline"))])

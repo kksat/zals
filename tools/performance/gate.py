@@ -15,12 +15,21 @@ import signal
 import statistics
 import subprocess
 import sys
+import tarfile
 import time
 
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG_PATH = Path(__file__).with_name("config.json")
 BASELINE_SHA = "c0c7ae384a12a747ca2596f53bbbb121b1c16ba0"
 MODE = "ReleaseSafe"
+BASELINE_BUILD_REPAIR = {
+    "id": "yaml-scanner-create-prototype",
+    "path": "vendor/tree-sitter-yaml/src/scanner.c",
+    "source_sha256": "a510c0ca699cf3853bd2192bf103e11132414bc002fe952a88a7106ffb5d44e9",
+    "repaired_sha256": "76cce2a10de4180864a43a820b3039d624a8dd3778f1bfcdc707f31c0e3ac4f9",
+    "before": "void *tree_sitter_yaml_external_scanner_create() {",
+    "after": "void *tree_sitter_yaml_external_scanner_create(void) {",
+}
 SEEDS = [42, 1042]
 THRESHOLDS = {"pooled_relative": .10, "pooled_absolute_ms": .50,
               "round_relative": .05, "round_absolute_ms": .25}
@@ -80,7 +89,8 @@ def config():
     require(type(data) is dict, "config must be an object")
     for key, expected in {"schema_version": 1, "baseline_sha": BASELINE_SHA, "optimize": MODE,
                           "zig_version": "0.15.1", "ci_python": "3.12", "seeds": SEEDS,
-                          "thresholds": THRESHOLDS, "workloads": WORKLOADS}.items():
+                          "thresholds": THRESHOLDS, "workloads": WORKLOADS,
+                          "baseline_build_repair": BASELINE_BUILD_REPAIR}.items():
         require(data.get(key) == expected, f"pinned config {key} changed; explicit policy review required")
     roster = data.get("matrix_scenarios")
     encoded = json.dumps(roster, sort_keys=True, separators=(",", ":")).encode()
@@ -280,6 +290,9 @@ def finish(output, cfg, rows, startup, provenance):
              f"Baseline: `{BASELINE_SHA}`; both endpoints `{MODE}`. Evidence: **{provenance['kind']}**.",
              "Pooled warm median must increase >10% AND >0.50 ms; both reversed rounds must increase >5% AND >0.25 ms.",
              "First responses, nearest-rank p95/max and startup are reporting-only, not SLOs or significance tests.", ""]
+    if "baseline_build" in provenance:
+        lines += ["**Baseline build: pinned baseline plus prototype repair**, not an unmodified historical executable. "
+                  "See `manifest.json` / `baseline_build` for exact source/build inputs and repair digests.", ""]
     if provenance["kind"] == "offline replay":
         lines += ["**Replay does not attest build flags, Git revision, harness execution or a shared physical runner.**",
                   "Only the selected workload is compared; this is not the complete live CI suite.", ""]
@@ -331,6 +344,57 @@ def inspect_tree(path, expected_sha=None):
     require(expected_sha is None or sha == expected_sha, "baseline tree is not the pinned pre-refactor SHA")
     require(not git("status", "--porcelain", "--untracked-files=no"), f"tracked checkout is dirty: {path}")
     return sha
+
+
+def source_digest(tree):
+    """Hash exported source paths and bytes, excluding only Zig's build outputs."""
+    require(tree.is_dir() and not tree.is_symlink(), "exported source tree missing or replaced by a symlink")
+
+    def unreadable(error):
+        raise error
+
+    entries = []
+    for directory, dirs, files in os.walk(tree, onerror=unreadable):
+        if Path(directory) == tree:
+            dirs[:] = [name for name in dirs if name not in (".zig-cache", "zig-out")]
+        for name in dirs + files:
+            require(not (Path(directory) / name).is_symlink(), "exported source must not contain symlinks")
+        for name in files:
+            path = Path(directory) / name
+            entries.append((path.relative_to(tree).as_posix(), digest(path)))
+    encoded = json.dumps(sorted(entries), separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def prepare_baseline(baseline, output, cfg, command):
+    """Repair one checked declaration in an exported snapshot, never the checkout."""
+    repair = cfg["baseline_build_repair"]
+    require(repair == BASELINE_BUILD_REPAIR, "unreviewed baseline build repair")
+    require(digest(baseline / repair["path"]) == repair["source_sha256"],
+            "original baseline scanner source digest mismatch")
+    archive = output / "baseline-source.tar"
+    command(["git", "archive", "--format=tar", "--output=" + str(archive), BASELINE_SHA],
+            baseline, "baseline-export", 30)
+    tree = output / "baseline-build"
+    tree.mkdir()
+    with tarfile.open(archive) as source:
+        source.extractall(tree, filter="data")
+    original_digest = source_digest(tree)
+    scanner = tree / repair["path"]
+    require(digest(scanner) == repair["source_sha256"], "exported baseline scanner source digest mismatch")
+    original = scanner.read_bytes()
+    before, after = repair["before"].encode(), repair["after"].encode()
+    require(original.count(before) == 1 and after not in original,
+            "baseline repair requires exactly one original declaration and no repaired declaration")
+    repaired = original.replace(before, after, 1)
+    require(hashlib.sha256(repaired).hexdigest() == repair["repaired_sha256"],
+            "baseline repair produced unexpected source bytes")
+    scanner.write_bytes(repaired)
+    provenance = {"source_commit": BASELINE_SHA, "source_archive": archive.name,
+                  "source_archive_sha256": digest(archive), "source_tree_sha256": original_digest,
+                  "build_tree": tree.name, "build_input_sha256": source_digest(tree),
+                  "repairs": [dict(repair)]}
+    return tree, provenance
 
 
 def execute(command, cwd, log, timeout, deadline, manifest, manifest_path):
@@ -393,9 +457,11 @@ def live_run(args, cfg, output):
     command(["make", "-s", "zig", "ARGS=version"], ROOT, "zig-version", 30)
     require((output / "zig-version.log").read_text().strip() == cfg["zig_version"], "wrong Zig toolchain")
     manifest["zig_version"] = cfg["zig_version"]
+    baseline_build, manifest["baseline_build"] = prepare_baseline(baseline, output, cfg, command)
+    write_json(manifest_path, manifest)
     binaries, binary_shas = {}, {}
     (output / "binaries").mkdir()
-    for endpoint, tree in (("baseline", baseline), ("current", ROOT)):
+    for endpoint, tree in (("baseline", baseline_build), ("current", ROOT)):
         command(["make", "build", "OPTIMIZE=" + MODE], tree, endpoint + "-build")
         binary = output / "binaries" / (endpoint + "-zals")
         shutil.copy2(tree / "zig-out/bin/zals", binary)
@@ -427,6 +493,10 @@ def live_run(args, cfg, output):
     for endpoint, tree in (("baseline", baseline), ("current", ROOT)):
         require(inspect_tree(tree, shas[endpoint]) == shas[endpoint], "checkout changed during live run")
         require(digest(binaries[endpoint]) == binary_shas[endpoint], "saved executable changed during live run")
+    require(source_digest(baseline_build) == manifest["baseline_build"]["build_input_sha256"],
+            "repaired baseline build inputs changed during live run")
+    require(digest(output / manifest["baseline_build"]["source_archive"]) ==
+            manifest["baseline_build"]["source_archive_sha256"], "baseline source archive changed during live run")
     for entry in manifest["reports"]:
         require(digest(output / entry["path"]) == entry["sha256"], "saved raw report changed during live run")
     require(time.monotonic() < deadline, "aggregate 30-minute gate deadline exceeded")
@@ -441,7 +511,8 @@ def live_run(args, cfg, output):
     manifest["status"] = "complete"
     write_json(manifest_path, manifest)
     code = finish(output, cfg, rows, startup, {"kind": "attested same-runner live suite", "manifest": "manifest.json",
-                                             "endpoint_shas": shas, "binary_sha256": binary_shas})
+                                             "endpoint_shas": shas, "binary_sha256": binary_shas,
+                                             "baseline_build": manifest["baseline_build"]})
     manifest["gate_status"] = "fail" if code else "pass"
     write_json(manifest_path, manifest)
     return code
@@ -478,7 +549,7 @@ def main(argv=None):
                                                              "current": [str(p.resolve()) for p in args.current]},
                                                   "binary_sha256": {"baseline": before[0]["metadata"]["binary_sha256"],
                                                                     "current": after[0]["metadata"]["binary_sha256"]}})
-    except (GateError, OSError, ValueError, TypeError, KeyError, subprocess.SubprocessError) as exc:
+    except (GateError, OSError, ValueError, TypeError, KeyError, tarfile.TarError, subprocess.SubprocessError) as exc:
         message = f"{type(exc).__name__}: {exc}"
         write_json(output / "error.json", {"status": "fail", "error": message})
         manifest_path = output / "manifest.json"

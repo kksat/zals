@@ -1388,7 +1388,7 @@ static bool scan(Scanner *scanner, TSLexer *lexer, const bool *valid_symbols) {
     return !valid_symbols[ERR_REC];
 }
 
-void *tree_sitter_yaml_external_scanner_create() {
+void *tree_sitter_yaml_external_scanner_create(void) {
     Scanner *scanner = ts_calloc(1, sizeof(Scanner));
     deserialize(scanner, NULL, 0);
     return scanner;
