@@ -292,14 +292,22 @@ jobs:
       contents: read
       id-token: write
     steps:
+      # Publishing helpers can repair metadata without moving a release tag.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - uses: actions/download-artifact@v4
         with:
           name: verified-publication-assets
           path: dist
-      - name: Select verified wheels
+      - name: Prepare and validate verified wheels for PyPI
         run: |
-          mkdir wheelhouse
-          cp dist/*.whl wheelhouse/
+          python -m pip install trove-classifiers
+          python tools/release/prepare_pypi.py --tag "$TAG" --source dist --output wheelhouse
       - name: Publish to PyPI using trusted publishing
         uses: pypa/gh-action-pypi-publish@release/v1
         with:

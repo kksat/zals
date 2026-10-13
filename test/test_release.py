@@ -1,5 +1,7 @@
 """Exercise the release contract without network access or package uploads."""
 
+import base64
+import csv
 import hashlib
 import importlib.util
 import io
@@ -18,6 +20,9 @@ ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("release_verify", ROOT / "tools/release/verify.py")
 release = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(release)
+pypi_spec = importlib.util.spec_from_file_location("prepare_pypi", ROOT / "tools/release/prepare_pypi.py")
+pypi = importlib.util.module_from_spec(pypi_spec)
+pypi_spec.loader.exec_module(pypi)
 
 
 class ReleaseTests(unittest.TestCase):
@@ -68,6 +73,50 @@ class ReleaseTests(unittest.TestCase):
         (self.directory / "version.txt").write_text("99.0.0")
         with self.assertRaisesRegex(ValueError, "version.txt"):
             release.verify_versions(self.directory, self.tag)
+
+    def test_source_uses_valid_replacement_for_legacy_classifier(self):
+        self.assertNotIn('"Topic :: Software Development :: Language Servers"',
+                         (ROOT / "python/pyproject.toml").read_text())
+
+    def make_legacy_wheel(self):
+        path = self.directory / "legacy.whl"
+        with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as wheel:
+            wheel.writestr("zals/bin/zals", b"unchanged executable")
+            wheel.writestr("zals/_run.py", b"unchanged Python wrapper")
+            wheel.writestr("zals-0.1.0.dist-info/METADATA",
+                           b"Name: zals\nVersion: 0.1.0\n" + pypi.INVALID_CLASSIFIER + b"\n")
+            wheel.writestr("zals-0.1.0.dist-info/RECORD", "old record")
+        return path
+
+    def test_pypi_classifier_repair_preserves_payloads_and_record_hashes(self):
+        source = self.make_legacy_wheel()
+        original_bytes = source.read_bytes()
+        output = self.directory / "publication/repaired.whl"
+        self.assertTrue(pypi.prepare_wheel(source, output, self.version))
+        self.assertEqual(source.read_bytes(), original_bytes)
+        with zipfile.ZipFile(source) as original, zipfile.ZipFile(output) as repaired:
+            self.assertEqual(original.namelist(), repaired.namelist())
+            for name in ("zals/bin/zals", "zals/_run.py"):
+                self.assertEqual(original.read(name), repaired.read(name))
+            metadata = repaired.read("zals-0.1.0.dist-info/METADATA")
+            self.assertNotIn(pypi.INVALID_CLASSIFIER, metadata)
+            self.assertIn(pypi.VALID_CLASSIFIER, metadata)
+            for name, digest, size in csv.reader(io.StringIO(
+                    repaired.read("zals-0.1.0.dist-info/RECORD").decode())):
+                if name.endswith("/RECORD"):
+                    self.assertEqual((digest, size), ("", ""))
+                else:
+                    data = repaired.read(name)
+                    expected_hash = base64.urlsafe_b64encode(hashlib.sha256(data).digest()).rstrip(b"=").decode()
+                    self.assertEqual(digest, "sha256=" + expected_hash)
+                    self.assertEqual(int(size), len(data))
+        copied = self.directory / "publication/copied.whl"
+        self.assertFalse(pypi.prepare_wheel(output, copied, self.version))
+        self.assertEqual(copied.read_bytes(), output.read_bytes())
+
+    def test_pypi_preparation_rejects_version_mismatch(self):
+        with self.assertRaisesRegex(ValueError, "Wrong wheel version"):
+            pypi.prepare_wheel(self.make_legacy_wheel(), self.directory / "bad.whl", "0.2.0")
 
     def test_rejects_invalid_tag(self):
         with self.assertRaisesRegex(ValueError, "Invalid release tag"):

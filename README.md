@@ -226,6 +226,10 @@ workflow; no API token is required. Homebrew uses `HOMEBREW_TAP_TOKEN` to update
 `kksat/homebrew-tap` (the repository behind `kksat/tap`), overridable with the
 `HOMEBREW_TAP_REPO` repository variable. Each publishing run verifies the GitHub
 assets and checksums before uploading the wheels or committing the formula.
+The initial GitHub `0.1.0` wheels contain an invalid legacy classifier; PyPI
+preparation corrects only that metadata and regenerates wheel `RECORD` hashes.
+Bundled binaries, package versions, the release tag, and GitHub assets remain
+unchanged. New releases use the corrected source metadata directly.
 
 The tap is public, but the formula downloads binaries from the GitHub release.
 If this repository is private, Homebrew installation needs access to those

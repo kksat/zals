@@ -16,7 +16,7 @@ classifiers = [
   "Environment :: Console",
   "Intended Audience :: Developers",
   "Programming Language :: Python :: 3",
-  "Topic :: Software Development :: Language Servers",
+  "Topic :: Software Development",
 ]
 
 [project.urls]
