@@ -54,6 +54,10 @@ jobs:
   smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        optimize: [Debug, ReleaseSafe]
     steps:
       - uses: actions/checkout@v4
       - uses: mlugg/setup-zig@v2
@@ -63,4 +67,4 @@ jobs:
         with:
           python-version: "3.12"
       - name: Run smoke tests
-        run: make smoke
+        run: make smoke OPTIMIZE=${{ matrix.optimize }}
