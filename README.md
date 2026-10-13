@@ -98,13 +98,13 @@ brew install zals
 The [`zals`](https://pypi.org/project/zals/) package is a thin wrapper that
 bundles the binary for your platform:
 
-Releases currently publish to GitHub only, not PyPI. Download the `.whl` for
-your platform from the release page, then install it locally:
-
 ```sh
-pip install ./zals-0.1.0-py3-none-<platform>.whl
+pip install zals
 zals --version
 ```
+
+You can also install the platform-specific `.whl` downloaded from the GitHub
+release page locally.
 
 ### Direct download
 
@@ -195,10 +195,10 @@ server, Python, and VS Code versions in lockstep. Merging that PR creates the
 `vX.Y.Z` tag and a GitHub release. See
 [ADR-0026](docs/adr/0026-release-process.md).
 
-The **release** workflow publishes **only to GitHub**. It builds five native
-binary archives, five Python wheels, five platform-specific VSIX packages, and
-`SHA256SUMS`. No PyPI, Homebrew tap, Visual Studio Marketplace, or Open VSX
-publishing runs, even if publishing secrets are configured.
+The **release** workflow defaults to **GitHub-only** packaging. It builds five
+native binary archives, five Python wheels, five platform-specific VSIX packages,
+and `SHA256SUMS`. PyPI and Homebrew publishing require explicit manual inputs;
+Visual Studio Marketplace and Open VSX publishing remain disabled.
 
 To bootstrap or rebuild a release, push the version tag, then run:
 
@@ -211,6 +211,25 @@ rejects mismatched source versions and verifies the complete asset set,
 platform metadata, and identical bundled binaries before creating or updating
 the GitHub release. Packaging must succeed for every platform before any assets
 are published. The initial baseline is `0.1.0`.
+
+To publish the existing verified GitHub release to PyPI and `kksat/tap` without
+rebuilding or replacing its assets:
+
+```sh
+gh workflow run release.yml --ref main -f tag=v0.1.0 \
+  -f publish_existing=true -f publish_pypi=true -f publish_homebrew=true
+```
+
+Omit `publish_existing` to build a release and then publish it in one run.
+PyPI uses trusted publishing (OIDC) configured for this repository's `release.yml`
+workflow; no API token is required. Homebrew uses `HOMEBREW_TAP_TOKEN` to update
+`kksat/homebrew-tap` (the repository behind `kksat/tap`), overridable with the
+`HOMEBREW_TAP_REPO` repository variable. Each publishing run verifies the GitHub
+assets and checksums before uploading the wheels or committing the formula.
+
+The tap is public, but the formula downloads binaries from the GitHub release.
+If this repository is private, Homebrew installation needs access to those
+private release assets; publishing the formula does not make the assets public.
 
 The local release contract tests run under `make check` (Python 3.11+). You can
 also check a downloaded asset directory with:

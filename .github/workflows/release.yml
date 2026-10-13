@@ -1,7 +1,7 @@
 name: release
 
-# GitHub-only packaging: no PyPI, Homebrew tap, Marketplace, or Open VSX uploads.
-# Every job checks out the tag, including when manually dispatched from main.
+# Packaging defaults to GitHub only; PyPI and Homebrew publication are opt-in.
+# Tagged sources/assets are used even when manually dispatched from main.
 on:
   release:
     types: [published]
@@ -11,6 +11,18 @@ on:
         description: "Tag to build and release on GitHub (e.g. v0.1.0)"
         required: true
         type: string
+      publish_existing:
+        description: "Publish existing GitHub assets without rebuilding or replacing them"
+        type: boolean
+        default: false
+      publish_pypi:
+        description: "Publish verified wheels to PyPI using trusted publishing"
+        type: boolean
+        default: false
+      publish_homebrew:
+        description: "Publish the verified formula to kksat/tap"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -39,6 +51,7 @@ jobs:
 
   build:
     name: build ${{ matrix.target }}
+    if: ${{ !inputs.publish_existing }}
     needs: validate
     runs-on: ubuntu-latest
     strategy:
@@ -209,6 +222,7 @@ jobs:
 
   release:
     name: verify and publish github assets
+    if: ${{ !inputs.publish_existing }}
     needs: [build, python, vscode]
     runs-on: ubuntu-latest
     permissions:
@@ -237,3 +251,117 @@ jobs:
           files: dist/*
           fail_on_unmatched_files: true
           generate_release_notes: true
+
+  publication_assets:
+    name: verify assets for external publication
+    needs: [validate, release]
+    if: >-
+      ${{ !cancelled() && needs.validate.result == 'success' &&
+          (needs.release.result == 'success' ||
+           (inputs.publish_existing && needs.release.result == 'skipped')) &&
+          (inputs.publish_pypi || inputs.publish_homebrew) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Download the published GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir dist
+      - name: Verify all packages and release checksums
+        run: |
+          python tools/release/verify.py assets --tag "$TAG" --directory dist
+          (cd dist && sha256sum --check SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verified-publication-assets
+          path: dist/*
+          if-no-files-found: error
+
+  pypi:
+    name: publish python wheels to pypi
+    needs: publication_assets
+    if: ${{ !cancelled() && inputs.publish_pypi && needs.publication_assets.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: verified-publication-assets
+          path: dist
+      - name: Select verified wheels
+        run: |
+          mkdir wheelhouse
+          cp dist/*.whl wheelhouse/
+      - name: Publish to PyPI using trusted publishing
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: wheelhouse
+          skip-existing: true
+
+  homebrew:
+    name: publish homebrew tap formula
+    needs: publication_assets
+    if: ${{ !cancelled() && inputs.publish_homebrew && needs.publication_assets.result == 'success' }}
+    runs-on: ubuntu-latest
+    env:
+      TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO || 'kksat/homebrew-tap' }}
+    steps:
+      # The formula template can be repaired without changing an immutable tag.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: verified-publication-assets
+          path: dist
+      - name: Require the tap publishing credential
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: test -n "$TAP_TOKEN" || { echo 'HOMEBREW_TAP_TOKEN is required'; exit 1; }
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.TAP_REPO }}
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+      - name: Render the formula from verified archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          sha() { sha256sum "dist/zals-${version}-$1.tar.gz" | awk '{print $1}'; }
+          mkdir -p tap/Formula
+          sed \
+            -e "s/__VERSION__/${version}/g" \
+            -e "s/__SHA256_X86_64_LINUX__/$(sha x86_64-linux)/g" \
+            -e "s/__SHA256_AARCH64_LINUX__/$(sha aarch64-linux)/g" \
+            -e "s/__SHA256_X86_64_MACOS__/$(sha x86_64-macos)/g" \
+            -e "s/__SHA256_AARCH64_MACOS__/$(sha aarch64-macos)/g" \
+            Formula/zals.rb > tap/Formula/zals.rb
+          if grep -q '__[A-Z0-9_]*__' tap/Formula/zals.rb; then
+            echo 'Unresolved formula placeholders' >&2
+            exit 1
+          fi
+          ruby -c tap/Formula/zals.rb
+      - name: Commit and push the formula
+        working-directory: tap
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/zals.rb
+          if git diff --cached --quiet; then
+            echo "Formula is already current"
+            exit 0
+          fi
+          git commit -m "chore(zals): release ${TAG#v}"
+          git push

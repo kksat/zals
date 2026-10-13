@@ -47,10 +47,17 @@ Use **Google release-please** to drive releases from
   source versions match it. Publication waits for every binary, wheel, and
   VSIX, verifies the 15-asset contract and matching bundled binary bytes,
   and attaches all assets plus `SHA256SUMS` to GitHub.
-- Distribution is currently **GitHub only**, to validate the packaging process.
-  There are no PyPI, Homebrew tap, Marketplace, or Open VSX upload steps, even
-  when external publishing credentials are present. `Formula/zals.rb` remains
-  a template for a future explicitly enabled Homebrew publishing workflow.
+- Packaging defaults to **GitHub only**. Manual dispatch inputs
+  `publish_pypi` and `publish_homebrew` explicitly opt into external publishing;
+  credentials alone never enable it. Marketplace and Open VSX remain disabled.
+- `publish_existing` skips rebuilding and reuses the existing GitHub release.
+  Publication checks all 15 assets and `SHA256SUMS` before distributing them.
+  PyPI uses OIDC trusted publishing configured for `release.yml`, uploading all
+  five wheels. Existing files are skipped to make retries safe.
+- Homebrew renders `Formula/zals.rb` from the workflow revision's template
+  and the tagged release's verified archive SHA-256s, then commits it to `kksat/homebrew-tap` (Homebrew's
+  `kksat/tap`). `HOMEBREW_TAP_TOKEN` is required; `HOMEBREW_TAP_REPO` can override
+  the repository. An already-current formula is a no-op.
 
 The current baseline is **0.1.0**: `version.txt`,
 `.release-please-manifest.json`, `src/main.zig`, `build.zig.zon`, and
@@ -67,8 +74,11 @@ flow through release-please.
 - Windows support required making the transport, writer, logging, and cache
   directory portable (`std.fs.File` instead of raw POSIX fds,
   `std.process.getEnvVarOwned` instead of `std.posix.getenv`).
-- External registries are not updated. Users install downloaded wheels and
-  VSIXs locally; registry publishing requires a separate, explicit change.
+- External publication is opt-in and independent for PyPI and Homebrew.
+  Existing verified GitHub assets can be published without moving a tag or
+  replacing assets. VSIXs continue to be installed locally.
+- A public tap does not expose private GitHub release binaries; if the source
+  repository remains private, installing the formula needs release access.
 - The Python wrapper and VS Code client do not reimplement the server; they
   locate and execute the bundled binary.
 - Release contract tests run locally in `make check` using Python 3.11+.
