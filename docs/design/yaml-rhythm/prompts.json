@@ -1,0 +1,48 @@
+{
+  "model": "gpt-image-2",
+  "provider": "Azure OpenAI",
+  "direction": "YAML rhythm",
+  "selected_logo": "02-zig-ember.png",
+  "postprocessing": "White-background removal, flat palette correction, centered scaling, and PNG resizing. Dark adaptation changes ink colors without altering geometry. Selected assets are unchanged.",
+  "logo": {
+    "slug": "02-zig-ember",
+    "name": "Zig ember",
+    "palette": [
+      "#F0A12A",
+      "#25313A"
+    ],
+    "model": "gpt-image-2",
+    "provider": "Azure OpenAI",
+    "api": "images/edits",
+    "request": {
+      "model": "gpt-image-2",
+      "prompt": "Use the supplied reference logo as the exact design family to develop. This is YAML rhythm, the chosen logo direction for zals, a Zig Ansible Language Server. It has exactly THREE separate wide horizontal geometric ribbons: a long top row, a shorter deliberately indented middle row, and a long bottom row. Their angled terminals imply a broken Z. Keep this wonderfully simple three-row rhythm. Do not introduce a connected Z, icon container, extra parts, badges, code brackets, lettering, dots, outlines, line art, or a wordmark. Preserve the reference's broad weights, generous open gaps, and legibility as a 16px icon. Create ONE new polished multicolor variant using exactly TWO flat ink colors within the actual logo, not a monochrome silhouette or just a colored background. Each ribbon should remain a single large flat color area; do not add little stripes or intricate subdivisions. Crisp vector-like geometric contours, optically balanced. No gradients, no shadows, no texture, no 3D or lighting, no transparency effects inside the mark. Place the single icon centered on a pure white (#FFFFFF) plain background with ample margin, approximately 75% canvas occupancy. The particular variation and its precise color palette are: Zig-inspired amber #F0A12A and graphite #25313A. Top and bottom ribbons are graphite; the shorter middle ribbon is amber. Make the top-right and bottom-left terminal cuts slightly steeper than the reference, keeping all three strokes bold, separate, and horizontal. A tiny bit more forward energy, no extra shapes.",
+      "n": 1,
+      "size": "1024x1024",
+      "quality": "medium",
+      "background": "opaque",
+      "output_format": "png"
+    },
+    "usage": {
+      "input_tokens": 1346,
+      "input_tokens_details": {
+        "image_tokens": 1024,
+        "text_tokens": 322
+      },
+      "output_tokens": 1756,
+      "output_tokens_details": {
+        "image_tokens": 1756,
+        "text_tokens": 0
+      },
+      "total_tokens": 3102
+    },
+    "created": 1791889966,
+    "original": "originals/02-zig-ember.png",
+    "export": "02-zig-ember.png",
+    "dark_palette": [
+      "#F0A12A",
+      "#F6F3EB"
+    ],
+    "input_reference_note": "Generated from the earlier YAML rhythm study; the discarded reference asset is not retained."
+  }
+}
