@@ -53,7 +53,7 @@
   },
   "harness_sha256": {
     "test/benchmark_operations.py": "216d9c26dc73874596f67ec5a789c56685d8b578564f04bebea0a0141e720628",
-    "test/smoke_cold_start.py": "7affa09e471bd21e91b113a943bbbb1d76451c86132d0823ae51bd9d6e535e66",
+    "test/smoke_cold_start.py": "b92333810a4128554ebfee2659a0177b8e9f3eccb293ad4c5eb9c0f57ec09475",
     "test/smoke_workspace.py": "f31594957b17daf64cba8e36e31b12db441a385379fe7f353b0b89244756b732"
   },
   "matrix_scenarios": [

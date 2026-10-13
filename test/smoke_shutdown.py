@@ -102,6 +102,7 @@ else:
             client.reader.join(timeout=2)
             client.proc.stdin.close()
             client.proc.stdout.close()
+            client.stderr.close()
 
 
 def main():

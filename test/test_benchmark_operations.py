@@ -5,11 +5,53 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import benchmark_operations as bench
 
 
 class BenchmarkTests(unittest.TestCase):
+    @staticmethod
+    def crashing_client(root):
+        popen = subprocess.Popen
+        script = "import os; os.read(0, 1); os.write(2, b'intentional crash\\n'); os._exit(7)"
+        with patch.object(bench.smoke_cold_start.subprocess, "Popen",
+                          side_effect=lambda argv, **kwargs: popen([sys.executable, "-c", script], **kwargs)):
+            return bench.Client(root, None)
+
+    def test_server_crash_retains_status_stderr_and_primary_eof_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            client = self.crashing_client(tmp)
+            with self.assertRaisesRegex(RuntimeError, "server exit=7; stderr tail: intentional crash"):
+                try:
+                    client.request("initialize", {})
+                finally:
+                    client.close()
+            self.assertEqual(client.proc.returncode, 7)
+            self.assertFalse(client.reader.is_alive())
+            self.assertTrue(client.stderr.closed)
+
+    def test_cleanup_does_not_mask_an_existing_response_assertion(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            client = self.crashing_client(tmp)
+            client.proc.stdin.write(b"x")
+            client.proc.stdin.flush()
+            client.proc.wait(timeout=2)
+            with self.assertRaisesRegex(AssertionError, "primary wrong response"):
+                try:
+                    raise AssertionError("primary wrong response")
+                finally:
+                    client.close()
+            self.assertTrue(client.stderr.closed)
+
+    def test_shutdown_failure_without_a_primary_error_still_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            client = self.crashing_client(tmp)
+            with self.assertRaisesRegex(RuntimeError, "server exit=7; stderr tail: intentional crash"):
+                client.close()
+            self.assertEqual(client.proc.returncode, 7)
+            self.assertFalse(client.reader.is_alive())
+
     def test_percentile_uses_nearest_rank(self):
         self.assertEqual(bench.percentile([5], .95), 5)
         self.assertEqual(bench.percentile(list(range(1, 31)), .95), 29)

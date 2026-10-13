@@ -19,6 +19,13 @@ cannot pass by being fast. No existing benchmark, test, fixture, inline test or 
 was changed to introduce the gate. The later scanner prototype repair does not
 change benchmark/client assertions, workload contents or timing thresholds.
 
+The client now retains server stderr and includes its last 8 KiB and the process
+exit status when stdout closes. Teardown preserves an earlier response/readiness
+failure instead of masking it with a secondary `BrokenPipeError`. This changes
+failure diagnostics only: successful shutdown still requires the shutdown
+response and process exit status zero within the original timeout. The updated
+helper digest is pinned in config and the same helper runs for both endpoints.
+
 ## Run the complete live suite
 
 Use separate clean checkouts, one at the fixed baseline SHA and one at the
@@ -87,7 +94,7 @@ repair to an exported snapshot, never to the baseline checkout:
 This is an explicit reviewed exception for C callback ABI compatibility, not a
 new performance baseline or a generally configurable patch mechanism. The repair
 contract is pinned in code and config, and any mismatch fails closed. It changes
-no scanner body, runtime behavior, compiler flag, harness, workload, optimization
+no scanner body, YAML parsing algorithm, compiler flag, harness, workload, optimization
 mode, round order or threshold. A future repair requires separate policy review.
 The gate retains the exported source/build tree as evidence; its binaries and
 measurements must be identified as **pinned baseline plus prototype repair**, not

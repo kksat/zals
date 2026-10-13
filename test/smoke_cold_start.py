@@ -21,10 +21,16 @@ from smoke_workspace import BIN, frame, pos
 
 class Client:
     def __init__(self, root, env):
-        self.proc = subprocess.Popen(
-            [BIN, "--stdio", "--log-level", "error"], cwd=root, env=env,
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-        )
+        # A file drains stderr without a second reader thread or pipe deadlock.
+        self.stderr = tempfile.TemporaryFile()
+        try:
+            self.proc = subprocess.Popen(
+                [BIN, "--stdio", "--log-level", "error"], cwd=root, env=env,
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.stderr,
+            )
+        except BaseException:
+            self.stderr.close()
+            raise
         self.messages = queue.Queue()
         self.notifications = []
         self.next_id = 1
@@ -38,7 +44,7 @@ class Client:
                 while True:
                     line = self.proc.stdout.readline()
                     if not line:
-                        raise RuntimeError("server closed stdout")
+                        raise RuntimeError(self._failure_text("server closed stdout"))
                     if not line.strip():
                         break
                     key, _, value = line.decode().partition(":")
@@ -47,6 +53,19 @@ class Client:
                 self.messages.put(json.loads(body))
         except Exception as exc:
             self.messages.put(exc)
+
+    def _failure_text(self, message):
+        # EOF can arrive just before waitpid observes the exit. Never wait
+        # indefinitely for a child that deliberately closes stdout while alive.
+        try:
+            self.proc.wait(timeout=.1)
+        except subprocess.TimeoutExpired:
+            pass
+        self.stderr.seek(0, os.SEEK_END)
+        end = self.stderr.tell()
+        self.stderr.seek(max(0, end - 8192))
+        tail = self.stderr.read().decode(errors="replace").strip()
+        return f"{message}; server exit={self.proc.poll()}; stderr tail: {tail or '(empty)'}"
 
     def read(self, timeout=2):
         try:
@@ -86,18 +105,30 @@ class Client:
             self.read(max(0, deadline - time.monotonic()))
 
     def close(self):
+        # A finally-block teardown must not replace the original failed response
+        # or stdout EOF with a secondary BrokenPipeError from a dead server.
+        preserve_error = sys.exc_info()[0] is not None
         try:
+            if self.proc.poll() is not None:
+                raise RuntimeError(self._failure_text("server exited before shutdown"))
             self.request("shutdown", None)
             self.notify("exit", None)
             self.proc.wait(timeout=10)
             assert self.proc.returncode == 0, self.proc.returncode
+        except Exception:
+            if not preserve_error:
+                raise
         finally:
             if self.proc.poll() is None:
                 self.proc.kill()
                 self.proc.wait()
             self.reader.join(timeout=2)
-            self.proc.stdin.close()
+            try:
+                self.proc.stdin.close()
+            except BrokenPipeError:
+                pass
             self.proc.stdout.close()
+            self.stderr.close()
 
 
 def main():
