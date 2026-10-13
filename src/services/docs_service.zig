@@ -64,6 +64,9 @@ pub const DocsService = struct {
         self.started = true;
         self.lib = lib;
         self.pool = pool;
+        // Bind before submitting: fingerprint, catalog, nested config/module
+        // discovery, and prefetch all inherit one owner-lifetime token.
+        self.lib.runner.cancel = &self.shutdown;
         self.bootstrap_task = .{ .func = bootstrapEntry, .ctx = self };
         self.pool.submit(&self.bootstrap_task) catch self.ready.store(true, .release);
     }

@@ -20,6 +20,15 @@ backend spawns real processes via `std.process.Child`. Every consumer
 (`ansible-config`, `ansible-doc`, `ansible-lint`, syntax check) depends on the
 interface, never on the process backend directly.
 
+An execution owner can bind a borrowed atomic cancellation token once to its
+runner. Nested command consumers inherit it. The process backend checks it
+before spawning, while collecting output, and while waiting for process exit;
+cancellation forcibly terminates and reaps the child, including a child that
+ignores SIGTERM or closes its output streams before exiting. Ordinary unbound
+commands retain their existing execution behavior. Docs bootstrap binds its
+shutdown token before submitting work, so server teardown can join workers
+without waiting on an unresponsive Ansible subprocess.
+
 The same principle applies to the other external dependencies:
 
 - `YamlParser` — tree-sitter today ([ADR-0004](0004-yaml-parsing-tree-sitter.md))

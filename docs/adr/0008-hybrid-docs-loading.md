@@ -35,7 +35,9 @@ and module discovery finish. While bootstrap or Workspace scanning is pending,
 it waits for input in bounded 25 ms intervals, applies background results, and
 reports readiness even to an idle client. It returns to blocking input once
 both readiness events are consumed. Prefetch and cache writes run on the pool
-and are cancelled on shutdown.
+and are cancelled on shutdown. The docs runner inherits the service's shutdown
+token, so in-flight fingerprint, catalog, config, module-version, and prefetch
+subprocesses are forcibly terminated and reaped before workers are joined.
 
 Navigation hovers for variables, fields, roles, and collections resolve before
 opening a contextual module library: they do not need module docs. Config dumps

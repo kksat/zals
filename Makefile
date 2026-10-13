@@ -77,6 +77,7 @@ smoke: build
 	python3 test/smoke_role_navigation.py
 	python3 test/smoke_workspace.py
 	python3 test/smoke_cold_start.py
+	python3 test/smoke_shutdown.py
 	python3 test/benchmark_operations.py --files 2 --tasks 2 --sessions 1 --samples 1 --warmup 0 > /dev/null
 
 # End-to-end request latency tables; pass output paths/load via ARGS.
