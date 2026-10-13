@@ -1,6 +1,14 @@
 {
   "schema_version": 1,
   "baseline_sha": "c0c7ae384a12a747ca2596f53bbbb121b1c16ba0",
+  "baseline_build_repair": {
+    "id": "yaml-scanner-create-prototype",
+    "path": "vendor/tree-sitter-yaml/src/scanner.c",
+    "source_sha256": "a510c0ca699cf3853bd2192bf103e11132414bc002fe952a88a7106ffb5d44e9",
+    "repaired_sha256": "76cce2a10de4180864a43a820b3039d624a8dd3778f1bfcdc707f31c0e3ac4f9",
+    "before": "void *tree_sitter_yaml_external_scanner_create() {",
+    "after": "void *tree_sitter_yaml_external_scanner_create(void) {"
+  },
   "optimize": "ReleaseSafe",
   "zig_version": "0.15.1",
   "ci_python": "3.12",
