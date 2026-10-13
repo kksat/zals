@@ -1,11 +1,16 @@
 """Exercise the release contract without network access or package uploads."""
 
+import hashlib
 import importlib.util
 import io
 import json
 from pathlib import Path
+import re
+import shutil
+import subprocess
 import tarfile
 import tempfile
+import textwrap
 import unittest
 import zipfile
 
@@ -86,6 +91,35 @@ class ReleaseTests(unittest.TestCase):
             archive.writestr("zals/bin/zals.exe", b"wrong binary")
         with self.assertRaisesRegex(ValueError, "Wheel binary differs"):
             release.verify_assets(self.directory, self.tag)
+
+    @unittest.skipUnless(shutil.which("sha256sum") and shutil.which("ruby"),
+                         "formula rendering requires sha256sum and Ruby")
+    def test_homebrew_workflow_renders_template_comments_and_checksums(self):
+        self.make_assets()
+        formula_dir = self.directory / "Formula"
+        formula_dir.mkdir()
+        shutil.copy2(ROOT / "Formula/zals.rb", formula_dir / "zals.rb")
+        # Exercise the actual workflow script, not a second implementation.
+        workflow = (ROOT / ".github/workflows/release.yml").read_text()
+        match = re.search(
+            r"      - name: Render the formula from verified archives\n"
+            r"        shell: bash\n        run: \|\n((?:          .*\n)+)", workflow,
+        )
+        self.assertIsNotNone(match)
+        script = textwrap.dedent(match[1]).replace('version="${TAG#v}"',
+                                                  f'version="{self.version}"')
+        (self.directory / "dist").mkdir()
+        for asset in self.directory.glob("*.tar.gz"):
+            shutil.copy2(asset, self.directory / "dist" / asset.name)
+        result = subprocess.run(["bash", "-c", script], cwd=self.directory,
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        formula = (self.directory / "tap/Formula/zals.rb").read_text()
+        self.assertIn('# tokens with the released version', formula)
+        self.assertIn(f'version "{self.version}"', formula)
+        self.assertIn('--version 2>&1', formula)
+        for asset in (self.directory / "dist").glob("*.tar.gz"):
+            self.assertIn(hashlib.sha256(asset.read_bytes()).hexdigest(), formula)
 
     def test_wrong_vsix_platform(self):
         self.make_assets()

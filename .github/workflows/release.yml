@@ -346,7 +346,7 @@ jobs:
             -e "s/__SHA256_X86_64_MACOS__/$(sha x86_64-macos)/g" \
             -e "s/__SHA256_AARCH64_MACOS__/$(sha aarch64-macos)/g" \
             Formula/zals.rb > tap/Formula/zals.rb
-          if grep -q '__[A-Z0-9_]*__' tap/Formula/zals.rb; then
+          if grep -q '^[^#]*__[A-Z0-9_]*__' tap/Formula/zals.rb; then
             echo 'Unresolved formula placeholders' >&2
             exit 1
           fi
