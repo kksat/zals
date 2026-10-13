@@ -46,9 +46,9 @@ Use **Google release-please** to drive releases from
   copies the binary from `ZALS_BINARY` and overrides the wheel platform tag from
   `ZALS_PLATFORM_TAG`.
 
-The current baseline is **1.0.0**: `version.txt`,
+The current baseline is **0.1.0**: `version.txt`,
 `.release-please-manifest.json`, `src/main.zig`, `build.zig.zon`, and
-`python/pyproject.toml` all read `1.0.0`. The initial `v1.0.0` tag is created
+`python/pyproject.toml` all read `0.1.0`. The initial `v0.1.0` tag is created
 once by hand (or by running the release workflow manually); subsequent releases
 flow through release-please.
 

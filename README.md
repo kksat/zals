@@ -182,8 +182,8 @@ publish the `zals` Python package to PyPI, and to update the Homebrew tap. See
 [ADR-0026](docs/adr/0026-release-process.md).
 
 To (re)build assets for an existing tag, run the **release** workflow manually
-and pass the tag (for example `v1.0.0`). The current baseline is `1.0.0`, so the
-initial `v1.0.0` release is bootstrapped this way; later releases flow through
+and pass the tag (for example `v0.1.0`). The current baseline is `0.1.0`, so the
+initial `v0.1.0` release is bootstrapped this way; later releases flow through
 release-please.
 
 Publishing the Homebrew formula requires a `HOMEBREW_TAP_TOKEN` secret with

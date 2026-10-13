@@ -1,6 +1,6 @@
 # Changelog
 
-## [1.0.0](https://github.com/kksat/zals/releases/tag/v1.0.0) (2026-09-19)
+## [0.1.0](https://github.com/kksat/zals/releases/tag/v0.1.0) (2026-09-19)
 
 ### Features
 

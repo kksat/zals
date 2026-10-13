@@ -1,7 +1,7 @@
 const std = @import("std");
 const zals = @import("zals");
 
-const version = "1.0.0"; // x-release-please-version
+const version = "0.1.0"; // x-release-please-version
 
 const usage =
     \\Usage: zals [options]
