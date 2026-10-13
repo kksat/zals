@@ -21,3 +21,9 @@ python/build/
 python/dist/
 python/wheelhouse/
 python/src/*.egg-info/
+
+# VS Code extension build artifacts
+editors/vscode/node_modules/
+editors/vscode/dist/
+editors/vscode/bin/
+*.vsix
