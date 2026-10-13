@@ -1,54 +1,75 @@
 name: release
 
-# Triggered when release-please publishes a GitHub release (which also creates
-# the version tag), or manually to (re)build assets for an existing tag.
+# GitHub-only packaging: no PyPI, Homebrew tap, Marketplace, or Open VSX uploads.
+# Every job checks out the tag, including when manually dispatched from main.
 on:
   release:
     types: [published]
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag to build and attach binaries to (e.g. v0.1.0)"
+        description: "Tag to build and release on GitHub (e.g. v0.1.0)"
         required: true
         type: string
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
 
 env:
   ZIG_VERSION: "0.15.1"
-  TAG: ${{ github.event.release.tag_name || github.event.inputs.tag }}
+  TAG: ${{ github.event.release.tag_name || inputs.tag }}
 
 jobs:
+  validate:
+    name: validate release versions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python tools/release/verify.py versions --tag "$TAG"
+
   build:
     name: build ${{ matrix.target }}
+    needs: validate
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
           - target: x86_64-linux
+            zig_target: x86_64-linux-musl
             archive: tar.gz
           - target: aarch64-linux
+            zig_target: aarch64-linux-musl
             archive: tar.gz
           - target: x86_64-macos
+            zig_target: x86_64-macos.13.0
             archive: tar.gz
           - target: aarch64-macos
+            zig_target: aarch64-macos.13.0
             archive: tar.gz
           - target: x86_64-windows
+            zig_target: x86_64-windows
             archive: zip
     steps:
       - uses: actions/checkout@v4
-
+        with:
+          ref: ${{ env.TAG }}
+          persist-credentials: false
       - uses: mlugg/setup-zig@v2
         with:
           version: ${{ env.ZIG_VERSION }}
-
-      # Zig cross-compiles every target from a single Linux runner, so no
-      # per-OS runner matrix is needed.
       - name: Build
-        run: zig build -Doptimize=ReleaseSafe -Dtarget=${{ matrix.target }}
-
+        run: make zig ARGS="build -Doptimize=ReleaseSafe -Dtarget=${{ matrix.zig_target }}"
       - name: Package
         shell: bash
         run: |
@@ -65,53 +86,31 @@ jobs:
             tar -C dist -czf "dist/${name}.tar.gz" zals
             rm dist/zals
           fi
-          ls -la dist
-
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.target }}
+          name: binaries-${{ matrix.target }}
           path: dist/*
           if-no-files-found: error
 
-  release:
-    name: publish release assets
+  python:
+    name: package python wheels
     needs: build
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: dist
-          merge-multiple: true
-
-      - name: Attach binaries to the release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ env.TAG }}
-          files: dist/*
-          fail_on_unmatched_files: true
-
-  pypi:
-    name: publish python package
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
     steps:
       - uses: actions/checkout@v4
-
+        with:
+          ref: ${{ env.TAG }}
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
       - name: Install build tooling
-        run: python -m pip install --upgrade build
-
+        run: python -m pip install build
       - uses: actions/download-artifact@v4
         with:
+          pattern: binaries-*
           path: dist
           merge-multiple: true
-
-      # Each wheel bundles the binary for one platform and is tagged for it.
       - name: Build wheels
         shell: bash
         run: |
@@ -141,68 +140,100 @@ jobs:
           build_wheel x86_64-macos  macosx_13_0_x86_64 tar.gz
           build_wheel aarch64-macos macosx_13_0_arm64 tar.gz
           build_wheel x86_64-windows win_amd64 zip
-
-          ls -la wheelhouse
-
-      # Uses PyPI trusted publishing (OIDC). To use an API token instead, add
-      # `password: ${{ secrets.PYPI_API_TOKEN }}` to the step below.
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+      - uses: actions/upload-artifact@v4
         with:
-          packages-dir: wheelhouse
+          name: python-wheels
+          path: wheelhouse/*.whl
+          if-no-files-found: error
 
-  homebrew:
-    name: update homebrew tap
-    needs: [build, release]
+  vscode:
+    name: package vs code extensions
+    needs: build
     runs-on: ubuntu-latest
-    env:
-      # Secrets cannot be referenced directly in `if:`; expose a boolean instead.
-      HAS_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+      - name: Install extension dependencies
+        run: npm ci --prefix editors/vscode
+      - name: Test and typecheck extension
+        run: |
+          npm --prefix editors/vscode run typecheck
+          npm --prefix editors/vscode test
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: binaries-*
+          path: dist
+          merge-multiple: true
+      - name: Build platform VSIX packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          mkdir -p vsix-packages
+          output="$(pwd)/vsix-packages"
 
+          package_vsix() {
+            local target="$1" platform="$2" archive="$3"
+            rm -rf editors/vscode/bin
+            mkdir -p editors/vscode/bin
+            if [ "$archive" = "zip" ]; then
+              unzip -q "dist/zals-${version}-${target}.zip" -d editors/vscode/bin
+            else
+              tar -xzf "dist/zals-${version}-${target}.tar.gz" -C editors/vscode/bin
+              chmod +x editors/vscode/bin/zals
+            fi
+            (
+              cd editors/vscode
+              npx --no-install vsce package --target "$platform" \
+                --out "$output/zals-${version}-${platform}.vsix" --no-dependencies
+            )
+          }
+
+          package_vsix x86_64-linux  linux-x64 tar.gz
+          package_vsix aarch64-linux linux-arm64 tar.gz
+          package_vsix x86_64-macos  darwin-x64 tar.gz
+          package_vsix aarch64-macos darwin-arm64 tar.gz
+          package_vsix x86_64-windows win32-x64 zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vscode-vsix
+          path: vsix-packages/*.vsix
+          if-no-files-found: error
+
+  release:
+    name: verify and publish github assets
+    needs: [build, python, vscode]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
-
-      - name: Render formula
-        shell: bash
-        run: |
-          set -euo pipefail
-          version="${TAG#v}"
-          sha() { sha256sum "dist/zals-${version}-$1.tar.gz" | awk '{print $1}'; }
-          mkdir -p rendered
-          sed \
-            -e "s/__VERSION__/${version}/g" \
-            -e "s/__SHA256_X86_64_LINUX__/$(sha x86_64-linux)/g" \
-            -e "s/__SHA256_AARCH64_LINUX__/$(sha aarch64-linux)/g" \
-            -e "s/__SHA256_X86_64_MACOS__/$(sha x86_64-macos)/g" \
-            -e "s/__SHA256_AARCH64_MACOS__/$(sha aarch64-macos)/g" \
-            Formula/zals.rb > rendered/zals.rb
-          cat rendered/zals.rb
-
-      # Requires a HOMEBREW_TAP_TOKEN secret with write access to the tap repo.
-      # Optionally override the tap with the HOMEBREW_TAP_REPO repository variable.
-      - name: Push to tap
-        if: env.HAS_TAP_TOKEN == 'true'
-        shell: bash
-        env:
-          TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO || 'kksat/homebrew-tap' }}
-        run: |
-          set -euo pipefail
-          version="${TAG#v}"
-          git clone --depth 1 "https://x-access-token:${TOKEN}@github.com/${TAP_REPO}.git" tap
-          mkdir -p tap/Formula
-          cp rendered/zals.rb tap/Formula/zals.rb
-          cd tap
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Formula/zals.rb
-          if git diff --cached --quiet; then
-            echo "formula unchanged"
-            exit 0
-          fi
-          git commit -m "zals ${version}"
-          git push
+      - name: Verify the complete asset set and bundled binaries
+        run: python tools/release/verify.py assets --tag "$TAG" --directory dist
+      - name: Generate checksums
+        working-directory: dist
+        run: sha256sum -- *.tar.gz *.zip *.whl *.vsix > SHA256SUMS
+      - name: Publish assets to GitHub only
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          files: dist/*
+          fail_on_unmatched_files: true
+          generate_release_notes: true

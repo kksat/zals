@@ -98,8 +98,11 @@ brew install zals
 The [`zals`](https://pypi.org/project/zals/) package is a thin wrapper that
 bundles the binary for your platform:
 
+Releases currently publish to GitHub only, not PyPI. Download the `.whl` for
+your platform from the release page, then install it locally:
+
 ```sh
-pip install zals
+pip install ./zals-0.1.0-py3-none-<platform>.whl
 zals --version
 ```
 
@@ -107,6 +110,19 @@ zals --version
 
 Download `zals-<version>-<target>.tar.gz` (or `.zip` on Windows) from the
 release page and put `zals` on your `PATH`.
+
+### VS Code
+
+Download the `.vsix` matching your VS Code host platform from the release page,
+then use **Extensions: Install from VSIX...** or:
+
+```sh
+code --install-extension ./zals-0.1.0-<platform>.vsix
+```
+
+Each VSIX bundles the matching native binary; no separate server install is
+needed. The extension source and development commands are in
+[`editors/vscode`](editors/vscode/README.md).
 
 ## Build
 
@@ -174,28 +190,35 @@ For Neovim, see the [filetype and LSP setup](docs/neovim.md), including
 
 Releases are driven by [release-please](https://github.com/googleapis/release-please)
 from [Conventional Commits](https://www.conventionalcommits.org/). Push commits
-to `main`; release-please opens a release PR that bumps the version, updates
-`CHANGELOG.md`, and rewrites the version in `src/main.zig` and `build.zig.zon`.
-Merging that PR creates the `vX.Y.Z` tag and a GitHub release, which triggers the
-release workflow to build and attach the Linux, macOS, and Windows binaries, to
-publish the `zals` Python package to PyPI, and to update the Homebrew tap. See
+to `main`; release-please opens a release PR that updates the changelog and all
+server, Python, and VS Code versions in lockstep. Merging that PR creates the
+`vX.Y.Z` tag and a GitHub release. See
 [ADR-0026](docs/adr/0026-release-process.md).
 
-To (re)build assets for an existing tag, run the **release** workflow manually
-and pass the tag (for example `v0.1.0`). The current baseline is `0.1.0`, so the
-initial `v0.1.0` release is bootstrapped this way; later releases flow through
-release-please.
+The **release** workflow publishes **only to GitHub**. It builds five native
+binary archives, five Python wheels, five platform-specific VSIX packages, and
+`SHA256SUMS`. No PyPI, Homebrew tap, Visual Studio Marketplace, or Open VSX
+publishing runs, even if publishing secrets are configured.
 
-Publishing the Homebrew formula requires a `HOMEBREW_TAP_TOKEN` secret with
-write access to the tap repository (default `kksat/homebrew-tap`, overridable
-with the `HOMEBREW_TAP_REPO` repository variable). Without it, the release still
-succeeds and the formula is only rendered in the workflow log.
+To bootstrap or rebuild a release, push the version tag, then run:
 
-Publishing to PyPI uses [trusted
-publishing](https://docs.pypi.org/trusted-publishers/): configure a trusted
-publisher for this repository and the `release.yml` workflow. To use an API
-token instead, add `password: ${{ secrets.PYPI_API_TOKEN }}` to the publish step
-in `.github/workflows/release.yml`.
+```sh
+gh workflow run release.yml --ref main -f tag=v0.1.0
+```
+
+All jobs check out the requested tag, not the moving branch tip. The workflow
+rejects mismatched source versions and verifies the complete asset set,
+platform metadata, and identical bundled binaries before creating or updating
+the GitHub release. Packaging must succeed for every platform before any assets
+are published. The initial baseline is `0.1.0`.
+
+The local release contract tests run under `make check` (Python 3.11+). You can
+also check a downloaded asset directory with:
+
+```sh
+python3 tools/release/verify.py assets --tag v0.1.0 --directory ./release-assets
+(cd release-assets && shasum -a 256 -c SHA256SUMS)
+```
 
 ## License
 

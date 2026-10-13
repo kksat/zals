@@ -33,6 +33,31 @@ This extension exposes the native `ansible.*` settings accepted by `zals`:
 | `ansible.validation.lint.arguments` | `""` | Arguments to pass to `ansible-lint`. |
 | `ansible.validation.lint.autoFixOnSave` | `false` | Run `ansible-lint --fix` on save. |
 
+## Install and develop
+
+Releases currently publish VSIXs only to GitHub, not to an extension registry.
+Download the package matching the VS Code host platform and use
+**Extensions: Install from VSIX...**. For remote development, choose the remote
+host's platform, not the local desktop's.
+
+Development requires Node 22+:
+
+```sh
+npm ci
+npm run typecheck
+npm test
+npm run package
+```
+
+Before packaging a VSIX, put the matching release binary in `bin/zals`
+(`bin/zals.exe` on Windows). Then run, for example:
+
+```sh
+npx --no-install vsce package --target darwin-arm64 --no-dependencies
+```
+
+The root release workflow performs this for all five supported platforms.
+
 ## License
 
 GPL-3.0-only. See [LICENSE](../../LICENSE) for details.
