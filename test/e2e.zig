@@ -62,6 +62,9 @@ fn assertCapabilities(result: Value) !void {
         };
         if (value != .bool or !value.bool) return error.DisabledNavigationCapability;
     }
+    const rename = lsp.field(caps, "renameProvider") orelse return error.MissingRenameCapability;
+    const prepare = lsp.field(rename, "prepareProvider") orelse return error.MissingPrepareRenameCapability;
+    if (prepare != .bool or !prepare.bool) return error.DisabledPrepareRenameCapability;
     // An absent positionEncoding also means UTF-16 by the LSP protocol.
     if (lsp.field(caps, "positionEncoding")) |encoding| {
         if (encoding != .string or !std.mem.eql(u8, encoding.string, "utf-16")) {
@@ -103,19 +106,33 @@ fn runCase(a: Allocator, client: *lsp.Client, resolver: anchor.Resolver, opened:
             .textDocument = document,
             .position = source.position,
         }),
+        .prepare_rename => try client.request("textDocument/prepareRename", .{
+            .textDocument = document,
+            .position = source.position,
+        }),
+        .rename => try client.request("textDocument/rename", .{
+            .textDocument = document,
+            .position = source.position,
+            .newName = case.new_name,
+        }),
     };
-    const actual = if (case.method == .hover)
-        try parseHoverLocations(a, result, source.uri)
-    else
-        try parseLocations(a, result);
-    const hover_matches = if (case.method == .hover) try hoverMatches(result, case) else true;
+    const actual = switch (case.method) {
+        .hover, .prepare_rename => try parseHoverLocations(a, result, source.uri),
+        .rename => try parseRenameLocations(a, result, case.new_name),
+        else => try parseLocations(a, result),
+    };
+    const extra_matches = switch (case.method) {
+        .hover => try hoverMatches(result, case),
+        .prepare_rename => try prepareRenameMatches(result, case),
+        else => true,
+    };
     const expected = try a.alloc(anchor.Location, case.expected.len);
     for (case.expected, 0..) |location, i| expected[i] = try resolver.location(location);
-    if (case.method == .references) {
+    if (case.method == .references or case.method == .rename) {
         std.mem.sort(anchor.Location, actual, {}, locationLessThan);
         std.mem.sort(anchor.Location, expected, {}, locationLessThan);
     }
-    if (locationsEqual(actual, expected) and hover_matches) return true;
+    if (locationsEqual(actual, expected) and extra_matches) return true;
 
     std.debug.print("FAIL {s} ({s}, includeDeclaration={}):\n", .{
         case.name, @tagName(case.method), case.include_declaration,
@@ -158,6 +175,41 @@ fn hoverMatches(result: Value, case: m.Case) !bool {
         }
     }
     return true;
+}
+
+fn prepareRenameMatches(result: Value, case: m.Case) !bool {
+    if (result == .null) return case.expected.len == 0;
+    const placeholder = lsp.field(result, "placeholder") orelse return error.MissingPrepareRenamePlaceholder;
+    if (placeholder != .string) return error.InvalidPrepareRenamePlaceholder;
+    if (!std.mem.eql(u8, placeholder.string, case.placeholder)) {
+        std.debug.print("  expected placeholder: {s}\n  actual placeholder: {s}\n", .{ case.placeholder, placeholder.string });
+        return false;
+    }
+    return true;
+}
+
+fn parseRenameLocations(a: Allocator, result: Value, expected_text: []const u8) ![]anchor.Location {
+    if (result == .null) return &.{};
+    const changes = lsp.field(result, "changes") orelse return error.MissingWorkspaceEditChanges;
+    if (changes != .object) return error.InvalidWorkspaceEditChanges;
+    var locations = std.array_list.Managed(anchor.Location).init(a);
+    var it = changes.object.iterator();
+    while (it.next()) |entry| {
+        const uri = entry.key_ptr.*;
+        if (entry.value_ptr.* != .array) return error.InvalidTextEditArray;
+        for (entry.value_ptr.array.items) |edit| {
+            const new_text = lsp.field(edit, "newText") orelse return error.MissingTextEditNewText;
+            if (new_text != .string or !std.mem.eql(u8, new_text.string, expected_text)) {
+                return error.UnexpectedTextEditNewText;
+            }
+            const range = lsp.field(edit, "range") orelse return error.MissingTextEditRange;
+            try locations.append(.{ .uri = uri, .range = .{
+                .start = try parsePosition(lsp.field(range, "start") orelse return error.MissingRangeStart),
+                .end = try parsePosition(lsp.field(range, "end") orelse return error.MissingRangeEnd),
+            } });
+        }
+    }
+    return locations.toOwnedSlice();
 }
 
 fn parseLocations(a: Allocator, result: Value) ![]anchor.Location {

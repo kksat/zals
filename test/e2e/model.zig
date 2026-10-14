@@ -14,7 +14,7 @@ pub const ExpectedLocation = union(enum) {
     file_start: []const u8,
 };
 
-pub const Method = enum { references, definition, implementation, hover };
+pub const Method = enum { references, definition, implementation, hover, prepare_rename, rename };
 
 pub const Case = struct {
     name: []const u8,
@@ -27,6 +27,9 @@ pub const Case = struct {
     /// Hover cases also assert independently specified documentation excerpts.
     markdown_contains: []const []const u8 = &.{},
     markdown_excludes: []const []const u8 = &.{},
+    /// Used by prepare_rename (expected placeholder) and rename (newName).
+    placeholder: []const u8 = "",
+    new_name: []const u8 = "renamed_var",
 };
 
 pub fn cursor(path: []const u8, snippet: []const u8) Anchor {
