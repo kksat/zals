@@ -19,19 +19,20 @@ pub fn references(self: *Server, a: Allocator, subject: *Subject) !?[]const type
     const own = types.Location{ .uri = subject.doc.uri, .range = subject.doc.rangeFromOffsets(ref.start, ref.end) };
     const path = try paths.uriToPath(a, subject.doc.uri);
     const declared = try yaml.collections.getRoleDeclaredCollections(forest.allocator(), path, subject.path);
-    const targets = util.resolveRoleAll(self, a, ref.name, path, declared);
+    const v = (try subject.workspace(self, a)) orelse return try a.dupe(types.Location, &.{own});
+    const ws_collections = try v.workspaceCollections();
+    const targets = util.roleResolverWithCollections(self, a, path, declared, ws_collections).resolveAll(ref.name, path);
     // Unresolved references have no identity to share, even with another
     // unresolved occurrence of the same spelling.
     if (targets.len == 0) return try a.dupe(types.Location, &.{own});
 
-    const v = (try subject.workspace(self, a)) orelse return try a.dupe(types.Location, &.{own});
     var locs = std.array_list.Managed(types.Location).init(a);
     try locs.append(own);
     for (v.files) |f| {
         if (f.facts.role_refs.len == 0) continue;
         // Build search paths once per file, not per reference. Facts already
         // retain the collections visible at each site from the index/open doc.
-        const resolver = util.roleResolver(self, a, f.path, &.{});
+        const resolver = util.roleResolverWithCollections(self, a, f.path, &.{}, ws_collections);
         for (f.facts.role_refs) |r| {
             if (std.mem.eql(u8, f.uri, subject.doc.uri) and r.start == ref.start and r.end == ref.end) continue;
             if (!roleRefMatches(resolver, f.path, r, targets)) continue;
@@ -67,7 +68,7 @@ pub fn hover(self: *Server, a: Allocator, subject: *Subject) !?types.Hover {
     const collections = yaml.collections.getRoleDeclaredCollections(forest.allocator(), path, subject.path) catch &.{};
     const range = subject.doc.rangeFromOffsets(ref.start, ref.end);
 
-    const dir = util.resolveRole(self, a, name, path, collections) orelse {
+    const dir = resolveRoleForSubject(self, a, subject, name, path, collections) orelse {
         return markdown(range, try std.fmt.allocPrint(a, "**Role** `{s}`\n\nNot found on the role search path.", .{name}));
     };
     return markdown(range, try roleCard(a, name, dir));
@@ -110,6 +111,33 @@ fn lessLocation(_: void, x: types.Location, y: types.Location) bool {
 
 pub const RoleResult = union(enum) { skip, none, locations: []const types.Location };
 
+fn resolveRoleAllForSubject(
+    self: *Server,
+    a: Allocator,
+    subject: *Subject,
+    name: []const u8,
+    referencing_path: []const u8,
+    declared_collections: []const []const u8,
+) []const []const u8 {
+    if (subject.workspace(self, a) catch null) |v| {
+        const ws_collections = v.workspaceCollections() catch &.{};
+        return util.roleResolverWithCollections(self, a, referencing_path, declared_collections, ws_collections).resolveAll(name, referencing_path);
+    }
+    return util.resolveRoleAll(self, a, name, referencing_path, declared_collections);
+}
+
+fn resolveRoleForSubject(
+    self: *Server,
+    a: Allocator,
+    subject: *Subject,
+    name: []const u8,
+    referencing_path: []const u8,
+    declared_collections: []const []const u8,
+) ?[]const u8 {
+    const all = resolveRoleAllForSubject(self, a, subject, name, referencing_path, declared_collections);
+    return if (all.len > 0) all[0] else null;
+}
+
 /// Jump from a role reference to the role's argument specs, metadata, or main
 /// task file. `.none` stops the chain when the cursor is on a role-name
 /// position but the role cannot be resolved.
@@ -120,7 +148,7 @@ pub fn definition(self: *Server, a: Allocator, subject: *Subject) !RoleResult {
     const path = try paths.uriToPath(a, subject.doc.uri);
     const collections = yaml.collections.getRoleDeclaredCollections(arena, path, subject.path) catch &.{};
     var locs = std.array_list.Managed(types.Location).init(a);
-    for (util.resolveRoleAll(self, a, ref.name, path, collections)) |dir| {
+    for (resolveRoleAllForSubject(self, a, subject, ref.name, path, collections)) |dir| {
         const target = roles.targets.definitionTarget(a, dir) orelse continue;
         try locs.append(try util.fileLocation(a, target));
     }
@@ -135,7 +163,7 @@ pub fn implementation(self: *Server, a: Allocator, subject: *Subject) !?[]const 
     const path = try paths.uriToPath(a, subject.doc.uri);
     const collections = yaml.collections.getRoleDeclaredCollections(arena, path, subject.path) catch &.{};
     var locs = std.array_list.Managed(types.Location).init(a);
-    for (util.resolveRoleAll(self, a, ref.name, path, collections)) |dir| {
+    for (resolveRoleAllForSubject(self, a, subject, ref.name, path, collections)) |dir| {
         const target = roles.targets.implementationTarget(a, dir) orelse continue;
         try locs.append(try util.fileLocation(a, target));
     }

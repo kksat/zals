@@ -96,8 +96,19 @@ pub fn roleResolver(
     const ctx = self.projectContext(a, referencing_path);
     const workspace_collections = if (ctx.workspace_root) |root| blk: {
         var v = @import("workspace_view.zig").View.init(self, a, root) catch break :blk &.{};
-        break :blk @import("../queries/collection_navigation.zig").workspaceCollections(a, &v) catch &.{};
+        break :blk v.workspaceCollections() catch &.{};
     } else &.{};
+    return roleResolverWithCollections(self, a, referencing_path, declared_collections, workspace_collections);
+}
+
+pub fn roleResolverWithCollections(
+    self: *Server,
+    a: Allocator,
+    referencing_path: []const u8,
+    declared_collections: []const []const u8,
+    workspace_collections: []const roles.resolve.WorkspaceCollection,
+) roles.Resolver {
+    const ctx = self.projectContext(a, referencing_path);
     return .{
         .allocator = a,
         .roles_paths = project_config.rolesPaths(a, ctx, referencing_path) catch &.{},

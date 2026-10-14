@@ -56,6 +56,7 @@ pub const Known = @import("../roles/resolve.zig").WorkspaceCollection;
 /// Metadata-defined collections: the Workspace root, or any directory below
 /// `ansible_collections/` within the Workspace's discovered file set.
 pub fn workspaceCollections(a: Allocator, v: *wv.View) ![]const Known {
+    if (v.collections) |colls| return colls;
     var out = std.array_list.Managed(Known).init(a);
     for (v.files) |f| {
         const base = std.fs.path.basename(f.path);
@@ -66,7 +67,9 @@ pub fn workspaceCollections(a: Allocator, v: *wv.View) ![]const Known {
         const name = galaxyName(a, text) orelse continue;
         try out.append(.{ .name = name, .dir = dir, .metadata_uri = f.uri });
     }
-    return out.toOwnedSlice();
+    const colls = try out.toOwnedSlice();
+    v.collections = colls;
+    return colls;
 }
 
 fn isWorkspaceCollectionRoot(root: []const u8, dir: []const u8) bool {
