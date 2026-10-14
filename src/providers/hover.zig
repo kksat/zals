@@ -71,12 +71,10 @@ test "hover formats a module from the cursor" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const options = std.StringHashMap(@import("../services/docs.zig").Option).init(a);
     const mod = @import("../services/docs.zig").Module{
         .name = "ping",
         .description = "probe the host",
         .filename = "/ping.py",
-        .options = options,
     };
     var doc = try Document.init(testing.allocator, "file:///play.yml", "ansible", 1, "- ping:\n", .utf8);
     defer doc.deinit();
@@ -96,12 +94,10 @@ test "hover uses the classified option" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const options = std.StringHashMap(@import("../services/docs.zig").Option).init(a);
     const mod = @import("../services/docs.zig").Module{
         .name = "ping",
         .description = "probe",
         .filename = "",
-        .options = options,
     };
     const opt = @import("../services/docs.zig").Option{
         .name = "child",

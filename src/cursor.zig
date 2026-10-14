@@ -278,13 +278,13 @@ fn schemaOption(module: docs.Module, trace: []const yaml.options.TraceStep, name
     while (idx > 0) {
         idx -= 1;
         const step = containers[idx];
-        const parent = if (subs) |s| findOpt(s, step.name) else module.options.get(step.name);
+        const parent = if (subs) |s| findOpt(s, step.name) else module.getOption(step.name);
         const p = parent orelse return null;
         if (!containerHolds(p, step.kind)) return null;
         subs = p.suboptions;
     }
     if (subs) |s| return findOpt(s, name);
-    return module.options.get(name);
+    return module.getOption(name);
 }
 
 fn containerHolds(opt: docs.Option, kind: yaml.options.TraceKind) bool {
@@ -381,12 +381,11 @@ const fake_vtable = Docs.VTable{
 };
 
 fn pingModule(a: Allocator) !docs.Module {
-    var options = std.StringHashMap(docs.Option).init(a);
-    try options.put("data", .{
+    const options = try a.dupe(docs.Option, &.{.{
         .name = "data",
         .description = "payload",
         .type = "str",
-    });
+    }});
     return .{
         .name = "ping",
         .description = "probe the host",
@@ -489,27 +488,23 @@ test "jinja ident is a variable occurrence" {
 }
 
 test "nested dict key is that suboption" {
-    var arena = std.heap.ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-    const a = arena.allocator();
     const subs = [_]docs.Option{.{
         .name = "child",
         .description = "inner",
         .type = "str",
     }};
-    var options = std.StringHashMap(docs.Option).init(a);
-    try options.put("complex", .{
+    const options = [_]docs.Option{.{
         .name = "complex",
         .description = "group",
         .type = "dict",
         .suboptions = &subs,
-    });
+    }};
     var fake = Fake{
         .modules = &.{.{
             .name = "ping",
             .description = "probe",
             .filename = "/ping.py",
-            .options = options,
+            .options = &options,
         }},
         .names = &.{"ping"},
         .fqcns = &.{},

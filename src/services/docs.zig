@@ -21,8 +21,7 @@ pub const Option = struct {
     elements: []const u8 = "",
 };
 
-/// A library lookup returns an immutable borrowed view. Do not mutate or
-/// deinitialize options (including through a copied map). All backing storage
+/// A library lookup returns an immutable borrowed view. All backing storage
 /// remains valid until library deinit, even when later ingestion replaces this
 /// name. Library teardown requires readers to finish and workers to be joined.
 pub const Module = struct {
@@ -35,7 +34,14 @@ pub const Module = struct {
     notes: []const []const u8 = &.{},
     deprecated: bool = false,
     filename: []const u8,
-    options: std.StringHashMap(Option),
+    options: []const Option = &.{},
+
+    pub fn getOption(self: Module, name: []const u8) ?Option {
+        for (self.options) |opt| {
+            if (std.mem.eql(u8, opt.name, name)) return opt;
+        }
+        return null;
+    }
 };
 
 pub const CatalogEntry = struct {
@@ -47,8 +53,8 @@ pub const CatalogEntry = struct {
 /// adapter. Keep the existing version-3 representation compatible.
 pub const cache_format_version = 3;
 
-/// Owns synchronized docs storage. Strings/nested slices are append-only in the
-/// arena; replaced option maps are retained until teardown for borrowed views.
+/// Owns synchronized docs storage. Strings and nested slices are append-only in
+/// the arena so borrowed views remain valid until teardown.
 /// Callers use operations below, not the storage fields or mutex.
 pub const DocsLibrary = struct {
     allocator: Allocator,
@@ -59,7 +65,6 @@ pub const DocsLibrary = struct {
     /// Short-name / FQCN → catalog description. Keys and values owned by `arena`.
     catalog: std.StringHashMap(CatalogEntry),
     modules: std.StringHashMap(Module),
-    retained_options: std.ArrayList(std.StringHashMap(Option)) = .empty,
     /// All module FQCNs discovered on disk (builtin + collections + redirects).
     /// Used for completion; keys are owned by `arena`.
     module_fqcns: std.StringHashMap(void),
@@ -85,11 +90,7 @@ pub const DocsLibrary = struct {
 
     pub fn deinit(self: *DocsLibrary) void {
         self.catalog.deinit();
-        var it = self.modules.iterator();
-        while (it.next()) |e| e.value_ptr.options.deinit();
         self.modules.deinit();
-        for (self.retained_options.items) |*options| options.deinit();
-        self.retained_options.deinit(self.allocator);
         self.module_fqcns.deinit();
         self.arena.deinit();
     }
@@ -274,9 +275,8 @@ pub const DocsLibrary = struct {
             try mo.put("deprecated", .{ .bool = m.deprecated });
             try mo.put("filename", .{ .string = m.filename });
             var opts = std.json.ObjectMap.init(a);
-            var oit = m.options.iterator();
-            while (oit.next()) |oe| {
-                try opts.put(oe.key_ptr.*, try cacheOptionToJson(a, oe.value_ptr.*));
+            for (m.options) |opt| {
+                try opts.put(opt.name, try cacheOptionToJson(a, opt));
             }
             try mo.put("options", .{ .object = opts });
             try mods.put(e.key_ptr.*, .{ .object = mo });
@@ -320,18 +320,16 @@ pub const DocsLibrary = struct {
             var it = mods.iterator();
             while (it.next()) |e| {
                 const name = try a.dupe(u8, e.key_ptr.*);
-                var options = std.StringHashMap(Option).init(self.allocator);
-                errdefer options.deinit();
+                var options = std.ArrayList(Option).empty;
                 if (json_util.object(e.value_ptr.*, "options")) |opts| {
                     var oi = opts.iterator();
                     while (oi.next()) |oe| {
-                        const opt_name = try a.dupe(u8, oe.key_ptr.*);
                         var opt = try cacheOptionFromJson(a, oe.value_ptr.*);
-                        opt.name = opt_name;
-                        try options.put(opt_name, opt);
+                        opt.name = try a.dupe(u8, oe.key_ptr.*);
+                        try options.append(a, opt);
                     }
                 }
-                try self.storeModule(.{
+                try self.modules.put(name, .{
                     .name = name,
                     .description = try a.dupe(u8, json_util.string(e.value_ptr.*, "description") orelse ""),
                     .long_description = try cacheStringList(a, json_util.field(e.value_ptr.*, "long_description") orelse Value.null),
@@ -339,22 +337,13 @@ pub const DocsLibrary = struct {
                     .notes = try cacheStringList(a, json_util.field(e.value_ptr.*, "notes") orelse Value.null),
                     .deprecated = json_util.boolean(e.value_ptr.*, "deprecated") orelse false,
                     .filename = try a.dupe(u8, json_util.string(e.value_ptr.*, "filename") orelse ""),
-                    .options = options,
+                    .options = try options.toOwnedSlice(a),
                 });
             }
         }
 
         self.ready = true;
         return true;
-    }
-
-    /// Caller holds the lock and transfers options ownership on success.
-    /// Replacements retain old map storage for previously borrowed Modules.
-    fn storeModule(self: *DocsLibrary, module: Module) !void {
-        const replacing = self.modules.contains(module.name);
-        if (replacing) try self.retained_options.ensureUnusedCapacity(self.allocator, 1);
-        if (try self.modules.fetchPut(module.name, module)) |old|
-            self.retained_options.appendAssumeCapacity(old.value.options);
     }
 
     fn fetchOne(self: *DocsLibrary, name: []const u8) !void {
@@ -394,14 +383,12 @@ pub const DocsLibrary = struct {
         while (it.next()) |e| {
             const doc = json_util.field(e.value_ptr.*, "doc") orelse continue;
             const filename = json_util.string(doc, "filename") orelse "";
-            var options = std.StringHashMap(Option).init(self.allocator);
-            errdefer options.deinit();
+            var options = std.ArrayList(Option).empty;
             if (json_util.object(doc, "options")) |opts| {
                 var oi = opts.iterator();
                 while (oi.next()) |opt| {
-                    const opt_name = try a.dupe(u8, opt.key_ptr.*);
-                    try options.put(opt_name, .{
-                        .name = opt_name,
+                    try options.append(a, .{
+                        .name = try a.dupe(u8, opt.key_ptr.*),
                         .description = try a.dupe(u8, descriptionOf(opt.value_ptr.*) orelse ""),
                         .type = try a.dupe(u8, json_util.string(opt.value_ptr.*, "type") orelse ""),
                         .required = json_util.boolean(opt.value_ptr.*, "required") orelse false,
@@ -412,7 +399,7 @@ pub const DocsLibrary = struct {
                 }
             }
             const stored_name = try a.dupe(u8, e.key_ptr.*);
-            try self.storeModule(.{
+            try self.modules.put(stored_name, .{
                 .name = stored_name,
                 .description = try a.dupe(u8, shortDescriptionOf(doc) orelse ""),
                 .long_description = try stringList(a, json_util.field(doc, "description") orelse Value.null),
@@ -420,7 +407,7 @@ pub const DocsLibrary = struct {
                 .notes = try stringList(a, json_util.field(doc, "notes") orelse Value.null),
                 .deprecated = json_util.field(doc, "deprecated") != null,
                 .filename = try a.dupe(u8, filename),
-                .options = options,
+                .options = try options.toOwnedSlice(a),
             });
         }
     }

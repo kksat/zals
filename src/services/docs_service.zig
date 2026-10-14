@@ -152,11 +152,13 @@ test "bootstrap remains pending until readiness is consumed" {
     try std.testing.expect(!service.takeReadyEvent());
 }
 
-/// Per-file module libraries. Each ordered path/cwd identity owns an immutable
-/// subprocess environment and its own in-memory docs. Never load/save these
-/// libraries through the process-wide, version-only disk cache: identical FQCNs
-/// may resolve to different files in different Workspaces or configurations.
-/// Created/read on the main thread; no background task borrows these snapshots.
+/// Contextual module libraries. Each ordered path/cwd identity (shared across
+/// files with the same effective config or Workspace root and collection paths)
+/// owns an immutable subprocess environment and its own in-memory docs. Never
+/// load/save these libraries through the process-wide, version-only disk cache:
+/// identical FQCNs may resolve to different files in different Workspaces or
+/// configurations. Created/read on the main thread; no background task borrows
+/// these snapshots.
 pub const ContextLibraries = struct {
     const ContextLibrary = struct {
         lib: DocsLibrary,
@@ -219,6 +221,34 @@ pub const ContextLibraries = struct {
         return &context.lib;
     }
 };
+
+test "ContextLibraries shares one library for identical cwd and collections paths" {
+    const Fake = struct {
+        calls: usize = 0,
+        fn run(ptr: *anyopaque, a: Allocator, argv: []const []const u8) anyerror!exec.Result {
+            return runWithOptions(ptr, a, argv, .{});
+        }
+        fn runWithOptions(ptr: *anyopaque, a: Allocator, _: []const []const u8, _: exec.Options) anyerror!exec.Result {
+            const self: *@This() = @ptrCast(@alignCast(ptr));
+            self.calls += 1;
+            return .{
+                .stdout = try a.dupe(u8, "{}"),
+                .stderr = try a.dupe(u8, ""),
+                .term = .{ .Exited = 0 },
+            };
+        }
+        const vtable = exec.Runner.VTable{ .run = run, .run_with_options = runWithOptions };
+    };
+    var fake = Fake{};
+    const runner = exec.Runner{ .ptr = &fake, .vtable = &Fake.vtable };
+    var libs = ContextLibraries.init(std.testing.allocator, runner);
+    defer libs.deinit();
+
+    const p1 = try libs.forPaths(&.{"/ws/.venv"}, "/ws");
+    const p2 = try libs.forPaths(&.{"/ws/.venv"}, "/ws");
+    try std.testing.expectEqual(p1, p2);
+    try std.testing.expectEqual(@as(usize, 1), libs.libraries.count());
+}
 
 /// Derive a cache fingerprint from the installed Ansible version. Returns null
 /// when the version cannot be determined (caching is then disabled).
