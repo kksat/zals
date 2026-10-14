@@ -92,9 +92,9 @@ pub const Cache = struct {
         const line = std.mem.count(u8, file.text[0..@min(binding.start, file.text.len)], "\n") + 1;
         if (!file.parsed) {
             file.parsed = true;
-            // Parser storage is explicitly released, not backed by the request
-            // arena. Source bytes remain captured for the whole request.
-            file.forest = yaml.parse(std.heap.page_allocator, file.text) catch null;
+            // Parser storage is explicitly released on cache teardown via
+            // forest.deinit(), avoiding page_allocator mmap churn.
+            file.forest = yaml.parse(self.allocator, file.text) catch null;
         }
         if (file.forest) |*forest| {
             for (forest.roots) |root| {

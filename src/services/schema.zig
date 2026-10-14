@@ -47,19 +47,19 @@ fn walk(arena: Allocator, out: *std.array_list.Managed(Diagnostic), schema: Valu
         for (all.items) |sub| try walk(arena, out, sub, instance, root);
     }
     if (json_util.array(sch, "anyOf")) |any| {
-        if (!matchesAny(any.items, instance, root)) {
+        if (!matchesAny(arena, any.items, instance, root)) {
             try out.append(.{ .message = "Value is not accepted. Valid values:" });
         }
     }
     if (json_util.array(sch, "oneOf")) |one| {
         var hits: usize = 0;
         for (one.items) |sub| {
-            if (matchesSchema(sub, instance, root)) hits += 1;
+            if (matchesSchema(arena, sub, instance, root)) hits += 1;
         }
         if (hits != 1) try out.append(.{ .message = "Value is not accepted. Valid values:" });
     }
     if (json_util.field(sch, "not")) |n| {
-        if (matchesSchema(n, instance, root)) {
+        if (matchesSchema(arena, n, instance, root)) {
             try out.append(.{ .message = "Value is not accepted. Valid values:" });
         }
     }
@@ -122,19 +122,107 @@ fn walk(arena: Allocator, out: *std.array_list.Managed(Diagnostic), schema: Valu
     }
 }
 
-fn matchesAny(options: []const Value, instance: Value, root: Value) bool {
+fn matchesAny(arena: Allocator, options: []const Value, instance: Value, root: Value) bool {
     for (options) |sub| {
-        if (matchesSchema(sub, instance, root)) return true;
+        if (matchesSchema(arena, sub, instance, root)) return true;
     }
     return false;
 }
 
-fn matchesSchema(schema: Value, instance: Value, root: Value) bool {
-    var dummy = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer dummy.deinit();
-    var out = std.array_list.Managed(Diagnostic).init(dummy.allocator());
-    walk(dummy.allocator(), &out, schema, instance, root) catch return false;
-    return out.items.len == 0;
+fn matchesSchema(arena: Allocator, schema: Value, instance: Value, root: Value) bool {
+    const sch = resolveRef(schema, root);
+
+    if (json_util.string(sch, "type")) |ty| {
+        if (!typeMatches(ty, instance)) return false;
+    }
+
+    if (json_util.array(sch, "enum")) |en| {
+        var ok = false;
+        for (en.items) |choice| {
+            if (valuesEqual(choice, instance)) {
+                ok = true;
+                break;
+            }
+        }
+        if (!ok) return false;
+    }
+
+    if (json_util.field(sch, "const")) |c| {
+        if (!valuesEqual(c, instance)) return false;
+    }
+
+    if (json_util.array(sch, "allOf")) |all| {
+        for (all.items) |sub| {
+            if (!matchesSchema(arena, sub, instance, root)) return false;
+        }
+    }
+    if (json_util.array(sch, "anyOf")) |any| {
+        if (!matchesAny(arena, any.items, instance, root)) return false;
+    }
+    if (json_util.array(sch, "oneOf")) |one| {
+        var hits: usize = 0;
+        for (one.items) |sub| {
+            if (matchesSchema(arena, sub, instance, root)) hits += 1;
+        }
+        if (hits != 1) return false;
+    }
+    if (json_util.field(sch, "not")) |n| {
+        if (matchesSchema(arena, n, instance, root)) return false;
+    }
+    if (instance == .string) {
+        if (json_util.integer(sch, "minLength")) |min| {
+            if (instance.string.len < @as(usize, @intCast(min))) return false;
+        }
+        if (json_util.string(sch, "pattern")) |pat| {
+            var scratch = std.heap.ArenaAllocator.init(arena);
+            defer scratch.deinit();
+            const ok = regex.matches(scratch.allocator(), pat, instance.string) catch |err| switch (err) {
+                error.InvalidPattern => true,
+                error.OutOfMemory => return false,
+            };
+            if (!ok) return false;
+        }
+    }
+    if (instance == .array) {
+        if (json_util.field(sch, "items")) |items_schema| {
+            for (instance.array.items) |item| {
+                if (!matchesSchema(arena, items_schema, item, root)) return false;
+            }
+        }
+    }
+
+    if (instance != .object) return true;
+    const obj = instance.object;
+
+    if (json_util.array(sch, "required")) |req| {
+        for (req.items) |r| {
+            const name = switch (r) {
+                .string => |s| s,
+                else => continue,
+            };
+            if (obj.get(name) == null) return false;
+        }
+    }
+
+    const props = json_util.object(sch, "properties");
+    const additional = json_util.field(sch, "additionalProperties");
+    var it = obj.iterator();
+    while (it.next()) |e| {
+        if (props) |p| {
+            if (p.get(e.key_ptr.*)) |sub| {
+                if (!matchesSchema(arena, sub, e.value_ptr.*, root)) return false;
+                continue;
+            }
+        }
+        if (additional) |add| {
+            switch (add) {
+                .bool => |b| if (!b) return false,
+                .object => if (!matchesSchema(arena, add, e.value_ptr.*, root)) return false,
+                else => {},
+            }
+        }
+    }
+    return true;
 }
 
 fn resolveRef(schema: Value, root: Value) Value {
@@ -206,4 +294,32 @@ test "pattern keyword" {
     const bad = try std.json.parseFromSlice(Value, allocator, "{\"name\":\"Bad-Name\"}", .{});
     defer bad.deinit();
     try std.testing.expectEqual(@as(usize, 1), (try validate(arena.allocator(), parsed_schema.value, bad.value)).len);
+}
+
+test "anyOf oneOf not combinators without diagnostic allocation churn" {
+    const allocator = std.testing.allocator;
+    const schema_json =
+        \\{"type":"object","properties":{"val":{"anyOf":[{"type":"string","pattern":"^[a-z]+$"},{"type":"integer"}],"oneOf":[{"type":"string"},{"type":"integer"}],"not":{"const":"forbidden"}}}}
+    ;
+    const parsed_schema = try std.json.parseFromSlice(Value, allocator, schema_json, .{});
+    defer parsed_schema.deinit();
+
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    const good_str = try std.json.parseFromSlice(Value, allocator, "{\"val\":\"allowed\"}", .{});
+    defer good_str.deinit();
+    try std.testing.expectEqual(@as(usize, 0), (try validate(arena.allocator(), parsed_schema.value, good_str.value)).len);
+
+    const good_int = try std.json.parseFromSlice(Value, allocator, "{\"val\":42}", .{});
+    defer good_int.deinit();
+    try std.testing.expectEqual(@as(usize, 0), (try validate(arena.allocator(), parsed_schema.value, good_int.value)).len);
+
+    const bad_not = try std.json.parseFromSlice(Value, allocator, "{\"val\":\"forbidden\"}", .{});
+    defer bad_not.deinit();
+    try std.testing.expectEqual(@as(usize, 1), (try validate(arena.allocator(), parsed_schema.value, bad_not.value)).len);
+
+    const bad_any = try std.json.parseFromSlice(Value, allocator, "{\"val\":\"UPPER\"}", .{});
+    defer bad_any.deinit();
+    try std.testing.expectEqual(@as(usize, 1), (try validate(arena.allocator(), parsed_schema.value, bad_any.value)).len);
 }

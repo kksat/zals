@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const zals = @import("zals");
 
 const version = "0.1.0"; // x-release-please-version
@@ -52,9 +53,12 @@ fn applyLogLevel(level: zals.cli.LogLevel) std.log.Level {
 }
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    var gpa: if (builtin.mode == .Debug) std.heap.GeneralPurposeAllocator(.{}) else void =
+        if (builtin.mode == .Debug) .{} else {};
+    defer if (builtin.mode == .Debug) {
+        _ = gpa.deinit();
+    };
+    const allocator = if (builtin.mode == .Debug) gpa.allocator() else std.heap.c_allocator;
 
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
