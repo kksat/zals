@@ -1,7 +1,8 @@
 //! Helpers for building and queuing outgoing JSON-RPC messages.
 //!
 //! Production output goes through Writer so every message shares one FIFO and
-//! framing owner. It copies serialized bytes before the request arena expires.
+//! framing owner. Serialized bytes are allocated directly with the writer's
+//! allocator and transferred before the request arena expires.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -10,8 +11,9 @@ const json_util = @import("json_util.zig");
 const Writer = @import("writer.zig").Writer;
 
 pub fn sendValue(writer: *Writer, a: Allocator, value: Value) !void {
-    const bytes = try std.json.Stringify.valueAlloc(a, value, .{});
-    try writer.writeMessage(bytes);
+    _ = a;
+    const bytes = try std.json.Stringify.valueAlloc(writer.allocator, value, .{});
+    try writer.writeMessageOwned(bytes);
 }
 
 pub fn sendResult(writer: *Writer, a: Allocator, id: Value, result: Value) !void {

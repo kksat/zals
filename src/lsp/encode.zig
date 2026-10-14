@@ -18,8 +18,8 @@ pub fn hover(a: Allocator, item: ?types.Hover) !Value {
 }
 
 pub fn completionList(a: Allocator, list: types.CompletionList) !Value {
-    var items = std.json.Array.init(a);
-    for (list.items) |item| try items.append(try completionItem(a, item));
+    var items = try std.json.Array.initCapacity(a, list.items.len);
+    for (list.items) |item| items.appendAssumeCapacity(try completionItem(a, item));
     var obj = json_util.obj(a);
     try obj.put("isIncomplete", json_util.booleanValue(list.isIncomplete));
     try obj.put("items", .{ .array = items });
@@ -48,17 +48,17 @@ pub fn markup(a: Allocator, doc: types.MarkupContent) !Value {
 }
 
 pub fn semanticTokens(a: Allocator, tokens: []const types.AbsoluteToken) !Value {
-    var data = std.json.Array.init(a);
+    var data = try std.json.Array.initCapacity(a, tokens.len * 5);
     var prev_line: u32 = 0;
     var prev_start: u32 = 0;
     for (tokens) |t| {
         const dline = t.line - prev_line;
         const dstart: u32 = if (t.line == prev_line) t.start - prev_start else t.start;
-        try data.append(json_util.num(dline));
-        try data.append(json_util.num(dstart));
-        try data.append(json_util.num(t.length));
-        try data.append(json_util.num(t.kind));
-        try data.append(json_util.num(t.mods));
+        data.appendAssumeCapacity(json_util.num(dline));
+        data.appendAssumeCapacity(json_util.num(dstart));
+        data.appendAssumeCapacity(json_util.num(t.length));
+        data.appendAssumeCapacity(json_util.num(t.kind));
+        data.appendAssumeCapacity(json_util.num(t.mods));
         prev_line = t.line;
         prev_start = t.start;
     }
@@ -80,8 +80,8 @@ pub fn optionalLocation(a: Allocator, loc: ?types.Location) !Value {
 }
 
 pub fn locations(a: Allocator, locs: []const types.Location) !Value {
-    var arr = std.json.Array.init(a);
-    for (locs) |loc| try arr.append(try location(a, loc));
+    var arr = try std.json.Array.initCapacity(a, locs.len);
+    for (locs) |loc| arr.appendAssumeCapacity(try location(a, loc));
     return .{ .array = arr };
 }
 
