@@ -48,6 +48,9 @@ pub const Cursor = struct {
 pub const Index = struct {
     allocator: Allocator,
     source: FileSource,
+    scans: std.StringHashMapUnmanaged(FileScan) = .empty,
+    role_roots: std.StringHashMapUnmanaged(?[]const u8) = .empty,
+    file_sets: std.StringHashMapUnmanaged(FileSet) = .empty,
 
     pub fn init(allocator: Allocator, source: FileSource) Index {
         return .{ .allocator = allocator, .source = source };
@@ -212,29 +215,58 @@ pub const Index = struct {
         references: []jinja.Ident,
         field_refs: []jinja.Ident = &.{},
         field_defs: []@import("fields.zig").Definition = &.{},
+        loads: []const scope.VarFileLoad = &.{},
     };
 
+    fn cachedRoleRoot(self: *Index, a: Allocator, path: []const u8) !?[]const u8 {
+        const dir = std.fs.path.dirname(path) orelse return null;
+        if (self.role_roots.get(dir)) |root| return root;
+        const root = scope.roleRoot(a, self.source, path);
+        try self.role_roots.put(a, try a.dupe(u8, dir), root);
+        return root;
+    }
+
     fn scanFile(self: *Index, a: Allocator, uri: []const u8, path: []const u8) !FileScan {
-        const text = (try self.source.read(a, uri)) orelse return .{ .definitions = &.{}, .references = &.{} };
-        var forest = yaml.parse(a, text) catch return .{ .definitions = &.{}, .references = &.{} };
+        if (self.scans.get(uri)) |cached| return cached;
+
+        const text = (try self.source.read(a, uri)) orelse {
+            const empty = FileScan{ .definitions = &.{}, .references = &.{} };
+            try self.scans.put(a, try a.dupe(u8, uri), empty);
+            return empty;
+        };
+        defer a.free(text);
+        var forest = yaml.parse(a, text) catch {
+            const empty = FileScan{ .definitions = &.{}, .references = &.{} };
+            try self.scans.put(a, try a.dupe(u8, uri), empty);
+            return empty;
+        };
         defer forest.deinit();
+        const scratch = forest.allocator();
 
-        var defs = std.array_list.Managed(Definition).init(a);
-        try definitions_mod.collect(a, &forest, scope.fileKind(path, scope.roleRoot(a, self.source, path)), &defs);
+        const role_root = try self.cachedRoleRoot(a, path);
+        const kind = scope.fileKind(path, role_root);
 
-        var refs = std.array_list.Managed(jinja.Ident).init(a);
-        for (forest.roots) |root| try collectRefs(a, root, forest.text, &refs);
+        var defs = std.array_list.Managed(Definition).init(scratch);
+        try definitions_mod.collect(scratch, &forest, kind, &defs);
 
-        var field_refs = std.array_list.Managed(jinja.Ident).init(a);
-        try collectFieldReferences(a, &forest, &field_refs);
+        var refs = std.array_list.Managed(jinja.Ident).init(scratch);
+        for (forest.roots) |root| try collectRefs(scratch, root, forest.text, &refs);
+
+        var field_refs = std.array_list.Managed(jinja.Ident).init(scratch);
+        try collectFieldReferences(scratch, &forest, &field_refs);
         var field_defs = std.array_list.Managed(@import("fields.zig").Definition).init(a);
-        try @import("fields.zig").collect(a, &forest, path, scope.fileKind(path, scope.roleRoot(a, self.source, path)), &field_defs);
-        return .{
+        try @import("fields.zig").collectFromDefinitions(a, &forest, path, kind, defs.items, &field_defs);
+        const loads = scope.varFileLoads(a, &forest, path, null) catch &.{};
+
+        const scan = FileScan{
             .definitions = try dupeDefinitions(a, defs.items),
             .references = try dupeIdents(a, refs.items),
             .field_refs = try dupeIdents(a, field_refs.items),
             .field_defs = try field_defs.toOwnedSlice(),
+            .loads = loads,
         };
+        try self.scans.put(a, try a.dupe(u8, uri), scan);
+        return scan;
     }
 
     /// The file set for `uri`: the role's conventional dirs, or the playbook
@@ -246,10 +278,21 @@ pub const Index = struct {
 
     fn fileSet(self: *Index, a: Allocator, uri: []const u8) !FileSet {
         const path = try scope.uriToPath(a, uri);
+        const role_root = try self.cachedRoleRoot(a, path);
+        const cache_key = role_root orelse uri;
+        if (self.file_sets.get(cache_key)) |cached| return cached;
+
         var base = std.array_list.Managed([]const u8).init(a);
-        if (scope.roleRoot(a, self.source, path)) |root| {
+        if (role_root) |root| {
             const role_files = try scope.enumerateFiles(a, self.source, root);
-            for (role_files) |f| try base.append(try scope.pathToUri(a, f));
+            for (role_files) |f| {
+                if (std.fs.path.dirname(f)) |f_dir| {
+                    if (!self.role_roots.contains(f_dir)) {
+                        try self.role_roots.put(a, try a.dupe(u8, f_dir), root);
+                    }
+                }
+                try base.append(try scope.pathToUri(a, f));
+            }
         } else {
             try base.append(try a.dupe(u8, uri));
         }
@@ -260,17 +303,16 @@ pub const Index = struct {
 
         for (base.items) |u| {
             const p = try scope.uriToPath(a, u);
-            const text = (try self.source.read(a, u)) orelse continue;
-            var forest = yaml.parse(a, text) catch continue;
-            defer forest.deinit();
-            const targets = try scope.varFileLoads(a, &forest, p, null);
-            for (targets) |load| {
+            const scan = try self.scanFile(a, u, p);
+            for (scan.loads) |load| {
                 try loads.append(load);
                 const target_uri = try scope.pathToUri(a, load.path);
                 try appendUnique(a, &all, target_uri);
             }
         }
-        return .{ .uris = try all.toOwnedSlice(), .loads = try loads.toOwnedSlice() };
+        const set = FileSet{ .uris = try all.toOwnedSlice(), .loads = try loads.toOwnedSlice() };
+        try self.file_sets.put(a, try a.dupe(u8, cache_key), set);
+        return set;
     }
 };
 
@@ -382,9 +424,11 @@ const testing = std.testing;
 /// derived from the file paths.
 const MapSource = struct {
     files: std.StringHashMap([]const u8),
+    reads: usize = 0,
 
     fn read(ptr: *anyopaque, allocator: Allocator, uri: []const u8) anyerror!?[]const u8 {
         const self: *MapSource = @ptrCast(@alignCast(ptr));
+        self.reads += 1;
         const text = self.files.get(uri) orelse return null;
         return try allocator.dupe(u8, text);
     }
@@ -639,4 +683,28 @@ test "fixture playbook scope is the file alone" {
     const app_port = try index.occurrences(a, uri, "app_port");
     try testing.expectEqual(@as(usize, 1), app_port.len);
     try testing.expectEqual(Site.role_param, app_port[0].site.?);
+}
+
+test "Index memoizes file scans and role roots across queries" {
+    var files = std.StringHashMap([]const u8).init(testing.allocator);
+    defer files.deinit();
+    try files.put("file:///r/meta/main.yml", "---\n");
+    try files.put("file:///r/defaults/main.yml", "app: { port: 8080 }\n");
+    try files.put("file:///r/tasks/main.yml", "- debug: msg=\"{{ app.port }}\"\n");
+    var src = MapSource{ .files = files };
+
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    var index = Index.init(a, src.source());
+    const occ = try index.occurrences(a, "file:///r/tasks/main.yml", "app");
+    try testing.expectEqual(@as(usize, 2), occ.len);
+    const reads_after_first = src.reads;
+    // 1 read for isRoleRoot(meta/main.yml) + 3 reads for the 3 role files (not re-read in occurrences after fileSet)
+    try testing.expectEqual(@as(usize, 4), reads_after_first);
+
+    const field_occ = try index.fieldOccurrences(a, "file:///r/tasks/main.yml", "port");
+    try testing.expectEqual(@as(usize, 2), field_occ.len);
+    try testing.expectEqual(reads_after_first, src.reads);
 }

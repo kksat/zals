@@ -21,7 +21,9 @@ pub const Span = struct {
 
 pub fn collect(a: Allocator, forest: *const yaml.Forest, path: []const u8) ![]Span {
     var out = std.array_list.Managed(Span).init(a);
-    var ctx = Ctx{ .a = a, .text = forest.text, .out = &out };
+    var path_stack = std.array_list.Managed(*Node).init(a);
+    defer path_stack.deinit();
+    var ctx = Ctx{ .a = a, .text = forest.text, .out = &out, .path = &path_stack };
     const base = std.fs.path.basename(path);
     const is_galaxy = std.mem.eql(u8, base, "galaxy.yml") or std.mem.eql(u8, base, "galaxy.yaml");
     for (forest.roots) |r| {
@@ -60,10 +62,13 @@ const Ctx = struct {
     a: Allocator,
     text: []const u8,
     out: *std.array_list.Managed(Span),
+    path: *std.array_list.Managed(*Node),
 
     /// `in_task_list`: `node` is an item of a sequence, so its keys may be
     /// module keys.
     fn walk(self: *Ctx, node: *Node, in_task_list: bool) !void {
+        try self.path.append(node);
+        defer _ = self.path.pop();
         switch (node.kind) {
             .map => for (node.items) |pair| {
                 const key_node = pair.key orelse continue;
@@ -85,22 +90,22 @@ const Ctx = struct {
                         }
                     }
                 }
+                try self.path.append(pair);
+                defer _ = self.path.pop();
                 try self.walk(val, false);
             },
             .seq => for (node.items) |item| {
-                if (item.isScalar()) try self.roleFqcn(item);
                 try self.walk(item, true);
             },
             .pair => {},
-            .scalar => try self.roleFqcn(node),
+            .scalar => try self.roleFqcn(),
             else => {},
         }
     }
 
     /// A role reference that is an FQCN contributes its collection prefix.
-    fn roleFqcn(self: *Ctx, node: *Node) !void {
-        const path = try ancestors(self.a, node);
-        const ref = role_reference.detect(path, self.text) orelse return;
+    fn roleFqcn(self: *Ctx) !void {
+        const ref = role_reference.detect(self.path.items, self.text) orelse return;
         const prefix = fqcnPrefix(ref.name) orelse return;
         try self.append(prefix, ref.start);
     }
@@ -138,17 +143,6 @@ const Ctx = struct {
         try self.out.append(.{ .name = try self.a.dupe(u8, name), .start = start, .end = start + name.len });
     }
 };
-
-fn ancestors(a: Allocator, node: *Node) ![]*Node {
-    var buf = std.array_list.Managed(*Node).init(a);
-    var n: ?*Node = node;
-    while (n) |cur| {
-        try buf.append(cur);
-        n = cur.parent;
-    }
-    std.mem.reverse(*Node, buf.items);
-    return buf.toOwnedSlice();
-}
 
 fn isIdentChar(c: u8) bool {
     return std.ascii.isAlphanumeric(c) or c == '_';

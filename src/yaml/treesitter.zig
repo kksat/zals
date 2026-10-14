@@ -193,6 +193,11 @@ fn convertSingle(a: Allocator, text: []const u8, node: c.TSNode) !*Node {
     var inner = raw;
     if (inner.len >= 2 and inner[0] == '\'' and inner[inner.len - 1] == '\'')
         inner = inner[1 .. inner.len - 1];
+    if (std.mem.indexOf(u8, inner, "''") == null) {
+        const out = try a.create(Node);
+        out.* = .{ .kind = .scalar, .start = start(node), .end = end(node), .value = inner };
+        return out;
+    }
     const buf = try a.alloc(u8, inner.len);
     var j: usize = 0;
     var i: usize = 0;
@@ -216,6 +221,11 @@ fn convertDouble(a: Allocator, text: []const u8, node: c.TSNode) !*Node {
     var inner = raw;
     if (inner.len >= 2 and inner[0] == '"' and inner[inner.len - 1] == '"')
         inner = inner[1 .. inner.len - 1];
+    if (std.mem.indexOfScalar(u8, inner, '\\') == null) {
+        const out = try a.create(Node);
+        out.* = .{ .kind = .scalar, .start = start(node), .end = end(node), .value = inner };
+        return out;
+    }
     var buf = std.ArrayList(u8).empty;
     var i: usize = 0;
     while (i < inner.len) : (i += 1) {
@@ -328,6 +338,12 @@ test "tree-sitter parses a playbook" {
     try std.testing.expect(play.isMap());
     try std.testing.expectEqualStrings("hosts", play.items[0].key.?.value.?);
     try std.testing.expectEqualStrings("all", play.items[0].val.?.value.?);
+    const tasks = dom.findPair(play, "tasks").?.val.?;
+    const ping = dom.findPair(tasks.items[0], "ansible.builtin.ping").?.val.?;
+    const data_val = dom.findPair(ping, "data").?.val.?.stringValue().?;
+    try std.testing.expectEqualStrings("hello", data_val);
+    try std.testing.expect(@intFromPtr(data_val.ptr) >= @intFromPtr(src.ptr) and
+        @intFromPtr(data_val.ptr) + data_val.len <= @intFromPtr(src.ptr) + src.len);
 }
 
 fn checkAcyclic(node: *const Node, depth: usize) !void {

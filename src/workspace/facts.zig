@@ -134,7 +134,7 @@ fn extractDependencyWithParser(a: Allocator, parser_allocator: Allocator, root: 
     const refs = try internIdents(a, &interner, idents.items);
 
     var raw_field_defs = std.array_list.Managed(variables.fields.Definition).init(scratch);
-    variables.fields.collect(scratch, &forest, path, kind, &raw_field_defs) catch {};
+    variables.fields.collectFromDefinitions(scratch, &forest, path, kind, raw_defs.items, &raw_field_defs) catch {};
     const field_defs = try internFieldDefinitions(a, &interner, raw_field_defs.items);
 
     var field_idents = std.array_list.Managed(variables.jinja.Ident).init(scratch);
@@ -142,7 +142,8 @@ fn extractDependencyWithParser(a: Allocator, parser_allocator: Allocator, root: 
     const field_refs = try internIdents(a, &interner, field_idents.items);
 
     var raw_role_refs = std.array_list.Managed(RoleRef).init(scratch);
-    for (forest.roots) |r| try walkRoleRefs(a, &interner, &forest, path, r, &raw_role_refs);
+    var role_path = std.array_list.Managed(*Node).init(scratch);
+    for (forest.roots) |r| try walkRoleRefs(a, &interner, &forest, path, r, &role_path, &raw_role_refs);
     const role_refs: []const RoleRef = if (raw_role_refs.items.len == 0) &.{} else try a.dupe(RoleRef, raw_role_refs.items);
 
     const sym = symbols.collect(scratch, &forest, path) catch symbols.Result{};
@@ -291,12 +292,21 @@ fn internCollectionSpans(a: Allocator, interner: *Interner, spans: []const colle
 
 /// Visit every scalar and keep those `roles.reference.detect` recognises, so
 /// the index and the cursor agree on what a role reference is.
-fn walkRoleRefs(a: Allocator, interner: *Interner, forest: *yaml.Forest, file_path: []const u8, node: *Node, out: *std.array_list.Managed(RoleRef)) !void {
+fn walkRoleRefs(
+    a: Allocator,
+    interner: *Interner,
+    forest: *yaml.Forest,
+    file_path: []const u8,
+    node: *Node,
+    path: *std.array_list.Managed(*Node),
+    out: *std.array_list.Managed(RoleRef),
+) !void {
+    try path.append(node);
+    defer _ = path.pop();
     switch (node.kind) {
         .scalar => {
-            const path = try ancestors(forest.allocator(), node);
-            if (role_reference.detect(path, forest.text)) |ref| {
-                const declared = try yaml.collections.getRoleDeclaredCollections(forest.allocator(), file_path, path);
+            if (role_reference.detect(path.items, forest.text)) |ref| {
+                const declared = try yaml.collections.getRoleDeclaredCollections(forest.allocator(), file_path, path.items);
                 const collections: []const []const u8 = if (declared.len == 0) &.{} else blk: {
                     const cols = try a.alloc([]const u8, declared.len);
                     for (declared, 0..) |name, i| cols[i] = try interner.get(name);
@@ -310,8 +320,8 @@ fn walkRoleRefs(a: Allocator, interner: *Interner, forest: *yaml.Forest, file_pa
                 });
             }
         },
-        .map, .seq => for (node.items) |item| try walkRoleRefs(a, interner, forest, file_path, item, out),
-        .pair => if (node.val) |v| try walkRoleRefs(a, interner, forest, file_path, v, out),
+        .map, .seq => for (node.items) |item| try walkRoleRefs(a, interner, forest, file_path, item, path, out),
+        .pair => if (node.val) |v| try walkRoleRefs(a, interner, forest, file_path, v, path, out),
         else => {},
     }
 }
