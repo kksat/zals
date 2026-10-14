@@ -48,12 +48,23 @@ Use **Google release-please** to drive releases from
   VSIX, verifies the 15-asset contract and matching bundled binary bytes,
   and attaches all assets plus `SHA256SUMS` to GitHub.
 - Packaging defaults to **GitHub only**. Manual dispatch inputs
-  `publish_pypi` and `publish_homebrew` explicitly opt into external publishing;
-  credentials alone never enable it. Marketplace and Open VSX remain disabled.
+  `publish_pypi`, `publish_homebrew`, `publish_vscode`, and `publish_openvsx`
+  explicitly opt into external publishing; credentials alone never enable it.
 - `publish_existing` skips rebuilding and reuses the existing GitHub release.
   Publication checks all 15 assets and `SHA256SUMS` before distributing them.
   PyPI uses OIDC trusted publishing configured for `release.yml`, uploading all
   five wheels. Existing files are skipped to make retries safe.
+- Marketplace and Open VSX upload all five verified VSIXs without rebuilding or
+  modifying them. Both use locked npm clients from the workflow revision and
+  skip duplicate versions to support partial-publication retries. Marketplace
+  follows Microsoft's secure automated publishing approach: GitHub OIDC
+  federates to a user-assigned Azure managed identity via `azure/login`, then
+  `vsce publish --azure-credential` uses the Azure CLI session. Its job grants
+  `id-token: write` at job scope and uses the protected `vscode-marketplace` environment.
+  Open VSX uses `OVSX_PAT`, scoped only to its credential check/upload steps.
+  Registries are independent; a failure does not roll back another registry.
+  See [setup instructions](../vscode-publishing.md) for federation and publisher
+  authorization.
 - Homebrew renders `Formula/zals.rb` from the workflow revision's template
   and the tagged release's verified archive SHA-256s, then commits it to `kksat/homebrew-tap` (Homebrew's
   `kksat/tap`). `HOMEBREW_TAP_TOKEN` is required; `HOMEBREW_TAP_REPO` can override
@@ -74,9 +85,13 @@ flow through release-please.
 - Windows support required making the transport, writer, logging, and cache
   directory portable (`std.fs.File` instead of raw POSIX fds,
   `std.process.getEnvVarOwned` instead of `std.posix.getenv`).
-- External publication is opt-in and independent for PyPI and Homebrew.
+- External publication is opt-in and independent for each registry.
   Existing verified GitHub assets can be published without moving a tag or
-  replacing assets. VSIXs continue to be installed locally.
+  replacing assets. VSIXs can still be installed locally.
+- Marketplace publishing stores no long-lived PAT/client secret. It requires
+  one-time Azure federation and Marketplace identity authorization, plus GitHub
+  environment branch restrictions. Open VSX requires namespace authorization
+  and a repository token secret.
 - A public tap does not expose private GitHub release binaries; if the source
   repository remains private, installing the formula needs release access.
 - The Python wrapper and VS Code client do not reimplement the server; they

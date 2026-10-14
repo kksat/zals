@@ -197,8 +197,8 @@ server, Python, and VS Code versions in lockstep. Merging that PR creates the
 
 The **release** workflow defaults to **GitHub-only** packaging. It builds five
 native binary archives, five Python wheels, five platform-specific VSIX packages,
-and `SHA256SUMS`. PyPI and Homebrew publishing require explicit manual inputs;
-Visual Studio Marketplace and Open VSX publishing remain disabled.
+and `SHA256SUMS`. PyPI, Homebrew, Visual Studio Marketplace, and Open VSX
+publishing require explicit manual inputs.
 
 To bootstrap or rebuild a release, push the version tag, then run:
 
@@ -230,6 +230,21 @@ The initial GitHub `0.1.0` wheels contain an invalid legacy classifier; PyPI
 preparation corrects only that metadata and regenerates wheel `RECORD` hashes.
 Bundled binaries, package versions, the release tag, and GitHub assets remain
 unchanged. New releases use the corrected source metadata directly.
+
+To publish verified VSIXs to Visual Studio Marketplace and/or Open VSX:
+
+```sh
+gh workflow run release.yml --ref main -f tag=v0.1.0 \
+  -f publish_existing=true -f publish_vscode=true -f publish_openvsx=true
+```
+
+Each registry is independently opt-in. Marketplace uses Microsoft Entra ID with
+GitHub OIDC (no PAT); Open VSX uses the `OVSX_PAT` repository secret. Both upload
+all five existing platform packages and skip already-published versions on
+retry. See [VS Code publishing setup](docs/vscode-publishing.md) for the Azure
+managed identity, protected GitHub environment, publisher authorization, and
+Open VSX namespace requirements. Until setup and an explicit publishing run
+succeed, install VSIXs from GitHub as above.
 
 The tap is public, but the formula downloads binaries from the GitHub release.
 If this repository is private, Homebrew installation needs access to those

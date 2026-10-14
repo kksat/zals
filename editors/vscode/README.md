@@ -35,8 +35,11 @@ This extension exposes the native `ansible.*` settings accepted by `zals`:
 
 ## Install and develop
 
-Releases currently publish VSIXs only to GitHub, not to an extension registry.
-Download the package matching the VS Code host platform and use
+Releases publish VSIXs to GitHub by default. Maintainers can opt into publishing
+those verified packages to Visual Studio Marketplace and Open VSX; see the
+[registry publishing setup](../../docs/vscode-publishing.md).
+For local installation, download the package matching the VS Code host platform
+and use
 **Extensions: Install from VSIX...**. For remote development, choose the remote
 host's platform, not the local desktop's.
 

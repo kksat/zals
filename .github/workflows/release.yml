@@ -1,6 +1,6 @@
 name: release
 
-# Packaging defaults to GitHub only; PyPI and Homebrew publication are opt-in.
+# Packaging defaults to GitHub only; external publication is opt-in.
 # Tagged sources/assets are used even when manually dispatched from main.
 on:
   release:
@@ -21,6 +21,14 @@ on:
         default: false
       publish_homebrew:
         description: "Publish the verified formula to kksat/tap"
+        type: boolean
+        default: false
+      publish_vscode:
+        description: "Publish verified VSIXs to Visual Studio Marketplace using Microsoft Entra ID"
+        type: boolean
+        default: false
+      publish_openvsx:
+        description: "Publish verified VSIXs to Open VSX"
         type: boolean
         default: false
 
@@ -259,7 +267,8 @@ jobs:
       ${{ !cancelled() && needs.validate.result == 'success' &&
           (needs.release.result == 'success' ||
            (inputs.publish_existing && needs.release.result == 'skipped')) &&
-          (inputs.publish_pypi || inputs.publish_homebrew) }}
+          (inputs.publish_pypi || inputs.publish_homebrew ||
+           inputs.publish_vscode || inputs.publish_openvsx) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -282,6 +291,90 @@ jobs:
           name: verified-publication-assets
           path: dist/*
           if-no-files-found: error
+
+  vscode_marketplace:
+    name: publish vs code marketplace
+    needs: publication_assets
+    if: ${{ !cancelled() && inputs.publish_vscode && needs.publication_assets.result == 'success' }}
+    runs-on: ubuntu-latest
+    environment: vscode-marketplace
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AZURE_CORE_OUTPUT: none
+    steps:
+      # Use the workflow revision's locked tools, even when publishing an older tag.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+      - run: npm ci --prefix editors/vscode
+      - uses: actions/download-artifact@v4
+        with:
+          name: verified-publication-assets
+          path: dist
+      - name: Require Marketplace identity configuration
+        env:
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+        run: |
+          test -n "$AZURE_CLIENT_ID" || { echo 'AZURE_CLIENT_ID is required'; exit 1; }
+          test -n "$AZURE_TENANT_ID" || { echo 'AZURE_TENANT_ID is required'; exit 1; }
+          test -n "$AZURE_SUBSCRIPTION_ID" || { echo 'AZURE_SUBSCRIPTION_ID is required'; exit 1; }
+      - name: Sign in to Microsoft Entra ID using GitHub OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Publish verified VSIXs to Visual Studio Marketplace
+        working-directory: editors/vscode
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --no-install vsce publish --azure-credential --skip-duplicate \
+            --packagePath ../../dist/zals-"${TAG#v}"-*.vsix
+
+  openvsx:
+    name: publish open vsx
+    needs: publication_assets
+    if: ${{ !cancelled() && inputs.publish_openvsx && needs.publication_assets.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+      - run: npm ci --prefix editors/vscode
+      - uses: actions/download-artifact@v4
+        with:
+          name: verified-publication-assets
+          path: dist
+      - name: Require Open VSX publishing credential
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: test -n "$OVSX_PAT" || { echo 'OVSX_PAT is required'; exit 1; }
+      - name: Publish verified VSIXs to Open VSX
+        working-directory: editors/vscode
+        shell: bash
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          set -euo pipefail
+          npx --no-install ovsx publish --skip-duplicate \
+            --packagePath ../../dist/zals-"${TAG#v}"-*.vsix
 
   pypi:
     name: publish python wheels to pypi

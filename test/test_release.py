@@ -6,6 +6,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import re
 import shutil
@@ -169,6 +170,96 @@ class ReleaseTests(unittest.TestCase):
         self.assertIn('--version 2>&1', formula)
         for asset in (self.directory / "dist").glob("*.tar.gz"):
             self.assertIn(hashlib.sha256(asset.read_bytes()).hexdigest(), formula)
+
+    def workflow_job(self, name):
+        workflow = (ROOT / ".github/workflows/release.yml").read_text()
+        match = re.search(rf"^  {name}:\n(.*?)(?=^  \w+:\n|\Z)",
+                          workflow, re.MULTILINE | re.DOTALL)
+        self.assertIsNotNone(match, f"Missing workflow job: {name}")
+        return match[1]
+
+    def test_registry_publication_is_opt_in_and_requires_verified_assets(self):
+        workflow = (ROOT / ".github/workflows/release.yml").read_text()
+        publication_assets = self.workflow_job("publication_assets")
+        for job, flag in (("vscode_marketplace", "publish_vscode"),
+                          ("openvsx", "publish_openvsx")):
+            with self.subTest(job=job):
+                self.assertRegex(workflow, rf"      {flag}:\n"
+                                 r"        description: .*\n"
+                                 r"        type: boolean\n        default: false\n")
+                self.assertIn(f"inputs.{flag}", publication_assets)
+                body = self.workflow_job(job)
+                self.assertIn("needs: publication_assets", body)
+                self.assertIn(f"!cancelled() && inputs.{flag} && "
+                              "needs.publication_assets.result == 'success'", body)
+                self.assertIn("name: verified-publication-assets", body)
+                self.assertIn("ref: ${{ github.sha }}", body)
+                self.assertIn("run: npm ci --prefix editors/vscode", body)
+
+    def test_marketplace_uses_federated_identity_not_pat(self):
+        marketplace = self.workflow_job("vscode_marketplace")
+        self.assertIn("environment: vscode-marketplace", marketplace)
+        self.assertIn("id-token: write", marketplace)
+        self.assertIn("uses: azure/login@v2", marketplace)
+        self.assertIn("--azure-credential", marketplace)
+        self.assertNotIn("VSCE_PAT", marketplace)
+        self.assertNotIn("secrets.", marketplace)
+        for name in ("AZURE_CLIENT_ID", "AZURE_TENANT_ID", "AZURE_SUBSCRIPTION_ID"):
+            self.assertIn(f"vars.{name}", marketplace)
+        openvsx = self.workflow_job("openvsx")
+        self.assertIn("secrets.OVSX_PAT", openvsx)
+        self.assertNotIn("id-token: write", openvsx)
+
+    def test_registry_commands_publish_all_five_prebuilt_packages_without_rebuilding(self):
+        self.make_assets()
+        dist = self.directory / "dist"
+        dist.mkdir()
+        for source in self.directory.glob("*.vsix"):
+            shutil.copy2(source, dist / source.name)
+        # An unrelated version must not be selected by either command.
+        (dist / "zals-99.0.0-linux-x64.vsix").write_bytes(b"unrelated")
+        cwd = self.directory / "editors/vscode"
+        cwd.mkdir(parents=True)
+        bin_dir = self.directory / "fake-bin"
+        bin_dir.mkdir()
+        captured = self.directory / "command.json"
+        npx = bin_dir / "npx"
+        # Never invoke a real registry client in these tests.
+        npx.write_text(f"#!{shutil.which('python3')}\n"
+                       "import json, os, sys\n"
+                       "from pathlib import Path\n"
+                       "Path(os.environ['CAPTURE']).write_text(json.dumps(sys.argv[1:]))\n"
+                       "sys.exit(int(os.environ.get('PUBLISH_EXIT', '0')))\n")
+        npx.chmod(0o755)
+        for job, step, client, auth in (
+                ("vscode_marketplace", "Visual Studio Marketplace", "vsce", ["--azure-credential"]),
+                ("openvsx", "Open VSX", "ovsx", [])):
+            with self.subTest(job=job):
+                match = re.search(rf"      - name: Publish verified VSIXs to {step}\n"
+                                  r".*?        run: \|\n((?:          .*\n)+)",
+                                  self.workflow_job(job), re.DOTALL)
+                self.assertIsNotNone(match)
+                script = textwrap.dedent(match[1])
+                result = subprocess.run(["bash", "-c", script], cwd=cwd,
+                                        env={**os.environ, "TAG": self.tag,
+                                             "PATH": f"{bin_dir}:{os.environ['PATH']}",
+                                             "CAPTURE": str(captured)},
+                                        capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                args = json.loads(captured.read_text())
+                expected_args = ["--no-install", client, "publish", *auth,
+                                 "--skip-duplicate", "--packagePath"]
+                self.assertEqual(args[:len(expected_args)], expected_args)
+                packages = [str((cwd / value).resolve()) for value in args[len(expected_args):]]
+                self.assertEqual(sorted(packages), sorted(str(p.resolve()) for p in dist.glob("zals-0.1.0-*.vsix")))
+                self.assertEqual(len(packages), 5)
+                # Authentication/upload failures must not be silently ignored.
+                failed = subprocess.run(["bash", "-c", script], cwd=cwd,
+                                        env={**os.environ, "TAG": self.tag,
+                                             "PATH": f"{bin_dir}:{os.environ['PATH']}",
+                                             "CAPTURE": str(captured), "PUBLISH_EXIT": "42"},
+                                        capture_output=True, text=True)
+                self.assertEqual(failed.returncode, 42)
 
     def test_wrong_vsix_platform(self):
         self.make_assets()
