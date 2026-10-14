@@ -45,6 +45,15 @@ pub fn handleRequest(self: *Server, a: Allocator, id: Value, method: []const u8,
         return self.sendResult(a, id, try implementationResult(self, a, params));
     if (std.mem.eql(u8, method, "textDocument/references"))
         return self.sendResult(a, id, try referencesResult(self, a, params));
+    if (std.mem.eql(u8, method, "textDocument/prepareRename"))
+        return self.sendResult(a, id, try prepareRenameResult(self, a, params));
+    if (std.mem.eql(u8, method, "textDocument/rename")) {
+        const new_name = json_util.string(params, "newName") orelse
+            return self.sendError(a, id, -32602, "invalid variable name");
+        if (!@import("../variables/jinja.zig").isValidIdentifier(new_name))
+            return self.sendError(a, id, -32602, "invalid variable name");
+        return self.sendResult(a, id, try renameResult(self, a, params, new_name));
+    }
     if (std.mem.eql(u8, method, "textDocument/semanticTokens/full"))
         return self.sendResult(a, id, try semanticResult(self, a, params));
     if (std.mem.eql(u8, method, "textDocument/documentSymbol"))
@@ -174,6 +183,14 @@ fn implementationResult(self: *Server, a: Allocator, params: Value) !Value {
 fn referencesResult(self: *Server, a: Allocator, params: Value) !Value {
     const locs = (try providers.references.references(self, a, params)) orelse return Value.null;
     return encode.locations(a, locs);
+}
+
+fn prepareRenameResult(self: *Server, a: Allocator, params: Value) !Value {
+    return encode.prepareRename(a, try providers.rename.prepareRename(self, a, params));
+}
+
+fn renameResult(self: *Server, a: Allocator, params: Value, new_name: []const u8) !Value {
+    return encode.workspaceEditChanges(a, try providers.rename.rename(self, a, params), new_name);
 }
 
 fn semanticResult(self: *Server, a: Allocator, params: Value) !Value {

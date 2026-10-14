@@ -58,7 +58,7 @@ fn pairWithKeyAt(node: *const yaml.Node, start: usize) ?*const yaml.Node {
             if (pairWithKeyAt(item, start)) |pair| return pair;
         },
         .pair => {
-            if (node.key) |key| if (key.start == start) return node;
+            if (node.key) |key| if (key.start <= start and start < key.end) return node;
             if (node.val) |value| return pairWithKeyAt(value, start);
         },
         else => {},
