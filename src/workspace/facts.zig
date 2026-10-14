@@ -104,53 +104,79 @@ pub fn extractDependencyIn(a: Allocator, root: ?[]const u8, path: []const u8, te
     return extractDependencyWithParser(a, a, root, path, text);
 }
 
+const Interner = struct {
+    arena: Allocator,
+    scratch: Allocator,
+    strings: std.StringHashMapUnmanaged([]const u8) = .empty,
+
+    fn get(self: *Interner, s: []const u8) ![]const u8 {
+        if (s.len == 0) return "";
+        if (self.strings.get(s)) |owned| return owned;
+        const owned = try self.arena.dupe(u8, s);
+        try self.strings.putNoClobber(self.scratch, owned, owned);
+        return owned;
+    }
+};
+
 fn extractDependencyWithParser(a: Allocator, parser_allocator: Allocator, root: ?[]const u8, path: []const u8, text: []const u8) !Facts {
     var forest = yaml.parse(parser_allocator, text) catch return .{};
     defer forest.deinit();
+    const scratch = forest.allocator();
+    var interner = Interner{ .arena = a, .scratch = scratch };
 
     const kind = variables.scope.fileKind(path, role_resolve.enclosingRole(path));
-    var defs = std.array_list.Managed(Definition).init(a);
-    variables.definitions.collect(a, &forest, kind, &defs) catch {};
-    for (defs.items) |*d| d.name = try a.dupe(u8, d.name);
+    var raw_defs = std.array_list.Managed(Definition).init(scratch);
+    variables.definitions.collect(scratch, &forest, kind, &raw_defs) catch {};
+    const defs = try internDefinitions(a, &interner, raw_defs.items);
 
-    var idents = std.array_list.Managed(variables.jinja.Ident).init(a);
-    variables.index.collectReferences(a, &forest, &idents) catch {};
-    const refs = try a.alloc(Span, idents.items.len);
-    for (idents.items, 0..) |r, i| refs[i] = .{ .name = try a.dupe(u8, r.name), .start = r.start, .end = r.end };
+    var idents = std.array_list.Managed(variables.jinja.Ident).init(scratch);
+    variables.index.collectReferences(scratch, &forest, &idents) catch {};
+    const refs = try internIdents(a, &interner, idents.items);
 
-    var field_defs = std.array_list.Managed(variables.fields.Definition).init(a);
-    variables.fields.collect(a, &forest, path, kind, &field_defs) catch {};
+    var raw_field_defs = std.array_list.Managed(variables.fields.Definition).init(scratch);
+    variables.fields.collect(scratch, &forest, path, kind, &raw_field_defs) catch {};
+    const field_defs = try internFieldDefinitions(a, &interner, raw_field_defs.items);
 
-    var field_idents = std.array_list.Managed(variables.jinja.Ident).init(a);
-    variables.index.collectFieldReferences(a, &forest, &field_idents) catch {};
-    const field_refs = try a.alloc(Span, field_idents.items.len);
-    for (field_idents.items, 0..) |r, i| field_refs[i] = .{ .name = try a.dupe(u8, r.name), .start = r.start, .end = r.end };
+    var field_idents = std.array_list.Managed(variables.jinja.Ident).init(scratch);
+    variables.index.collectFieldReferences(scratch, &forest, &field_idents) catch {};
+    const field_refs = try internIdents(a, &interner, field_idents.items);
 
-    var role_refs = std.array_list.Managed(RoleRef).init(a);
-    for (forest.roots) |r| try walkRoleRefs(a, &forest, path, r, &role_refs);
+    var raw_role_refs = std.array_list.Managed(RoleRef).init(scratch);
+    for (forest.roots) |r| try walkRoleRefs(a, &interner, &forest, path, r, &raw_role_refs);
+    const role_refs: []const RoleRef = if (raw_role_refs.items.len == 0) &.{} else try a.dupe(RoleRef, raw_role_refs.items);
 
-    const sym = symbols.collect(a, &forest, path) catch symbols.Result{};
+    const sym = symbols.collect(scratch, &forest, path) catch symbols.Result{};
+    const syms = try internSymbols(a, &interner, sym.symbols);
 
-    const var_loads = variables.scope.varFileLoads(a, &forest, path, root) catch &.{};
+    const raw_loads = variables.scope.varFileLoads(scratch, &forest, path, root) catch &.{};
+    const var_loads = try internVarLoads(a, &interner, raw_loads);
+
+    const raw_file_refs = file_refs.collect(scratch, &forest, path, root) catch &.{};
+    const f_refs = try internFileRefs(a, &interner, raw_file_refs);
+
+    const raw_col_refs = collection_refs.collect(scratch, &forest, path) catch &.{};
+    const col_refs = try internCollectionSpans(a, &interner, raw_col_refs);
 
     return .{
         .source_fingerprint = sourceFingerprint(text),
-        .binding_lines = try bindingLines(a, text, defs.items, field_defs.items),
-        .var_defs = try defs.toOwnedSlice(),
+        .binding_lines = try bindingLines(a, text, defs, field_defs),
+        .var_defs = defs,
         .var_refs = refs,
-        .field_defs = try field_defs.toOwnedSlice(),
+        .field_defs = field_defs,
         .field_refs = field_refs,
-        .role_refs = try role_refs.toOwnedSlice(),
+        .role_refs = role_refs,
         .var_loads = var_loads,
-        .file_refs = file_refs.collect(a, &forest, path, root) catch &.{},
-        .collection_refs = collectionSpans(a, &forest, path) catch &.{},
+        .file_refs = f_refs,
+        .collection_refs = col_refs,
         .shape = sym.shape,
-        .symbols = sym.symbols,
+        .symbols = syms,
     };
 }
 
 fn bindingLines(a: Allocator, text: []const u8, defs: []const Definition, fields: []const variables.fields.Definition) ![]const BindingLine {
-    const lines = try a.alloc(BindingLine, defs.len + fields.len);
+    const total = defs.len + fields.len;
+    if (total == 0) return &.{};
+    const lines = try a.alloc(BindingLine, total);
     for (defs, 0..) |def, i| lines[i] = .{ .start = def.start, .line = 1 };
     for (fields, defs.len..) |def, i| lines[i] = .{ .start = def.start, .line = 1 };
     std.mem.sort(BindingLine, lines, {}, struct {
@@ -169,33 +195,123 @@ fn bindingLines(a: Allocator, text: []const u8, defs: []const Definition, fields
     return lines;
 }
 
-fn collectionSpans(a: Allocator, forest: *const yaml.Forest, path: []const u8) ![]const Span {
-    const spans = try collection_refs.collect(a, forest, path);
+fn internDefinitions(a: Allocator, interner: *Interner, defs: []const Definition) ![]const Definition {
+    if (defs.len == 0) return &.{};
+    const out = try a.alloc(Definition, defs.len);
+    for (defs, 0..) |d, i| {
+        out[i] = .{
+            .name = try interner.get(d.name),
+            .start = d.start,
+            .end = d.end,
+            .site = d.site,
+        };
+    }
+    return out;
+}
+
+fn internIdents(a: Allocator, interner: *Interner, idents: []const variables.jinja.Ident) ![]const Span {
+    if (idents.len == 0) return &.{};
+    const out = try a.alloc(Span, idents.len);
+    for (idents, 0..) |r, i| {
+        out[i] = .{ .name = try interner.get(r.name), .start = r.start, .end = r.end };
+    }
+    return out;
+}
+
+fn internFieldDefinitions(a: Allocator, interner: *Interner, defs: []const variables.fields.Definition) ![]const variables.fields.Definition {
+    if (defs.len == 0) return &.{};
+    const out = try a.alloc(variables.fields.Definition, defs.len);
+    for (defs, 0..) |d, i| {
+        const path_out: []const []const u8 = if (d.path.len == 0) &.{} else blk: {
+            const segs = try a.alloc([]const u8, d.path.len);
+            for (d.path, 0..) |seg, j| segs[j] = try interner.get(seg);
+            break :blk segs;
+        };
+        out[i] = .{
+            .name = try interner.get(d.name),
+            .start = d.start,
+            .end = d.end,
+            .site = d.site,
+            .path = path_out,
+        };
+    }
+    return out;
+}
+
+fn internSymbols(a: Allocator, interner: *Interner, syms: []const symbols.Symbol) ![]const symbols.Symbol {
+    if (syms.len == 0) return &.{};
+    const out = try a.alloc(symbols.Symbol, syms.len);
+    for (syms, 0..) |s, i| {
+        out[i] = .{
+            .name = try interner.get(s.name),
+            .kind = s.kind,
+            .play = try interner.get(s.play),
+            .start = s.start,
+            .end = s.end,
+        };
+    }
+    return out;
+}
+
+fn internVarLoads(a: Allocator, interner: *Interner, loads: []const variables.scope.VarFileLoad) ![]const variables.scope.VarFileLoad {
+    if (loads.len == 0) return &.{};
+    const out = try a.alloc(variables.scope.VarFileLoad, loads.len);
+    for (loads, 0..) |load, i| {
+        out[i] = .{
+            .path = try interner.get(load.path),
+            .site = load.site,
+        };
+    }
+    return out;
+}
+
+fn internFileRefs(a: Allocator, interner: *Interner, refs: []const FileRef) ![]const FileRef {
+    if (refs.len == 0) return &.{};
+    const out = try a.alloc(FileRef, refs.len);
+    for (refs, 0..) |r, i| {
+        out[i] = .{
+            .kind = r.kind,
+            .raw = try interner.get(r.raw),
+            .target = try interner.get(r.target),
+            .start = r.start,
+            .end = r.end,
+        };
+    }
+    return out;
+}
+
+fn internCollectionSpans(a: Allocator, interner: *Interner, spans: []const collection_refs.Span) ![]const Span {
+    if (spans.len == 0) return &.{};
     const out = try a.alloc(Span, spans.len);
-    for (spans, 0..) |c, i| out[i] = .{ .name = c.name, .start = c.start, .end = c.end };
+    for (spans, 0..) |c, i| {
+        out[i] = .{ .name = try interner.get(c.name), .start = c.start, .end = c.end };
+    }
     return out;
 }
 
 /// Visit every scalar and keep those `roles.reference.detect` recognises, so
 /// the index and the cursor agree on what a role reference is.
-fn walkRoleRefs(a: Allocator, forest: *yaml.Forest, file_path: []const u8, node: *Node, out: *std.array_list.Managed(RoleRef)) !void {
+fn walkRoleRefs(a: Allocator, interner: *Interner, forest: *yaml.Forest, file_path: []const u8, node: *Node, out: *std.array_list.Managed(RoleRef)) !void {
     switch (node.kind) {
         .scalar => {
             const path = try ancestors(forest.allocator(), node);
             if (role_reference.detect(path, forest.text)) |ref| {
                 const declared = try yaml.collections.getRoleDeclaredCollections(forest.allocator(), file_path, path);
-                const collections = try a.alloc([]const u8, declared.len);
-                for (declared, 0..) |name, i| collections[i] = try a.dupe(u8, name);
+                const collections: []const []const u8 = if (declared.len == 0) &.{} else blk: {
+                    const cols = try a.alloc([]const u8, declared.len);
+                    for (declared, 0..) |name, i| cols[i] = try interner.get(name);
+                    break :blk cols;
+                };
                 try out.append(.{
-                    .name = try a.dupe(u8, ref.name),
+                    .name = try interner.get(ref.name),
                     .start = ref.start,
                     .end = ref.end,
                     .declared_collections = collections,
                 });
             }
         },
-        .map, .seq => for (node.items) |item| try walkRoleRefs(a, forest, file_path, item, out),
-        .pair => if (node.val) |v| try walkRoleRefs(a, forest, file_path, v, out),
+        .map, .seq => for (node.items) |item| try walkRoleRefs(a, interner, forest, file_path, item, out),
+        .pair => if (node.val) |v| try walkRoleRefs(a, interner, forest, file_path, v, out),
         else => {},
     }
 }
@@ -305,4 +421,38 @@ test "role facts retain per-site declared collections after parsing" {
     );
     try testing.expectEqual(@as(usize, 1), non_play.role_refs.len);
     try testing.expectEqual(@as(usize, 0), non_play.role_refs[0].declared_collections.len);
+}
+
+test "extract interns repeated names and play labels within an entry" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    var scratch = std.heap.ArenaAllocator.init(testing.allocator);
+    defer scratch.deinit();
+    const f = try extractInWithParser(arena.allocator(), scratch.allocator(), null, "/w/site.yml",
+        \\- name: Configure web
+        \\  hosts: all
+        \\  collections: [ns.col]
+        \\  vars:
+        \\    settings:
+        \\      port: 8080
+        \\  roles: [web]
+        \\  tasks:
+        \\    - name: First task
+        \\      ns.col.mod:
+        \\        msg: "{{ settings.port }} {{ settings.port }}"
+        \\    - name: Second task
+        \\      debug:
+        \\        msg: "{{ settings.port }}"
+        \\
+    );
+    try testing.expectEqual(f.var_defs[0].name.ptr, f.var_refs[0].name.ptr);
+    try testing.expectEqual(f.var_refs[0].name.ptr, f.var_refs[1].name.ptr);
+    try testing.expectEqual(f.var_defs[0].name.ptr, f.field_defs[0].path[0].ptr);
+    try testing.expectEqual(f.field_defs[0].name.ptr, f.field_defs[0].path[1].ptr);
+    try testing.expectEqual(f.field_defs[0].name.ptr, f.field_refs[0].name.ptr);
+    try testing.expectEqual(f.field_refs[0].name.ptr, f.field_refs[1].name.ptr);
+    try testing.expectEqual(f.role_refs[0].declared_collections[0].ptr, f.collection_refs[0].name.ptr);
+    try testing.expectEqual(f.collection_refs[0].name.ptr, f.collection_refs[1].name.ptr);
+    try testing.expectEqual(f.symbols[0].name.ptr, f.symbols[1].play.ptr);
+    try testing.expectEqual(f.symbols[1].play.ptr, f.symbols[2].play.ptr);
 }

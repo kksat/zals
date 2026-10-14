@@ -25,7 +25,7 @@ pub const Entry = struct {
 
     /// Parse `path` (or `text` when given) into a new entry.
     pub fn build(gpa: Allocator, root: []const u8, path: []const u8, text: ?[]const u8, mtime: i128) !*Entry {
-        var scratch = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        var scratch = std.heap.ArenaAllocator.init(gpa);
         defer scratch.deinit();
         return buildWithScratch(gpa, scratch.allocator(), root, path, text, mtime);
     }
@@ -72,6 +72,7 @@ const Pending = struct {
     root: []const u8,
     entry: ?*Entry = null,
     info: ?*RootInfo = null,
+    owned_root: bool = false,
     done: bool = false,
 };
 
@@ -277,7 +278,7 @@ pub const WorkspaceIndex = struct {
                 if (self.infos.fetchRemove(ri.root)) |kv| kv.value.destroy(self.gpa);
                 self.infos.put(ri.root, ri) catch ri.destroy(self.gpa);
             }
-            self.gpa.free(p.root);
+            if (p.owned_root and p.root.len > 0) self.gpa.free(p.root);
         }
     }
 
@@ -397,7 +398,7 @@ pub const WorkspaceIndex = struct {
     fn freePending(self: *WorkspaceIndex, p: Pending) void {
         if (p.entry) |e| e.destroy(self.gpa);
         if (p.info) |i| i.destroy(self.gpa);
-        self.gpa.free(p.root);
+        if (p.owned_root and p.root.len > 0) self.gpa.free(p.root);
     }
 };
 
@@ -431,7 +432,7 @@ fn scan(index: *WorkspaceIndex, root: []const u8, marker: []const u8, generation
     // Transfer completion and discovery storage to ScanWork only after setup
     // succeeds. Until then, even a failed discovery completes this generation.
     var handed_off = false;
-    defer if (!handed_off) index.push(.{ .generation = generation, .root = gpa.dupe(u8, root) catch "", .done = true });
+    defer if (!handed_off) index.push(.{ .generation = generation, .root = gpa.dupe(u8, root) catch "", .owned_root = true, .done = true });
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer if (!handed_off) arena.deinit();
     const a = arena.allocator();
@@ -452,7 +453,7 @@ fn scan(index: *WorkspaceIndex, root: []const u8, marker: []const u8, generation
         ri.roles_dirs = dupeAll(info_a, found.roles_dirs) catch &.{};
         ri.collection_paths = dupeAll(info_a, found.collection_paths) catch &.{};
         ri.file_count = found.files.len;
-        index.push(.{ .generation = generation, .root = gpa.dupe(u8, root) catch "", .info = ri });
+        index.push(.{ .generation = generation, .root = ri.root, .info = ri });
     }
 
     // The discovery worker also parses files; it never waits on tasks queued
@@ -496,20 +497,21 @@ const ScanWork = struct {
             const path = self.files[i];
             const st = std.fs.cwd().statFile(path) catch continue;
             const e = Entry.buildWithScratch(self.index.gpa, scratch.allocator(), self.root, path, null, st.mtime) catch continue;
-            self.index.push(.{ .generation = self.generation, .root = self.index.gpa.dupe(u8, self.root) catch "", .entry = e });
+            self.index.push(.{ .generation = self.generation, .root = e.root, .entry = e });
         }
     }
 
     fn finish(self: *ScanWork) void {
         if (self.remaining.fetchSub(1, .acq_rel) != 1) return;
         const index = self.index;
-        index.push(.{ .generation = self.generation, .root = index.gpa.dupe(u8, self.root) catch "", .done = true });
+        index.push(.{ .generation = self.generation, .root = index.gpa.dupe(u8, self.root) catch "", .owned_root = true, .done = true });
         self.arena.deinit();
         index.gpa.destroy(self);
     }
 };
 
 fn dupeAll(a: Allocator, items: []const []const u8) ![]const []const u8 {
+    if (items.len == 0) return &.{};
     const out = try a.alloc([]const u8, items.len);
     for (items, 0..) |x, i| out[i] = try a.dupe(u8, x);
     return out;
