@@ -5,7 +5,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const types = @import("../lsp/types.zig");
 const Server = @import("../lsp/server.zig").Server;
-const Document = @import("../workspace/document.zig").Document;
+const document_mod = @import("../workspace/document.zig");
 const variables = @import("../variables/root.zig");
 
 /// `FileSource` backed by the server's open documents and the filesystem.
@@ -46,7 +46,7 @@ pub const ServerSource = struct {
 };
 
 /// Convert an occurrence to an LSP `Location`, using the open document's
-/// position mapping when available and a temporary one otherwise.
+/// position mapping when available and a single-pass scan otherwise.
 pub fn location(
     a: Allocator,
     server: *Server,
@@ -57,9 +57,7 @@ pub fn location(
         return .{ .uri = o.uri, .range = doc.rangeFromOffsets(o.start, o.end) };
     }
     const text = (try index.fileText(a, o.uri)) orelse "";
-    var doc = try Document.init(a, o.uri, "ansible", 0, text, server.encoding);
-    defer doc.deinit();
-    return .{ .uri = o.uri, .range = doc.rangeFromOffsets(o.start, o.end) };
+    return .{ .uri = o.uri, .range = document_mod.rangeInText(text, o.start, o.end, server.encoding) };
 }
 
 /// Deterministic ordering: by URI, then byte offset.
