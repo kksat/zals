@@ -39,13 +39,17 @@ pub const Writer = struct {
     /// Enqueue one message body. The writer thread frames and writes it.
     pub fn writeMessage(self: *Writer, bytes: []const u8) !void {
         const copy = try self.allocator.dupe(u8, bytes);
+        try self.writeMessageOwned(copy);
+    }
+
+    /// Enqueue one message body already allocated with `self.allocator`.
+    /// Takes ownership of `bytes` and frees it on error, shutdown, or after writing.
+    pub fn writeMessageOwned(self: *Writer, bytes: []u8) !void {
+        errdefer self.allocator.free(bytes);
         self.mutex.lock();
         defer self.mutex.unlock();
-        if (self.shutdown) {
-            self.allocator.free(copy);
-            return error.Shutdown;
-        }
-        try self.queue.append(self.allocator, copy);
+        if (self.shutdown) return error.Shutdown;
+        try self.queue.append(self.allocator, bytes);
         self.cond.signal();
     }
 

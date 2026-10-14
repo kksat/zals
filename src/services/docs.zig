@@ -247,43 +247,61 @@ pub const DocsLibrary = struct {
     /// coherent library revision. No borrowed storage escapes and no disk I/O
     /// happens here; the cache adapter writes only after this returns.
     pub fn encodeCache(self: *DocsLibrary, allocator: Allocator) ![]u8 {
-        // Build the JSON tree in a scratch arena so nested maps are freed at once.
-        var arena = std.heap.ArenaAllocator.init(allocator);
-        defer arena.deinit();
-        const a = arena.allocator();
-
-        var root = std.json.ObjectMap.init(a);
-        try root.put("version", .{ .integer = cache_format_version });
+        var aw: std.Io.Writer.Allocating = .init(allocator);
+        defer aw.deinit();
         self.mutex.lock();
         defer self.mutex.unlock();
-        try root.put("ansible_version", .{ .string = self.ansible_version });
+        self.writeCacheJson(&aw.writer) catch return error.OutOfMemory;
+        return aw.toOwnedSlice();
+    }
 
-        var cat = std.json.ObjectMap.init(a);
+    fn writeCacheJson(self: *DocsLibrary, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+        var jw: std.json.Stringify = .{ .writer = writer };
+        try jw.beginObject();
+        try jw.objectField("version");
+        try jw.write(cache_format_version);
+        try jw.objectField("ansible_version");
+        try jw.write(self.ansible_version);
+
+        try jw.objectField("catalog");
+        try jw.beginObject();
         var it = self.catalog.iterator();
-        while (it.next()) |e| try cat.put(e.key_ptr.*, .{ .string = e.value_ptr.description });
-        try root.put("catalog", .{ .object = cat });
+        while (it.next()) |e| {
+            try jw.objectField(e.key_ptr.*);
+            try jw.write(e.value_ptr.description);
+        }
+        try jw.endObject();
 
-        var mods = std.json.ObjectMap.init(a);
+        try jw.objectField("modules");
+        try jw.beginObject();
         var mit = self.modules.iterator();
         while (mit.next()) |e| {
             const m = e.value_ptr.*;
-            var mo = std.json.ObjectMap.init(a);
-            try mo.put("description", .{ .string = m.description });
-            try mo.put("long_description", try stringArray(a, m.long_description));
-            try mo.put("requirements", try stringArray(a, m.requirements));
-            try mo.put("notes", try stringArray(a, m.notes));
-            try mo.put("deprecated", .{ .bool = m.deprecated });
-            try mo.put("filename", .{ .string = m.filename });
-            var opts = std.json.ObjectMap.init(a);
+            try jw.objectField(e.key_ptr.*);
+            try jw.beginObject();
+            try jw.objectField("description");
+            try jw.write(m.description);
+            try jw.objectField("long_description");
+            try jw.write(m.long_description);
+            try jw.objectField("requirements");
+            try jw.write(m.requirements);
+            try jw.objectField("notes");
+            try jw.write(m.notes);
+            try jw.objectField("deprecated");
+            try jw.write(m.deprecated);
+            try jw.objectField("filename");
+            try jw.write(m.filename);
+            try jw.objectField("options");
+            try jw.beginObject();
             for (m.options) |opt| {
-                try opts.put(opt.name, try cacheOptionToJson(a, opt));
+                try jw.objectField(opt.name);
+                try writeCacheOption(&jw, opt);
             }
-            try mo.put("options", .{ .object = opts });
-            try mods.put(e.key_ptr.*, .{ .object = mo });
+            try jw.endObject();
+            try jw.endObject();
         }
-        try root.put("modules", .{ .object = mods });
-
-        return std.json.Stringify.valueAlloc(allocator, Value{ .object = root }, .{});
+        try jw.endObject();
+        try jw.endObject();
     }
 
     /// Startup-cache capability: parse/validate before ingestion. Returns false
@@ -413,19 +431,28 @@ pub const DocsLibrary = struct {
     }
 };
 
-fn cacheOptionToJson(a: Allocator, o: Option) !Value {
-    var oo = std.json.ObjectMap.init(a);
-    try oo.put("description", .{ .string = o.description });
-    try oo.put("type", .{ .string = o.type });
-    try oo.put("required", .{ .bool = o.required });
-    try oo.put("default", if (o.default) |d| .{ .string = d } else .null);
-    try oo.put("elements", .{ .string = o.elements });
+fn writeCacheOption(jw: *std.json.Stringify, o: Option) std.Io.Writer.Error!void {
+    try jw.beginObject();
+    try jw.objectField("description");
+    try jw.write(o.description);
+    try jw.objectField("type");
+    try jw.write(o.type);
+    try jw.objectField("required");
+    try jw.write(o.required);
+    try jw.objectField("default");
+    try jw.write(o.default);
+    try jw.objectField("elements");
+    try jw.write(o.elements);
     if (o.suboptions.len > 0) {
-        var subs = std.json.ObjectMap.init(a);
-        for (o.suboptions) |s| try subs.put(s.name, try cacheOptionToJson(a, s));
-        try oo.put("suboptions", .{ .object = subs });
+        try jw.objectField("suboptions");
+        try jw.beginObject();
+        for (o.suboptions) |s| {
+            try jw.objectField(s.name);
+            try writeCacheOption(jw, s);
+        }
+        try jw.endObject();
     }
-    return .{ .object = oo };
+    try jw.endObject();
 }
 
 fn cacheOptionFromJson(a: Allocator, v: Value) !Option {
@@ -449,12 +476,6 @@ fn cacheOptionFromJson(a: Allocator, v: Value) !Option {
         .default = if (json_util.string(v, "default")) |d| try a.dupe(u8, d) else null,
         .elements = try a.dupe(u8, json_util.string(v, "elements") orelse ""),
     };
-}
-
-fn stringArray(a: Allocator, items: []const []const u8) !Value {
-    var arr = std.json.Array.init(a);
-    for (items) |s| try arr.append(.{ .string = s });
-    return .{ .array = arr };
 }
 
 fn cacheStringList(a: Allocator, v: Value) ![]const []const u8 {
