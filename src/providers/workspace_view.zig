@@ -12,6 +12,7 @@ const facts_mod = @import("../workspace/facts.zig");
 const discover = @import("../workspace/discover.zig");
 const roles = @import("../roles/root.zig");
 const util = @import("util.zig");
+const collection_navigation = @import("../queries/collection_navigation.zig");
 pub const view = @import("../workspace/view.zig");
 
 pub const File = view.File;
@@ -22,6 +23,7 @@ pub const View = struct {
     root: []const u8,
     files: []const File,
     texts: std.StringHashMap([]const u8),
+    collections: ?[]const roles.resolve.WorkspaceCollection = null,
 
     /// The files of the Workspace rooted at `root`. Open documents replace
     /// their indexed copy, so unsaved edits win.
@@ -66,13 +68,21 @@ pub const View = struct {
     /// A role's invoking files are selected by resolved directory, not its
     /// basename. Each reference uses its own declared collections and the
     /// referencing file's configured search paths.
+    pub fn workspaceCollections(self: *View) ![]const roles.resolve.WorkspaceCollection {
+        if (self.collections) |colls| return colls;
+        const colls = try collection_navigation.workspaceCollections(self.a, self);
+        self.collections = colls;
+        return colls;
+    }
+
     pub fn reachableFiles(self: *View, path: []const u8) !view.Reachability {
         const role_dir = roles.resolve.enclosingRole(path);
         var invokers = std.array_list.Managed([]const u8).init(self.a);
         if (role_dir) |target| {
+            const ws_collections = try self.workspaceCollections();
             for (self.files) |f| {
                 if (f.facts.role_refs.len == 0) continue;
-                const base = util.roleResolver(self.server, self.a, f.path, &.{});
+                const base = util.roleResolverWithCollections(self.server, self.a, f.path, &.{}, ws_collections);
                 for (f.facts.role_refs) |ref| {
                     if (!roleRefResolvesTo(base, f.path, ref, target)) continue;
                     try invokers.append(f.path);
