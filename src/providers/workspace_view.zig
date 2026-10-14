@@ -6,7 +6,9 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const types = @import("../lsp/types.zig");
 const Server = @import("../lsp/server.zig").Server;
-const Document = @import("../workspace/document.zig").Document;
+const document_mod = @import("../workspace/document.zig");
+const Document = document_mod.Document;
+const LineIndex = document_mod.LineIndex;
 const paths = @import("../paths.zig");
 const facts_mod = @import("../workspace/facts.zig");
 const discover = @import("../workspace/discover.zig");
@@ -23,6 +25,7 @@ pub const View = struct {
     root: []const u8,
     files: []const File,
     texts: std.StringHashMap([]const u8),
+    line_indices: std.StringHashMap(LineIndex),
     collections: ?[]const roles.resolve.WorkspaceCollection = null,
 
     /// The files of the Workspace rooted at `root`. Open documents replace
@@ -54,6 +57,7 @@ pub const View = struct {
             .root = root,
             .files = try files.toOwnedSlice(),
             .texts = std.StringHashMap([]const u8).init(a),
+            .line_indices = std.StringHashMap(LineIndex).init(a),
         };
     }
 
@@ -97,10 +101,13 @@ pub const View = struct {
         if (self.server.documents.get(uri)) |doc| {
             return .{ .uri = uri, .range = doc.rangeFromOffsets(start, end) };
         }
-        const body = try self.text(uri);
-        var doc = try Document.init(self.a, uri, "ansible", 0, body, self.server.encoding);
-        defer doc.deinit();
-        return .{ .uri = uri, .range = doc.rangeFromOffsets(start, end) };
+        const idx = if (self.line_indices.get(uri)) |cached| cached else blk: {
+            const body = try self.text(uri);
+            const built = try LineIndex.init(self.a, body, self.server.encoding);
+            try self.line_indices.put(uri, built);
+            break :blk built;
+        };
+        return .{ .uri = uri, .range = idx.rangeFromOffsets(start, end) };
     }
 
     /// Text of `uri`: the open document, else the file on disk (cached).

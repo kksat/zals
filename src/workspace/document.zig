@@ -112,27 +112,19 @@ pub const Document = struct {
 
     /// Convert a byte offset to an LSP position.
     pub fn positionAt(self: *const Document, offset: usize) lsp.Position {
-        const clamped = @min(offset, self.text.items.len);
-        var lo: usize = 0;
-        var hi: usize = self.line_starts.items.len;
-        while (lo + 1 < hi) {
-            const mid = (lo + hi) / 2;
-            if (self.line_starts.items[mid] <= clamped) lo = mid else hi = mid;
-        }
-        const line_start = self.line_starts.items[lo];
-        var units: u32 = 0;
-        var i = line_start;
-        while (i < clamped) {
-            const cp_len = std.unicode.utf8ByteSequenceLength(self.text.items[i]) catch 1;
-            const cp = std.unicode.utf8Decode(self.text.items[i .. i + cp_len]) catch 0xFFFD;
-            units += self.encoding.unitsPerCodepoint(cp);
-            i += cp_len;
-        }
-        return .{ .line = @intCast(lo), .character = units };
+        return self.lineIndex().positionAt(offset);
     }
 
     pub fn rangeFromOffsets(self: *const Document, start: usize, end: usize) lsp.Range {
-        return .{ .start = self.positionAt(start), .end = self.positionAt(end) };
+        return self.lineIndex().rangeFromOffsets(start, end);
+    }
+
+    pub fn lineIndex(self: *const Document) LineIndex {
+        return .{
+            .text = self.text.items,
+            .line_starts = self.line_starts.items,
+            .encoding = self.encoding,
+        };
     }
 
     /// Apply an incremental change. A null range replaces the whole document.
@@ -149,6 +141,105 @@ pub const Document = struct {
         try self.rebuildLineIndex();
     }
 };
+
+/// Borrowed line index over `text` for offset-to-position conversion without
+/// copying file contents or document metadata.
+pub const LineIndex = struct {
+    text: []const u8,
+    line_starts: []const usize,
+    encoding: PositionEncoding,
+
+    pub fn init(allocator: Allocator, text: []const u8, encoding: PositionEncoding) !LineIndex {
+        var count: usize = 1;
+        for (text) |b| {
+            if (b == '\n') count += 1;
+        }
+        const line_starts = try allocator.alloc(usize, count);
+        line_starts[0] = 0;
+        var idx: usize = 1;
+        for (text, 0..) |b, i| {
+            if (b == '\n') {
+                line_starts[idx] = i + 1;
+                idx += 1;
+            }
+        }
+        return .{
+            .text = text,
+            .line_starts = line_starts,
+            .encoding = encoding,
+        };
+    }
+
+    pub fn deinit(self: *LineIndex, allocator: Allocator) void {
+        allocator.free(self.line_starts);
+    }
+
+    pub fn positionAt(self: LineIndex, offset: usize) lsp.Position {
+        const clamped = @min(offset, self.text.len);
+        var lo: usize = 0;
+        var hi: usize = self.line_starts.len;
+        while (lo + 1 < hi) {
+            const mid = (lo + hi) / 2;
+            if (self.line_starts[mid] <= clamped) lo = mid else hi = mid;
+        }
+        const line_start = self.line_starts[lo];
+        return .{
+            .line = @intCast(lo),
+            .character = countUnits(self.text[line_start..clamped], self.encoding),
+        };
+    }
+
+    pub fn rangeFromOffsets(self: LineIndex, start: usize, end: usize) lsp.Range {
+        return .{ .start = self.positionAt(start), .end = self.positionAt(end) };
+    }
+};
+
+/// Convert a byte range in `text` to an LSP `Range` in a single pass without
+/// allocating a line index or copying `text`.
+pub fn rangeInText(text: []const u8, start: usize, end: usize, encoding: PositionEncoding) lsp.Range {
+    const c_start = @min(start, text.len);
+    const c_end = @min(end, text.len);
+    if (c_start <= c_end) {
+        const start_pos = advancePosition(.{ .line = 0, .character = 0 }, text[0..c_start], encoding);
+        const end_pos = advancePosition(start_pos, text[c_start..c_end], encoding);
+        return .{ .start = start_pos, .end = end_pos };
+    }
+    const end_pos = advancePosition(.{ .line = 0, .character = 0 }, text[0..c_end], encoding);
+    const start_pos = advancePosition(end_pos, text[c_end..c_start], encoding);
+    return .{ .start = start_pos, .end = end_pos };
+}
+
+fn countUnits(slice: []const u8, encoding: PositionEncoding) u32 {
+    var units: u32 = 0;
+    var i: usize = 0;
+    while (i < slice.len) {
+        const cp_len = std.unicode.utf8ByteSequenceLength(slice[i]) catch 1;
+        const cp = if (i + cp_len <= slice.len)
+            std.unicode.utf8Decode(slice[i .. i + cp_len]) catch 0xFFFD
+        else
+            0xFFFD;
+        units += encoding.unitsPerCodepoint(cp);
+        i += cp_len;
+    }
+    return units;
+}
+
+fn advancePosition(pos: lsp.Position, slice: []const u8, encoding: PositionEncoding) lsp.Position {
+    var line = pos.line;
+    var last_line_start: usize = 0;
+    var has_newline = false;
+    for (slice, 0..) |b, i| {
+        if (b == '\n') {
+            line += 1;
+            last_line_start = i + 1;
+            has_newline = true;
+        }
+    }
+    if (has_newline) {
+        return .{ .line = line, .character = countUnits(slice[last_line_start..], encoding) };
+    }
+    return .{ .line = line, .character = pos.character + countUnits(slice, encoding) };
+}
 
 test "line index and utf-16 positions" {
     const allocator = std.testing.allocator;
@@ -172,4 +263,28 @@ test "incremental change" {
         .text = "hi",
     });
     try std.testing.expectEqualStrings("hi", doc.bytes());
+}
+
+test "LineIndex and rangeInText match Document.rangeFromOffsets" {
+    const allocator = std.testing.allocator;
+    const text = "first: 1\nsecond: 🚀 value\nthird: end\n";
+    for ([_]PositionEncoding{ .utf8, .utf16 }) |enc| {
+        var doc = try Document.init(allocator, "file:///t.yml", "ansible", 1, text, enc);
+        defer doc.deinit();
+        var idx = try LineIndex.init(allocator, text, enc);
+        defer idx.deinit(allocator);
+
+        const pairs = [_][2]usize{
+            .{ 0, 5 },
+            .{ 9, 15 },
+            .{ 17, 27 },
+            .{ 9, 35 },
+            .{ 0, text.len + 10 },
+        };
+        for (pairs) |p| {
+            const expected = doc.rangeFromOffsets(p[0], p[1]);
+            try std.testing.expectEqual(expected, idx.rangeFromOffsets(p[0], p[1]));
+            try std.testing.expectEqual(expected, rangeInText(text, p[0], p[1], enc));
+        }
+    }
 }

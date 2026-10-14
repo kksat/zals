@@ -7,7 +7,9 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Server = @import("../lsp/server.zig").Server;
 const types = @import("../lsp/types.zig");
-const Document = @import("../workspace/document.zig").Document;
+const document_mod = @import("../workspace/document.zig");
+const Document = document_mod.Document;
+const LineIndex = document_mod.LineIndex;
 const facts = @import("../workspace/facts.zig");
 const discover = @import("../workspace/discover.zig");
 const view = @import("../workspace/view.zig");
@@ -29,9 +31,15 @@ pub const Query = struct {
     allocator: Allocator,
     files: source.ServerSource,
     texts: std.StringHashMap(?[]const u8),
+    line_indices: std.StringHashMap(LineIndex),
 
     pub fn init(server: *Server, a: Allocator) Query {
-        return .{ .allocator = a, .files = .{ .server = server }, .texts = std.StringHashMap(?[]const u8).init(a) };
+        return .{
+            .allocator = a,
+            .files = .{ .server = server },
+            .texts = std.StringHashMap(?[]const u8).init(a),
+            .line_indices = std.StringHashMap(LineIndex).init(a),
+        };
     }
 
     /// Concrete bindings in the resolved callee's conventional sources plus
@@ -158,9 +166,13 @@ pub const Query = struct {
 
     fn location(self: *Query, uri: []const u8, start: usize, end: usize) !types.Location {
         if (self.files.server.documents.get(uri)) |doc| return .{ .uri = uri, .range = doc.rangeFromOffsets(start, end) };
-        var doc = try Document.init(self.allocator, uri, "ansible", 0, (try self.text(uri)) orelse "", self.files.server.encoding);
-        defer doc.deinit();
-        return .{ .uri = uri, .range = doc.rangeFromOffsets(start, end) };
+        const idx = if (self.line_indices.get(uri)) |cached| cached else blk: {
+            const body = (try self.text(uri)) orelse "";
+            const built = try LineIndex.init(self.allocator, body, self.files.server.encoding);
+            try self.line_indices.put(uri, built);
+            break :blk built;
+        };
+        return .{ .uri = uri, .range = idx.rangeFromOffsets(start, end) };
     }
 };
 
