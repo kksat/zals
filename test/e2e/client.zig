@@ -85,6 +85,24 @@ pub const Client = struct {
         }
     }
 
+    pub fn requestError(self: *Client, method: []const u8, params: anytype) !Value {
+        const id = self.next_id;
+        self.next_id += 1;
+        try self.send(.{ .jsonrpc = "2.0", .id = id, .method = method, .params = params });
+        while (true) {
+            const msg = try self.readMessage();
+            if (field(msg, "method")) |event| {
+                if (event == .string and std.mem.eql(u8, event.string, "ansible/workspaceIndexReady")) {
+                    self.index_ready = true;
+                }
+                continue;
+            }
+            const response_id = (field(msg, "id") orelse return error.InvalidResponse);
+            if (response_id != .integer or response_id.integer != id) return error.UnexpectedResponseId;
+            return field(msg, "error") orelse error.ExpectedJsonRpcError;
+        }
+    }
+
     pub fn notify(self: *Client, method: []const u8, params: anytype) !void {
         try self.send(.{ .jsonrpc = "2.0", .method = method, .params = params });
     }
