@@ -44,6 +44,15 @@ pub fn handleRequest(self: *Server, a: Allocator, id: Value, method: []const u8,
         return self.sendResult(a, id, try navigation.result(&context, .implementation, params));
     if (std.mem.eql(u8, method, "textDocument/references"))
         return self.sendResult(a, id, try navigation.result(&context, .references, params));
+    if (std.mem.eql(u8, method, "textDocument/prepareRename"))
+        return self.sendResult(a, id, try navigation.result(&context, .prepare_rename, params));
+    if (std.mem.eql(u8, method, "textDocument/rename")) {
+        const new_name = json_util.string(params, "newName") orelse
+            return self.sendError(a, id, -32602, "invalid variable name");
+        if (!@import("../variables/jinja.zig").isValidIdentifier(new_name))
+            return self.sendError(a, id, -32602, "invalid variable name");
+        return self.sendResult(a, id, try navigation.result(&context, .rename, params));
+    }
     if (std.mem.eql(u8, method, "textDocument/semanticTokens/full"))
         return self.sendResult(a, id, try semanticResult(&context, params));
     if (std.mem.eql(u8, method, "textDocument/documentSymbol"))

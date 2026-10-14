@@ -81,15 +81,15 @@ pub fn collect(
     const text = forest.text;
     for (forest.roots) |root| {
         switch (kind) {
-            .role_defaults => try topLevelKeys(root, .role_defaults, out),
-            .role_vars => try topLevelKeys(root, .role_vars, out),
-            .role_meta => try argumentSpecs(root, out),
+            .role_defaults => try topLevelKeys(root, text, .role_defaults, out),
+            .role_vars => try topLevelKeys(root, text, .role_vars, out),
+            .role_meta => try argumentSpecs(root, text, out),
             // Playbooks and task files are seq-rooted. A map-rooted document
             // is variable data only in a Variable file; elsewhere it is
             // package, tool, or inventory configuration until a load targets
             // the file (see `collectLoaded`).
             .role_tasks, .role_handlers, .vars_file, .general => if (root.isMap()) {
-                if (kind == .vars_file) try topLevelKeys(root, .vars_files, out);
+                if (kind == .vars_file) try topLevelKeys(root, text, .vars_files, out);
             } else {
                 try walk(allocator, root, text, kind.structure(), out);
             },
@@ -101,11 +101,12 @@ pub fn collect(
 /// load targets it: the top-level keys of its map-rooted documents. A loaded
 /// `.general` file binds exactly what a `.vars_file` binds.
 pub fn collectLoaded(forest: *const dom.Forest, out: *std.array_list.Managed(Definition)) !void {
-    for (forest.roots) |root| try topLevelKeys(root, .vars_files, out);
+    for (forest.roots) |root| try topLevelKeys(root, forest.text, .vars_files, out);
 }
 
 fn topLevelKeys(
     root: *const Node,
+    text: []const u8,
     site: Site,
     out: *std.array_list.Managed(Definition),
 ) !void {
@@ -113,12 +114,14 @@ fn topLevelKeys(
     for (root.items) |pair| {
         const key = pair.key orelse continue;
         const name = key.stringValue() orelse continue;
-        try out.append(.{ .name = name, .start = key.start, .end = key.end, .site = site });
+        const range = scalarRange(key, text, name);
+        try out.append(.{ .name = name, .start = range.start, .end = range.end, .site = site });
     }
 }
 
 fn argumentSpecs(
     root: *const Node,
+    text: []const u8,
     out: *std.array_list.Managed(Definition),
 ) !void {
     const specs = dom.findPair(root, "argument_specs") orelse return;
@@ -130,7 +133,7 @@ fn argumentSpecs(
         const options = dom.findPair(entry_map, "options") orelse continue;
         const options_map = options.val orelse continue;
         if (!options_map.isMap()) continue;
-        try addMapKeys(options_map, .argument_specs, out);
+        try addMapKeys(options_map, text, .argument_specs, out);
     }
 }
 
@@ -151,12 +154,12 @@ fn walk(
                 const val = pair.val orelse continue;
 
                 if (std.mem.eql(u8, key, "vars") and val.isMap()) {
-                    if (varsSite(node, file)) |site| try addMapKeys(val, site, out);
+                    if (varsSite(node, file)) |site| try addMapKeys(val, text, site, out);
                     // Structured variable values are data, not nested Ansible
                     // directives that introduce another `vars:` binding map.
                     continue;
                 } else if (plays.isAction(key, "set_fact") and val.isMap()) {
-                    try addMapKeys(val, .set_fact, out);
+                    try addMapKeys(val, text, .set_fact, out);
                     continue;
                 } else if (std.mem.eql(u8, key, "register") and val.isScalar()) {
                     try addScalar(val, text, .register, out);
@@ -172,7 +175,7 @@ fn walk(
                         }
                     }
                 } else if (std.mem.eql(u8, key, "roles") and val.isSeq()) {
-                    try roleParams(val, out);
+                    try roleParams(val, text, out);
                     continue;
                 }
                 // Recurse only through Ansible play/task containers. Module
@@ -192,6 +195,7 @@ fn walk(
 
 fn roleParams(
     seq: *const Node,
+    text: []const u8,
     out: *std.array_list.Managed(Definition),
 ) !void {
     for (seq.items) |item| {
@@ -201,13 +205,14 @@ fn roleParams(
             const name = key_node.stringValue() orelse continue;
             if (std.mem.eql(u8, name, "vars")) {
                 if (pair.val) |value| if (value.isMap()) {
-                    if (varsSite(item, .{})) |site| try addMapKeys(value, site, out);
+                    if (varsSite(item, .{})) |site| try addMapKeys(value, text, site, out);
                 };
                 continue;
             }
             if (std.mem.eql(u8, name, "role")) continue;
             if (keywords.isRoleKeyword(name)) continue;
-            try out.append(.{ .name = name, .start = key_node.start, .end = key_node.end, .site = .role_param });
+            const range = scalarRange(key_node, text, name);
+            try out.append(.{ .name = name, .start = range.start, .end = range.end, .site = .role_param });
         }
     }
 }
@@ -225,13 +230,15 @@ fn varsSite(map: *const Node, file: plays.File) ?Site {
 
 fn addMapKeys(
     map: *const Node,
+    text: []const u8,
     site: Site,
     out: *std.array_list.Managed(Definition),
 ) !void {
     for (map.items) |pair| {
         const key = pair.key orelse continue;
         const name = key.stringValue() orelse continue;
-        try out.append(.{ .name = name, .start = key.start, .end = key.end, .site = site });
+        const range = scalarRange(key, text, name);
+        try out.append(.{ .name = name, .start = range.start, .end = range.end, .site = site });
     }
 }
 

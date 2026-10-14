@@ -1,5 +1,5 @@
-//! The navigation protocol adapter. Definition, implementation, references
-//! and hover share one shape: decode the text-document position, ask
+//! The navigation protocol adapter. Definition, implementation, references,
+//! hover and rename share one shape: decode the text-document position, ask
 //! `queries/navigation.Query`, and encode the answer. Semantic precedence and
 //! fallbacks live in the query; only JSON and result shapes live here.
 
@@ -28,7 +28,7 @@ pub fn cursorAt(documents: *DocumentStore, params: Value) ?Cursor {
     return .{ .doc = doc, .offset = offset };
 }
 
-pub const Method = enum { definition, implementation, references, hover };
+pub const Method = enum { definition, implementation, references, hover, prepare_rename, rename };
 
 /// The JSON result of a navigation request. Null when the position is not in
 /// an open document or the cursor is on nothing navigable.
@@ -57,5 +57,10 @@ pub fn result(context: *Context, method: Method, params: Value) !Value {
             return encode.locations(a, locs);
         },
         .hover => return encode.hover(a, try query.hover(&subject)),
+        .prepare_rename => return encode.prepareRename(a, try query.prepareRename(&subject)),
+        .rename => {
+            const new_name = json_util.string(params, "newName") orelse return Value.null;
+            return encode.workspaceEditChanges(a, try query.rename(&subject), new_name);
+        },
     }
 }

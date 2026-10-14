@@ -28,7 +28,8 @@ pub fn contextAt(context: *Context, subject: *Subject, field: bool) !?Passed {
     const path = subject.path;
     if (!field) {
         const param = parameters.parameterAt(path) orelse return null;
-        return try resolve(context, subject, .{ .names = try a.dupe([]const u8, &.{param.name}), .role = param.role, .entry_point = param.entry_point, .directories = &.{}, .range = subject.doc.rangeFromOffsets(param.start, param.end) });
+        const range = variables.definitions.scalarRange(path[path.len - 1], forest.text, param.name);
+        return try resolve(context, subject, .{ .names = try a.dupe([]const u8, &.{param.name}), .role = param.role, .entry_point = param.entry_point, .directories = &.{}, .range = subject.doc.rangeFromOffsets(range.start, range.end) });
     }
     if (path.len < 2) return null;
     const key = path[path.len - 1];

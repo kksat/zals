@@ -164,6 +164,11 @@ pub const TextEdit = struct {
     newText: []const u8,
 };
 
+pub const PrepareRename = struct {
+    range: Range,
+    placeholder: []const u8,
+};
+
 pub const WorkspaceEdit = struct {
     changes: ?std.json.Value = null,
     documentChanges: ?std.json.Value = null,
