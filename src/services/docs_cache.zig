@@ -75,13 +75,12 @@ test "cache round trip" {
         .name = "ansible.builtin.ping",
         .description = "ping module",
     });
-    var opts = std.StringHashMap(docs.Option).init(allocator);
-    try opts.put(try a.dupe(u8, "data"), .{
+    const opts = try a.dupe(docs.Option, &.{.{
         .name = "data",
         .description = "data option",
         .type = "str",
         .required = true,
-    });
+    }});
     try lib.modules.put(try a.dupe(u8, "ansible.builtin.ping"), .{
         .name = "ansible.builtin.ping",
         .description = "ping module",
@@ -105,6 +104,6 @@ test "cache round trip" {
     const m = lib2.modules.get("ansible.builtin.ping").?;
     try std.testing.expectEqualStrings("ping module", m.description);
     try std.testing.expectEqualStrings("/x/ping.py", m.filename);
-    try std.testing.expectEqualStrings("str", m.options.get("data").?.type);
-    try std.testing.expect(m.options.get("data").?.required);
+    try std.testing.expectEqualStrings("str", m.getOption("data").?.type);
+    try std.testing.expect(m.getOption("data").?.required);
 }

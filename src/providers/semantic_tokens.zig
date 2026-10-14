@@ -124,13 +124,14 @@ test "module option is a method token" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    var options = std.StringHashMap(docs.Option).init(a);
-    try options.put("data", .{ .name = "data", .description = "payload", .type = "str" });
+    const options = [_]docs.Option{
+        .{ .name = "data", .description = "payload", .type = "str" },
+    };
     var one = One{ .module = .{
         .name = "ping",
         .description = "probe",
         .filename = "",
-        .options = options,
+        .options = &options,
     } };
     const lookup = cursor.Docs{ .ptr = &one, .vtable = &one_vtable };
     const src = "- ping:\n    data: 1\n";

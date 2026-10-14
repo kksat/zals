@@ -72,9 +72,7 @@ fn addFallback(
 }
 
 fn addOptions(items: *std.array_list.Managed(types.CompletionItem), o: cursor.OptionAt) !void {
-    var it = o.module.options.iterator();
-    while (it.next()) |e| {
-        const opt = e.value_ptr.*;
+    for (o.module.options) |opt| {
         var skip = false;
         for (o.provided) |p| {
             if (std.mem.eql(u8, p, opt.name)) {
@@ -160,19 +158,20 @@ test "completion lists remaining module options" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    var options = std.StringHashMap(@import("../services/docs.zig").Option).init(a);
-    try options.put("data", .{ .name = "data", .description = "payload", .type = "str" });
-    try options.put("other", .{ .name = "other", .description = "", .type = "int" });
+    const options = [_]@import("../services/docs.zig").Option{
+        .{ .name = "data", .description = "payload", .type = "str" },
+        .{ .name = "other", .description = "", .type = "int" },
+    };
     const mod = @import("../services/docs.zig").Module{
         .name = "ping",
         .description = "probe",
         .filename = "",
-        .options = options,
+        .options = &options,
     };
     const cur = cursor.Cursor{ .module_option = .{
         .name = "data",
         .module = mod,
-        .option = options.get("data"),
+        .option = mod.getOption("data"),
         .list_options = true,
         .provided = &.{"data"},
         .start = 0,
