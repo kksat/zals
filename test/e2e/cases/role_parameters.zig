@@ -57,21 +57,35 @@ const origins = [_]struct { name: []const u8, at: m.Anchor }{
     .{ .name = "other role binding", .at = m.cursor(other ++ "defaults/main.yml", "<input_value>: other-default") },
 };
 
-fn symmetricReferenceCases() [origins.len * 2]m.Case {
-    var cases: [origins.len * 2]m.Case = undefined;
+fn symmetricReferenceCases() [origins.len * 4]m.Case {
+    var cases: [origins.len * 4]m.Case = undefined;
     for (origins, 0..) |origin, i| {
-        cases[i * 2] = .{
+        cases[i * 4] = .{
             .name = "role parameter/references from " ++ origin.name ++ ": reads only",
             .method = .references,
             .from = origin.at,
             .include_declaration = false,
             .expected = reads,
         };
-        cases[i * 2 + 1] = .{
+        cases[i * 4 + 1] = .{
             .name = "role parameter/references from " ++ origin.name ++ ": reads and bindings",
             .method = .references,
             .from = origin.at,
             .include_declaration = true,
+            .expected = reads_and_bindings,
+        };
+        cases[i * 4 + 2] = .{
+            .name = "role parameter/prepareRename from " ++ origin.name,
+            .method = .prepare_rename,
+            .from = origin.at,
+            .placeholder = "input_value",
+            .expected = &.{m.span(origin.at.path, origin.at.snippet)},
+        };
+        cases[i * 4 + 3] = .{
+            .name = "role parameter/rename from " ++ origin.name ++ ": all reads and bindings",
+            .method = .rename,
+            .from = origin.at,
+            .new_name = "renamed_input_value",
             .expected = reads_and_bindings,
         };
     }
