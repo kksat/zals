@@ -20,7 +20,20 @@ pub fn collect(a: Allocator, forest: *const yaml.Forest, file_path: []const u8, 
     var roots = std.array_list.Managed(definitions.Definition).init(a);
     defer roots.deinit();
     try definitions.collect(a, forest, kind, &roots);
-    for (roots.items) |root_def| {
+    return collectFromDefinitions(a, forest, file_path, kind, roots.items, out);
+}
+
+/// Collect field keys using root definitions already extracted from `forest`.
+pub fn collectFromDefinitions(
+    a: Allocator,
+    forest: *const yaml.Forest,
+    file_path: []const u8,
+    kind: definitions.FileKind,
+    root_defs: []const definitions.Definition,
+    out: *std.array_list.Managed(Definition),
+) !void {
+    if (kind == .general and isMetadata(file_path)) return;
+    for (root_defs) |root_def| {
         for (forest.roots) |root| {
             const pair = pairWithKeyAt(root, root_def.start) orelse continue;
             const value = pair.val orelse continue;

@@ -46,10 +46,6 @@ const Parser = struct {
         n.* = .{ .kind = kind, .start = start, .end = end };
         return n;
     }
-
-    fn dupe(self: *Parser, s: []const u8) ![]const u8 {
-        return self.arena.dupe(u8, s);
-    }
 };
 
 pub fn parse(allocator: Allocator, text: []const u8) !Forest {
@@ -306,7 +302,7 @@ fn parseBlockScalar(p: *Parser, start: usize, header: []const u8, parent_indent:
 
 fn parseScalarFrom(p: *Parser, raw: []const u8, start: usize, end: usize) !*Node {
     const n = try p.allocNode(.scalar, start, end);
-    n.value = try p.dupe(unquote(raw));
+    n.value = unquote(raw);
     return n;
 }
 
@@ -399,7 +395,10 @@ test "parse nested maps and quoted keys" {
     try std.testing.expect(root.isMap());
     const foo = dom.findPair(root, "foo").?;
     try std.testing.expect(foo.val.?.isMap());
-    try std.testing.expectEqualStrings("baz", dom.findPair(foo.val.?, "bar").?.val.?.stringValue().?);
+    const bar_val = dom.findPair(foo.val.?, "bar").?.val.?.stringValue().?;
+    try std.testing.expectEqualStrings("baz", bar_val);
+    try std.testing.expect(@intFromPtr(bar_val.ptr) >= @intFromPtr(src.ptr) and
+        @intFromPtr(bar_val.ptr) + bar_val.len <= @intFromPtr(src.ptr) + src.len);
 }
 
 test "URL scalars are not mapping keys" {
