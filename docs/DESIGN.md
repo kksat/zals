@@ -184,9 +184,18 @@ existing `ansible.*` configuration works unchanged. See
 
 ## 10. Custom messages
 
-Three upstream custom messages are retained: `ansible/errorMessage`,
-`ansible/docsLibraryReady`, and `ansible/refreshConfiguration`. The Tier 2
-messages (`resync/ansible-inventory`, `update/ansible-metadata`) are dropped.
+Two custom readiness notifications are retained for tests and benchmarks:
+`ansible/workspaceIndexReady` reports the applied Workspace index file count;
+`ansible/docsLibraryReady` reports the catalog count after asynchronous docs
+bootstrap, not full documentation prefetch completion. Ordinary editor requests
+do not wait for either notification.
+
+`ansible/refreshConfiguration` is not supported. Settings use
+`initializationOptions` and `workspace/didChangeConfiguration`; no replacement
+cache or installed-collection refresh is provided. `ansible/errorMessage` was
+never implemented; existing warnings use standard LSP messages. The Tier 2
+messages (`resync/ansible-inventory`, `update/ansible-metadata`) remain unsupported.
+See [ADR-0043](adr/0043-custom-readiness-without-refresh.md).
 
 ## 11. Build and platforms
 

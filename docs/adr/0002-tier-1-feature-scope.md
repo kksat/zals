@@ -31,7 +31,7 @@ and metadata notifications, execution environments, and `--generate-docs`.
 - A usable, focused server ships sooner.
 - The Tier 2 custom messages (`resync/ansible-inventory`,
   `update/ansible-metadata`) are dropped (see
-  [ADR-0016](0016-custom-ansible-messages.md)).
+  [ADR-0043](0043-custom-readiness-without-refresh.md)).
 - Tier 2/3 can be added later without reworking the Tier 1 architecture, because
   external dependencies sit behind interfaces
   ([ADR-0003](0003-pluggable-external-process-execution.md)).

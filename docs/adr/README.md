@@ -20,7 +20,7 @@ Each ADR captures one decision, its context, and its consequences. Statuses are
 | [0013](0013-memory-management.md) | Memory management | Accepted |
 | [0014](0014-multi-root-workspace.md) | Git workspaces and shared docs cache | Accepted |
 | [0015](0015-validation-behavior.md) | Validation behavior | Accepted |
-| [0016](0016-custom-ansible-messages.md) | Custom `ansible/*` messages | Accepted |
+| [0016](0016-custom-ansible-messages.md) | Custom `ansible/*` messages | Superseded by ADR-0043 |
 | [0017](0017-settings-compatibility.md) | Settings compatibility | Accepted |
 | [0018](0018-cli-and-logging.md) | CLI and logging | Accepted |
 | [0019](0019-toolchain-build-and-platforms.md) | Toolchain, build, and platforms | Accepted |
@@ -47,6 +47,7 @@ Each ADR captures one decision, its context, and its consequences. Statuses are
 | [0040](0040-navigation-file-uris.md) | Absolute, escaped navigation file URIs | Accepted |
 | [0041](0041-field-name-navigation.md) | Field-name navigation | Accepted |
 | [0042](0042-passed-role-field-navigation.md) | Passed role-field navigation | Accepted |
+| [0043](0043-custom-readiness-without-refresh.md) | Custom readiness without configuration refresh | Accepted |
 
 ## Template
 

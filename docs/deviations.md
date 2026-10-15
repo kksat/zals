@@ -16,8 +16,9 @@ what differs, why, and whether it is expected to be permanent.
 
 | # | Deviation | Rationale | Permanent? |
 | --- | --- | --- | --- |
-| 4 | `resync/ansible-inventory` and `update/ansible-metadata` are not implemented. | Tier 2. See [ADR-0016](adr/0016-custom-ansible-messages.md). | Until Tier 2 |
+| 4 | `resync/ansible-inventory` and `update/ansible-metadata` are not implemented. | Tier 2. See [ADR-0043](adr/0043-custom-readiness-without-refresh.md). | Until Tier 2 |
 | 5 | Go-to-definition targets the start of the module file. | Simpler and always correct. See [ADR-0009](adr/0009-go-to-definition-target.md). | Maybe |
+| 21 | `ansible/refreshConfiguration` is not supported; `ansible/errorMessage` was never implemented. | Use standard settings updates and existing LSP warnings. Both custom readiness notifications remain. See [ADR-0043](adr/0043-custom-readiness-without-refresh.md). | Yes |
 
 ## Implementation
 
