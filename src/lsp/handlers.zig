@@ -18,14 +18,8 @@ pub fn handleRequest(self: *Server, a: Allocator, id: Value, method: []const u8,
         self.shutdown_requested = true;
         return self.sendResult(a, id, Value.null);
     }
-    if (std.mem.eql(u8, method, "ansible/refreshConfiguration")) {
-        self.settings.reload();
-        try self.rebuildWorkspaces();
-        try self.warnMissingWorkspace(a);
-        return self.sendResult(a, id, Value.null);
-    }
 
-    // Lifecycle/configuration requests above are writers. Remaining requests
+    // Lifecycle requests above are writers. Remaining requests
     // share a lazy lease through response encoding and enqueueing; nested
     // Workspace/role/collection reads borrow one revision. Notifications
     // run separately, so documents, roots, settings and the selected venv also
@@ -242,4 +236,81 @@ fn onInitialize(self: *Server, a: Allocator, id: Value, params: Value) !void {
     try result.put("serverInfo", .{ .object = info });
 
     try self.sendResult(a, id, .{ .object = result });
+}
+
+test "removed refresh leaves settings and Workspaces unchanged while standard configuration still works" {
+    const testing = std.testing;
+    const Transport = @import("transport.zig").Transport;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    (try tmp.dir.createFile("workspace-marker", .{})).close();
+    (try tmp.dir.createFile("next-marker", .{})).close();
+    const output = try tmp.dir.createFile("messages", .{ .read = true });
+    defer output.close();
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const root = try tmp.dir.realpathAlloc(a, ".");
+    const root_uri = try @import("../paths.zig").pathToUri(a, root);
+    const ids = [_]Value{ .{ .integer = 0 }, json_util.str("refresh") };
+    {
+        var server = try Server.init(testing.allocator, Transport.init(output, output));
+        defer server.deinit(); // Flush the writer before inspecting the wire output.
+        var params = try std.json.parseFromSliceLeaky(Value, a,
+            \\{"initializationOptions":{"ansible":{"workspace":{"rootMarker":"workspace-marker"},"python":{"venvPath":"custom-venv"},"validation":{"enabled":false}}}}
+        , .{});
+        try params.object.put("rootUri", json_util.str(root_uri));
+        try handleRequest(&server, a, .{ .integer = 1 }, "initialize", params);
+        try testing.expectEqualStrings("workspace-marker", server.settings.root_marker);
+        try testing.expectEqualStrings("custom-venv", server.settings.venv_path);
+        try testing.expect(!server.settings.validation_enabled);
+        try testing.expectEqual(@as(usize, 1), server.root_uris.items.len);
+        try testing.expectEqualStrings(root_uri, server.root_uris.items[0]);
+
+        for (ids) |id| {
+            try handleRequest(&server, a, id, "ansible/refreshConfiguration", .null);
+            try testing.expectEqualStrings("workspace-marker", server.settings.root_marker);
+            try testing.expectEqualStrings("custom-venv", server.settings.venv_path);
+            try testing.expect(!server.settings.validation_enabled);
+            try testing.expectEqual(@as(usize, 1), server.root_uris.items.len);
+            try testing.expectEqualStrings(root_uri, server.root_uris.items[0]);
+        }
+        try handleNotification(&server, a, "ansible/refreshConfiguration", .null);
+        try testing.expectEqualStrings("workspace-marker", server.settings.root_marker);
+        try testing.expectEqualStrings("custom-venv", server.settings.venv_path);
+        try testing.expect(!server.settings.validation_enabled);
+        try testing.expectEqual(@as(usize, 1), server.root_uris.items.len);
+        try testing.expectEqualStrings(root_uri, server.root_uris.items[0]);
+
+        const changed = try std.json.parseFromSliceLeaky(Value, a,
+            \\{"settings":{"ansible":{"workspace":{"rootMarker":"next-marker"},"python":{"venvPath":"next-venv"},"validation":{"enabled":false}}}}
+        , .{});
+        try handleNotification(&server, a, "workspace/didChangeConfiguration", changed);
+        try testing.expectEqualStrings("next-marker", server.settings.root_marker);
+        try testing.expectEqualStrings("next-venv", server.settings.venv_path);
+        try testing.expect(!server.settings.validation_enabled);
+        try testing.expectEqual(@as(usize, 1), server.root_uris.items.len);
+        try testing.expectEqualStrings(root_uri, server.root_uris.items[0]);
+    }
+
+    try output.seekTo(0);
+    var transport = Transport.init(output, output);
+    const initialized = try std.json.parseFromSliceLeaky(Value, a, (try transport.readMessage(a)).?, .{});
+    try testing.expectEqual(@as(i64, 1), json_util.field(initialized, "id").?.integer);
+    try testing.expect(json_util.field(initialized, "result") != null);
+    for (ids) |id| {
+        const response = try std.json.parseFromSliceLeaky(Value, a, (try transport.readMessage(a)).?, .{});
+        const response_id = json_util.field(response, "id").?;
+        switch (id) {
+            .integer => |n| try testing.expectEqual(n, response_id.integer),
+            .string => |s| try testing.expectEqualStrings(s, response_id.string),
+            else => unreachable,
+        }
+        try testing.expect(json_util.field(response, "result") == null);
+        const err = json_util.field(response, "error").?;
+        try testing.expectEqual(@as(i64, -32601), json_util.field(err, "code").?.integer);
+        try testing.expectEqualStrings("method not found", json_util.string(err, "message").?);
+    }
+    // Neither the removed notification nor standard configuration emits a response.
+    try testing.expectEqual(@as(?[]u8, null), try transport.readMessage(a));
 }

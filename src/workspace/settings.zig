@@ -73,12 +73,6 @@ pub const Settings = struct {
         self.missing_git_warning = optBool(workspace, "missingGitWarning", true);
         self.root_marker = try dupeOpt(a, if (workspace) |w| json_util.string(w, "rootMarker") else null, ".git");
     }
-
-    /// Reset to defaults.
-    pub fn reload(self: *Settings) void {
-        _ = self.arena.reset(.retain_capacity);
-        self.* = .{ .allocator = self.allocator, .arena = self.arena };
-    }
 };
 
 fn optBool(v: ?Value, key: []const u8, default: bool) bool {

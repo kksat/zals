@@ -31,7 +31,9 @@ Build in this order:
    `ansible-lint` + codeclimate parser, syntax-check fallback, validation manager
    with cache reconciliation.
 7. **M7 — Workspace:** multi-root contexts, `didChangeConfiguration`, watched
-   files, `refreshConfiguration`.
+   files. The custom `refreshConfiguration` request was later removed by
+   [ADR-0043](0043-custom-readiness-without-refresh.md); standard configuration
+   updates remain.
 8. **M8 — Parity harness & packaging:** differential harness, deviations list,
    logging, release artifacts.
 
