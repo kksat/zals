@@ -195,10 +195,13 @@ server, Python, and VS Code versions in lockstep. Merging that PR creates the
 `vX.Y.Z` tag and a GitHub release. See
 [ADR-0026](docs/adr/0026-release-process.md).
 
-The **release** workflow defaults to **GitHub-only** packaging. It builds five
-native binary archives, five Python wheels, five platform-specific VSIX packages,
-and `SHA256SUMS`. PyPI, Homebrew, Visual Studio Marketplace, and Open VSX
-publishing require explicit manual inputs.
+When release-please creates a release after its release PR is merged, it calls
+the **release** workflow with the new tag and publishes to Visual Studio
+Marketplace and Open VSX using `VSCE_PAT` and `OVSX_PAT`. Ordinary commits,
+unrelated GitHub release events, and tag pushes do not start publishing. Manual
+dispatch remains available and defaults to **GitHub-only** packaging. The workflow
+builds five native archives, five Python wheels, five platform-specific VSIXs,
+and `SHA256SUMS`. PyPI and Homebrew remain explicit manual opt-ins.
 
 To bootstrap or rebuild a release, push the version tag, then run:
 
@@ -206,7 +209,8 @@ To bootstrap or rebuild a release, push the version tag, then run:
 gh workflow run release.yml --ref main -f tag=v0.1.0
 ```
 
-All jobs check out the requested tag, not the moving branch tip. The workflow
+Build and asset verification jobs check out the requested tag, not the moving
+branch tip; publishing tools come from the workflow revision. The workflow
 rejects mismatched source versions and verifies the complete asset set,
 platform metadata, and identical bundled binaries before creating or updating
 the GitHub release. Packaging must succeed for every platform before any assets
@@ -238,14 +242,17 @@ gh workflow run release.yml --ref main -f tag=v0.1.0 \
   -f publish_existing=true -f publish_vscode=true -f publish_openvsx=true
 ```
 
-Each registry is independently opt-in. Marketplace defaults to Microsoft Entra ID
-with GitHub OIDC (no PAT); explicitly selecting `-f vscode_auth=pat` instead uses
-the `VSCE_PAT` repository secret. Open VSX uses the `OVSX_PAT` repository secret. Both upload
+Manual runs select each registry independently. Marketplace defaults to Microsoft
+Entra ID with GitHub OIDC (no PAT); explicitly selecting `-f vscode_auth=pat`
+instead uses `VSCE_PAT`. Automatic release-please publication explicitly selects
+PAT mode. Open VSX uses `OVSX_PAT`. Both upload
 all five existing platform packages and skip already-published versions on
 retry. See [VS Code publishing setup](docs/vscode-publishing.md) for the Azure
 managed identity, protected GitHub environment, publisher authorization, and
-Open VSX namespace requirements. Until setup and an explicit publishing run
-succeed, install VSIXs from GitHub as above.
+Open VSX namespace requirements. Already-published version/platform pairs succeed
+without replacement; missing targets are uploaded, and real publication errors
+still fail. Until setup and a publishing run succeed, install VSIXs from GitHub
+as above.
 
 The tap is public, but the formula downloads binaries from the GitHub release.
 If this repository is private, Homebrew installation needs access to those

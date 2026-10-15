@@ -1,15 +1,40 @@
 # Publishing the VS Code extension
 
 The release workflow packages five platform-specific VSIXs for `kksat.zals`.
-Registry publication is separately opt-in: `publish_vscode` selects Visual Studio
-Marketplace, and `publish_openvsx` selects Open VSX. Both jobs consume the complete
-GitHub release only after its package metadata, bundled binaries, and
+Merging a release-please release PR automatically publishes to Visual Studio
+Marketplace and Open VSX using `VSCE_PAT` and `OVSX_PAT`. Manual runs select
+registries independently: `publish_vscode` selects Marketplace, and
+`publish_openvsx` selects Open VSX. Both jobs consume the complete GitHub release
+only after its package metadata, bundled binaries, and
 `SHA256SUMS` have been verified. They upload the existing VSIXs without rebuilding,
 bumping versions, moving tags, or replacing GitHub assets.
 
-Marketplace authentication defaults to `vscode_auth=entra`. To use the repository
-secret `VSCE_PAT` instead, explicitly select `vscode_auth=pat`; there is no
-implicit fallback from Entra to a PAT.
+Manual Marketplace authentication defaults to `vscode_auth=entra`. To use the
+repository secret `VSCE_PAT` instead, explicitly select `vscode_auth=pat`; there
+is no implicit fallback from Entra to a PAT. The release-please caller explicitly
+selects PAT authentication until Azure federation is configured.
+
+## When publishing runs
+
+`release-please.yml` runs on pushes to `main`, but calls `release.yml` **only**
+when its release action outputs `release_created == 'true'`. This normally
+happens after merging the release PR. The caller passes the action's exact
+`tag_name` and explicitly enables Marketplace and Open VSX publication. PyPI
+and Homebrew remain manual opt-ins.
+
+`release.yml` supports only `workflow_call` and `workflow_dispatch`; it has no
+push, pull-request, tag, or GitHub release event trigger. Ordinary commits,
+opening/updating a release PR, and unrelated manually created GitHub releases
+do not start packaging or publication. Direct workflow reuse avoids depending
+on release events, which GitHub suppresses when release-please uses
+`GITHUB_TOKEN`.
+
+For a failed automatic publication, use the manual command below with
+`publish_existing=true` once the complete GitHub assets exist. If packaging
+failed before those assets were uploaded, omit that flag to build them first.
+Rerunning all of release-please after it already created the release can yield
+`release_created=false`; that skips publication, so manual dispatch is the
+explicit retry path.
 
 ## Visual Studio Marketplace: one-time setup
 
@@ -18,7 +43,7 @@ Microsoft Entra ID, workload identity federation, and a user-assigned managed
 identity. The linked example uses Azure Pipelines; here GitHub Actions supplies
 OIDC tokens through [`azure/login`](https://github.com/Azure/login#login-with-openid-connect-oidc-recommended),
 and `vsce publish --azure-credential` uses the resulting Azure CLI session.
-**No Azure DevOps PAT or client secret is stored in GitHub.**
+**This Entra mode does not use an Azure DevOps PAT or client secret.**
 
 1. Create or confirm the Marketplace publisher ID **`kksat`** at
    <https://marketplace.visualstudio.com/manage>.
@@ -121,8 +146,10 @@ gh workflow run release.yml --ref main -f tag=v0.1.0 \
   -f publish_existing=true -f publish_openvsx=true
 ```
 
-Omit `publish_existing` to build and publish in one run. Release-triggered runs
-still publish only to GitHub; credentials alone never enable registry jobs.
+Omit `publish_existing` to build and publish in one run. A manual dispatch with
+no registry flags packages only to GitHub. The automatic release-please caller
+explicitly enables the two extension registries; credentials alone never select
+a registry.
 
 Both clients are locked npm dependencies installed from the workflow revision,
 so publishing an older tag can use updated tooling without altering its VSIXs.
@@ -134,8 +161,27 @@ identifies each package by version **and** target platform. For example, if only
 The existing target is skipped and kept unchanged. Changing its contents requires
 a newer version; `--skip-duplicate` does not update that package.
 
-Other upload/authentication failures fail the job. The registries run
-independently, so a failure in one does not undo publication to the other.
+A run with all five packages already present succeeds. A partial release skips
+existing packages and publishes missing targets; retrying converges on the same
+five version/platform pairs without replacing any existing package. Invalid
+credentials, permission errors, registry/server errors, and inability to verify
+or upload packages still fail the job. Errors are not swallowed with
+`continue-on-error` or a blanket success fallback. The registries run independently,
+so a failure in one does not undo publication to the other.
+
+The retry contract is exercised through the **real locked CLIs** against local
+HTTP registry fixtures in `test/test_release.py`: fresh, partially published,
+and fully published releases, repeated runs, HTTP 401/403/500 failures, and
+recovery after a failed upload. No real registry or credential is used. Run:
+
+```sh
+npm ci --prefix editors/vscode
+python3 -m unittest discover -s test -p 'test_release.py'
+```
+
+`make check` runs these tests when the Node dependencies are installed;
+otherwise only the two real-CLI tests are skipped. The VS Code CI test job
+installs the dependencies so they always run there.
 
 Check the Actions run and registry pages after publishing:
 

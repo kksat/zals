@@ -1,10 +1,46 @@
 name: release
 
-# Packaging defaults to GitHub only; external publication is opt-in.
+# Called only after release-please creates a release, or manually dispatched.
+# Manual packaging defaults to GitHub only; the caller selects external registries.
 # Tagged sources/assets are used even when manually dispatched from main.
 on:
-  release:
-    types: [published]
+  workflow_call:
+    inputs:
+      tag:
+        description: "Release-please tag to build and publish"
+        required: true
+        type: string
+      publish_existing:
+        description: "Publish existing GitHub assets without rebuilding or replacing them"
+        type: boolean
+        default: false
+      publish_pypi:
+        description: "Publish verified wheels to PyPI using trusted publishing"
+        type: boolean
+        default: false
+      publish_homebrew:
+        description: "Publish the verified formula to kksat/tap"
+        type: boolean
+        default: false
+      publish_vscode:
+        description: "Publish verified VSIXs to Visual Studio Marketplace"
+        type: boolean
+        default: false
+      vscode_auth:
+        description: "Marketplace authentication: entra or pat"
+        type: string
+        default: entra
+      publish_openvsx:
+        description: "Publish verified VSIXs to Open VSX"
+        type: boolean
+        default: false
+    secrets:
+      VSCE_PAT:
+        required: false
+      OVSX_PAT:
+        required: false
+      HOMEBREW_TAP_TOKEN:
+        required: false
   workflow_dispatch:
     inputs:
       tag:
@@ -43,12 +79,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.event.release.tag_name || inputs.tag }}
+  group: release-${{ inputs.tag }}
   cancel-in-progress: false
 
 env:
   ZIG_VERSION: "0.15.1"
-  TAG: ${{ github.event.release.tag_name || inputs.tag }}
+  TAG: ${{ inputs.tag }}
 
 jobs:
   validate:

@@ -27,7 +27,15 @@ Use **Google release-please** to drive releases from
   `python/pyproject.toml` via the generic updater (`x-release-please-version`
   annotations), plus the VS Code manifest and lockfile via JSON updaters.
 - Merging the release PR creates the `vX.Y.Z` tag and a GitHub release.
-- `.github/workflows/release.yml` runs when a release is published. It
+  The action exposes `release_created` and `tag_name` as job outputs. A dependent
+  job calls the reusable release workflow only when `release_created == 'true'`,
+  passing the exact tag and explicitly enabling Marketplace and Open VSX using
+  the configured PAT secrets. Ordinary pushes that only update a release PR do
+  not invoke packaging or publishing.
+- `.github/workflows/release.yml` runs only via that `workflow_call` or manual
+  `workflow_dispatch`, not arbitrary GitHub release events or tag pushes. Calling
+  it directly also avoids GitHub's suppression of events from releases created
+  using `GITHUB_TOKEN`. It
   cross-compiles `x86_64`/`aarch64` Linux, `x86_64`/`aarch64` macOS, and
   `x86_64` Windows binaries from a single Linux runner (Zig cross-compiles),
   packages them as `zals-<version>-<target>.tar.gz` (`.zip` on Windows).
@@ -43,13 +51,16 @@ Use **Google release-please** to drive releases from
   (`linux-x64`, `linux-arm64`, `darwin-x64`, `darwin-arm64`, `win32-x64`) each
   bundle the matching binary and the compiled language client. Packaging uses
   the locked `@vscode/vsce` dependency and Node 22 for TypeScript unit tests.
-- Every job checks out the requested tag. A validation job checks that all
+- Build and asset verification jobs check out the requested tag; publishing
+  tools use the workflow revision. A validation job checks that all
   source versions match it. Publication waits for every binary, wheel, and
   VSIX, verifies the 15-asset contract and matching bundled binary bytes,
   and attaches all assets plus `SHA256SUMS` to GitHub.
-- Packaging defaults to **GitHub only**. Manual dispatch inputs
+- Manual packaging defaults to **GitHub only**. Dispatch/call inputs
   `publish_pypi`, `publish_homebrew`, `publish_vscode`, and `publish_openvsx`
-  explicitly opt into external publishing; credentials alone never enable it.
+  select external publishing; credentials alone never enable it. The
+  release-please caller explicitly enables the two extension registries; PyPI
+  and Homebrew remain manual opt-ins.
 - `publish_existing` skips rebuilding and reuses the existing GitHub release.
   Publication checks all 15 assets and `SHA256SUMS` before distributing them.
   PyPI uses OIDC trusted publishing configured for `release.yml`, uploading all
@@ -62,8 +73,10 @@ Use **Google release-please** to drive releases from
   `vsce publish --azure-credential` uses the Azure CLI session. Its job grants
   `id-token: write` at job scope and uses the protected `vscode-marketplace` environment.
   An explicit `vscode_auth=pat` option instead selects an isolated Marketplace
-  job using `VSCE_PAT`, with no Azure setup or OIDC permission. Entra remains the
-  default; missing identity configuration never silently falls back to a PAT.
+  job using `VSCE_PAT`, with no Azure setup or OIDC permission in that job.
+  Entra remains the input default; the release-please caller explicitly selects
+  PAT mode until federation is configured. Missing identity configuration never
+  silently falls back to a PAT.
   Both PAT secrets are scoped only to credential check/upload steps; Open VSX
   uses `OVSX_PAT`.
   Registries are independent; a failure does not roll back another registry.
@@ -89,9 +102,18 @@ flow through release-please.
 - Windows support required making the transport, writer, logging, and cache
   directory portable (`std.fs.File` instead of raw POSIX fds,
   `std.process.getEnvVarOwned` instead of `std.posix.getenv`).
-- External publication is opt-in and independent for each registry.
-  Existing verified GitHub assets can be published without moving a tag or
-  replacing assets. VSIXs can still be installed locally.
+- Registries are independently selected by explicit inputs. Release PR merges
+  automatically publish to both extension registries; manual runs can select any
+  registry. Existing verified GitHub assets can be published without moving a
+  tag or replacing assets. VSIXs can still be installed locally.
+- Publishing is idempotent for each version/platform pair: existing packages
+  succeed without replacement, missing targets are uploaded, and genuine
+  authentication, permission, or upload errors still fail. Local HTTP fixtures
+  exercise these outcomes through the locked real CLIs, including partial
+  failure recovery; CI installs Node dependencies to ensure these tests run.
+- Manual dispatch with `publish_existing=true` is the publication retry path
+  once GitHub assets exist. Rerunning all of release-please may output
+  `release_created=false` for a release it already created and skip the call.
 - Marketplace's default Entra mode stores no long-lived PAT/client secret. It
   requires one-time Azure federation and Marketplace identity authorization,
   plus GitHub environment branch restrictions. The explicitly selected PAT mode

@@ -174,12 +174,39 @@ class ReleaseTests(unittest.TestCase):
         for asset in (self.directory / "dist").glob("*.tar.gz"):
             self.assertIn(hashlib.sha256(asset.read_bytes()).hexdigest(), formula)
 
-    def workflow_job(self, name):
-        workflow = (ROOT / ".github/workflows/release.yml").read_text()
+    def workflow_job(self, name, path=".github/workflows/release.yml"):
+        workflow = (ROOT / path).read_text()
         match = re.search(rf"^  {name}:\n(.*?)(?=^  \w+:\n|\Z)",
                           workflow, re.MULTILINE | re.DOTALL)
         self.assertIsNotNone(match, f"Missing workflow job: {name}")
         return match[1]
+
+    def test_release_runs_only_for_release_please_release_creation_or_manual_dispatch(self):
+        workflow = (ROOT / ".github/workflows/release.yml").read_text()
+        triggers = re.search(r"^on:\n(.*?)(?=^\w)", workflow, re.MULTILINE | re.DOTALL)[1]
+        self.assertEqual(set(re.findall(r"^  ([\w_]+):", triggers, re.MULTILINE)),
+                         {"workflow_call", "workflow_dispatch"})
+        self.assertIn("TAG: ${{ inputs.tag }}", workflow)
+        self.assertIn("group: release-${{ inputs.tag }}", workflow)
+        release_please_path = ".github/workflows/release-please.yml"
+        release_please = (ROOT / release_please_path).read_text()
+        self.assertIn("  push:\n    branches: [main]", release_please)
+        self.assertIn("id: release", release_please)
+        self.assertIn("release_created: ${{ steps.release.outputs.release_created }}", release_please)
+        self.assertIn("tag_name: ${{ steps.release.outputs.tag_name }}", release_please)
+        publish = self.workflow_job("publish", release_please_path)
+        self.assertIn("needs: release-please", publish)
+        self.assertIn("if: ${{ needs.release-please.outputs.release_created == 'true' }}", publish)
+        self.assertIn("uses: ./.github/workflows/release.yml", publish)
+        self.assertIn("tag: ${{ needs.release-please.outputs.tag_name }}", publish)
+        self.assertIn("publish_vscode: true", publish)
+        self.assertIn("vscode_auth: pat", publish)
+        self.assertIn("publish_openvsx: true", publish)
+        self.assertNotIn("publish_pypi: true", publish)
+        self.assertNotIn("publish_homebrew: true", publish)
+        callers = [p.name for p in (ROOT / ".github/workflows").glob("*.yml")
+                   if "uses: ./.github/workflows/release.yml" in p.read_text()]
+        self.assertEqual(callers, ["release-please.yml"])
 
     def test_registry_publication_is_opt_in_and_requires_verified_assets(self):
         workflow = (ROOT / ".github/workflows/release.yml").read_text()

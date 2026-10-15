@@ -11,8 +11,30 @@ permissions:
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
       - uses: googleapis/release-please-action@v4
+        id: release
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+  publish:
+    name: publish the newly created release
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    # Call directly: releases made with GITHUB_TOKEN do not trigger other workflows.
+    uses: ./.github/workflows/release.yml
+    permissions:
+      contents: write
+      id-token: write
+    with:
+      tag: ${{ needs.release-please.outputs.tag_name }}
+      publish_vscode: true
+      vscode_auth: pat
+      publish_openvsx: true
+    secrets:
+      VSCE_PAT: ${{ secrets.VSCE_PAT }}
+      OVSX_PAT: ${{ secrets.OVSX_PAT }}
