@@ -5,6 +5,7 @@ import csv
 import hashlib
 import importlib.util
 import io
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
@@ -14,7 +15,9 @@ import subprocess
 import tarfile
 import tempfile
 import textwrap
+import threading
 import unittest
+import xml.etree.ElementTree as ET
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -287,6 +290,158 @@ class ReleaseTests(unittest.TestCase):
                 archive.writestr(name, content)
         with self.assertRaisesRegex(ValueError, "Wrong VSIX platform"):
             release.verify_assets(self.directory, self.tag)
+
+
+class RegistryServer(ThreadingHTTPServer):
+    """Local registry boundary for exercising the real locked publishing CLIs."""
+
+    def __init__(self):
+        super().__init__(("127.0.0.1", 0), RegistryHandler)
+        self.published = set()
+        self.uploads = []
+        self.failure_status = None
+
+
+class RegistryHandler(BaseHTTPRequestHandler):
+    def log_message(self, *_args):
+        pass
+
+    def reply(self, status, body):
+        content = json.dumps(body).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(content)))
+        self.end_headers()
+        self.wfile.write(content)
+
+    def do_OPTIONS(self):
+        # Azure DevOps discovers its Gallery API route before publishing.
+        self.reply(200, {"value": [{
+            "id": "e11ea35a-16fe-4b80-ab11-c4cab88a0966",
+            "area": "gallery", "resourceName": "extensions",
+            "routeTemplate": "_apis/gallery/publishers/{publisherName}/extensions/{extensionName}",
+            "minVersion": "1.0", "maxVersion": "7.2", "releasedVersion": "7.2",
+            "resourceVersion": 2,
+        }]})
+
+    def do_GET(self):
+        if self.path == "/api/version":
+            self.reply(200, {"version": "1.0.0"})
+        elif self.path.startswith("/_apis/gallery/publishers/kksat/extensions/zals"):
+            self.reply(200, {"versions": [
+                {"version": "0.1.0", "targetPlatform": target}
+                for target in sorted(self.server.published)
+            ]})
+        else:
+            self.reply(404, {"error": "Unexpected test registry path"})
+
+    def upload_body(self):
+        if self.headers.get("Transfer-Encoding") == "chunked":
+            chunks = []
+            while True:
+                size = int(self.rfile.readline().strip().split(b";")[0], 16)
+                if not size:
+                    self.rfile.readline()
+                    return b"".join(chunks)
+                chunks.append(self.rfile.read(size))
+                self.rfile.read(2)
+        return self.rfile.read(int(self.headers.get("Content-Length", "0")))
+
+    def do_POST(self):
+        self.publish()
+
+    def do_PUT(self):
+        self.publish()
+
+    def publish(self):
+        with zipfile.ZipFile(io.BytesIO(self.upload_body())) as archive:
+            identity = ET.fromstring(archive.read("extension.vsixmanifest")).find("{*}Metadata/{*}Identity")
+            target = identity.get("TargetPlatform")
+        if self.server.failure_status is not None:
+            self.reply(self.server.failure_status, {"error": "Registry rejected the upload",
+                                                    "message": "Registry rejected the upload"})
+        elif target in self.server.published:
+            self.reply(409, {"error": f"Extension kksat.zals 0.1.0 {target} is already published."})
+        else:
+            self.server.published.add(target)
+            self.server.uploads.append(target)
+            self.reply(200, {"namespace": "kksat", "name": "zals", "version": "0.1.0",
+                             "targetPlatform": target})
+
+
+@unittest.skipUnless(shutil.which("node") and
+                     (ROOT / "editors/vscode/node_modules/ovsx/bin/ovsx").exists(),
+                     "registry CLI tests require npm ci --prefix editors/vscode")
+class RegistryCliTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.directory = Path(self.temp.name)
+        self.targets = {platform for _, _, platform in release.PLATFORMS}
+        self.packages = []
+        for target in sorted(self.targets):
+            package = self.directory / f"zals-0.1.0-{target}.vsix"
+            with zipfile.ZipFile(package, "w") as archive:
+                archive.writestr("extension/package.json", json.dumps({
+                    "name": "zals", "publisher": "kksat", "version": "0.1.0",
+                    "engines": {"vscode": "^1.82.0"},
+                }))
+                archive.writestr("extension.vsixmanifest",
+                                 '<PackageManifest><Metadata><Identity Version="0.1.0" '
+                                 f'TargetPlatform="{target}" /></Metadata></PackageManifest>')
+            self.packages.append(str(package))
+        self.server = RegistryServer()
+        thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(self.server.server_close)
+        self.addCleanup(thread.join)
+        self.addCleanup(self.server.shutdown)
+
+    def publish(self, client):
+        executable = "@vscode/vsce/vsce" if client == "vsce" else "ovsx/bin/ovsx"
+        url = f"http://127.0.0.1:{self.server.server_port}"
+        # Never inherit real credentials, registry settings, proxies, or OIDC tokens.
+        env = {"PATH": os.environ["PATH"], "HOME": str(self.directory), "CI": "true",
+               "VSCE_PAT": "test-only", "OVSX_PAT": "test-only",
+               "VSCE_MARKETPLACE_URL": url, "OVSX_REGISTRY_URL": url,
+               "NO_PROXY": "127.0.0.1"}
+        return subprocess.run([shutil.which("node"),
+                               str(ROOT / "editors/vscode/node_modules" / executable),
+                               "publish", "--skip-duplicate", "--packagePath", *self.packages],
+                              env=env, capture_output=True, text=True, timeout=30)
+
+    def check_idempotence(self, client):
+        for initially_published in (set(), {"darwin-arm64"}, self.targets):
+            with self.subTest(initially_published=initially_published):
+                self.server.published = set(initially_published)
+                self.server.uploads = []
+                result = self.publish(client)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(self.server.published, self.targets)
+                self.assertCountEqual(self.server.uploads, self.targets - initially_published)
+                self.server.uploads = []
+                retry = self.publish(client)
+                self.assertEqual(retry.returncode, 0, retry.stdout + retry.stderr)
+                self.assertEqual(self.server.uploads, [])
+        for status in (401, 403, 500):
+            with self.subTest(status=status):
+                # A mixed batch of duplicates and one missing target must still fail.
+                self.server.published = self.targets - {"win32-x64"}
+                self.server.failure_status = status
+                failed = self.publish(client)
+                self.assertNotEqual(failed.returncode, 0, failed.stdout + failed.stderr)
+                self.assertIn("Registry rejected the upload", failed.stdout + failed.stderr)
+                self.assertNotIn("win32-x64", self.server.published)
+                self.server.failure_status = None
+                retry = self.publish(client)
+                self.assertEqual(retry.returncode, 0, retry.stdout + retry.stderr)
+                self.assertEqual(self.server.published, self.targets)
+
+    def test_marketplace_duplicates_succeed_and_real_failures_fail(self):
+        self.check_idempotence("vsce")
+
+    def test_openvsx_duplicates_succeed_and_real_failures_fail(self):
+        self.check_idempotence("ovsx")
 
 
 if __name__ == "__main__":

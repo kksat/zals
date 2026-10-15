@@ -35,6 +35,28 @@ jobs:
       - name: Run unit tests
         run: make test
 
+  vscode:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: npm ci --prefix editors/vscode
+      - name: Test extension and real registry CLI retry behavior
+        run: |
+          npm --prefix editors/vscode run typecheck
+          npm --prefix editors/vscode test
+          python -m unittest discover -s test -p 'test_release.py'
+
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 20
