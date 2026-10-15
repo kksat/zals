@@ -24,9 +24,16 @@ on:
         type: boolean
         default: false
       publish_vscode:
-        description: "Publish verified VSIXs to Visual Studio Marketplace using Microsoft Entra ID"
+        description: "Publish verified VSIXs to Visual Studio Marketplace"
         type: boolean
         default: false
+      vscode_auth:
+        description: "Marketplace authentication (Entra recommended; PAT uses VSCE_PAT)"
+        type: choice
+        default: entra
+        options:
+          - entra
+          - pat
       publish_openvsx:
         description: "Publish verified VSIXs to Open VSX"
         type: boolean
@@ -295,7 +302,7 @@ jobs:
   vscode_marketplace:
     name: publish vs code marketplace
     needs: publication_assets
-    if: ${{ !cancelled() && inputs.publish_vscode && needs.publication_assets.result == 'success' }}
+    if: ${{ !cancelled() && inputs.publish_vscode && inputs.vscode_auth != 'pat' && needs.publication_assets.result == 'success' }}
     runs-on: ubuntu-latest
     environment: vscode-marketplace
     permissions:
@@ -340,6 +347,42 @@ jobs:
         run: |
           set -euo pipefail
           npx --no-install vsce publish --azure-credential --skip-duplicate \
+            --packagePath ../../dist/zals-"${TAG#v}"-*.vsix
+
+  vscode_marketplace_pat:
+    name: publish vs code marketplace using pat
+    needs: publication_assets
+    if: ${{ !cancelled() && inputs.publish_vscode && inputs.vscode_auth == 'pat' && needs.publication_assets.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+      - run: npm ci --prefix editors/vscode
+      - uses: actions/download-artifact@v4
+        with:
+          name: verified-publication-assets
+          path: dist
+      - name: Require Marketplace PAT
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: test -n "$VSCE_PAT" || { echo 'VSCE_PAT is required'; exit 1; }
+      - name: Publish verified VSIXs to Visual Studio Marketplace
+        working-directory: editors/vscode
+        shell: bash
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          set -euo pipefail
+          npx --no-install vsce publish --skip-duplicate \
             --packagePath ../../dist/zals-"${TAG#v}"-*.vsix
 
   openvsx:

@@ -238,8 +238,9 @@ gh workflow run release.yml --ref main -f tag=v0.1.0 \
   -f publish_existing=true -f publish_vscode=true -f publish_openvsx=true
 ```
 
-Each registry is independently opt-in. Marketplace uses Microsoft Entra ID with
-GitHub OIDC (no PAT); Open VSX uses the `OVSX_PAT` repository secret. Both upload
+Each registry is independently opt-in. Marketplace defaults to Microsoft Entra ID
+with GitHub OIDC (no PAT); explicitly selecting `-f vscode_auth=pat` instead uses
+the `VSCE_PAT` repository secret. Open VSX uses the `OVSX_PAT` repository secret. Both upload
 all five existing platform packages and skip already-published versions on
 retry. See [VS Code publishing setup](docs/vscode-publishing.md) for the Azure
 managed identity, protected GitHub environment, publisher authorization, and

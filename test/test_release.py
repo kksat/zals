@@ -182,6 +182,7 @@ class ReleaseTests(unittest.TestCase):
         workflow = (ROOT / ".github/workflows/release.yml").read_text()
         publication_assets = self.workflow_job("publication_assets")
         for job, flag in (("vscode_marketplace", "publish_vscode"),
+                          ("vscode_marketplace_pat", "publish_vscode"),
                           ("openvsx", "publish_openvsx")):
             with self.subTest(job=job):
                 self.assertRegex(workflow, rf"      {flag}:\n"
@@ -190,14 +191,20 @@ class ReleaseTests(unittest.TestCase):
                 self.assertIn(f"inputs.{flag}", publication_assets)
                 body = self.workflow_job(job)
                 self.assertIn("needs: publication_assets", body)
-                self.assertIn(f"!cancelled() && inputs.{flag} && "
-                              "needs.publication_assets.result == 'success'", body)
+                self.assertIn(f"!cancelled() && inputs.{flag} && ", body)
+                self.assertIn("needs.publication_assets.result == 'success'", body)
                 self.assertIn("name: verified-publication-assets", body)
                 self.assertIn("ref: ${{ github.sha }}", body)
                 self.assertIn("run: npm ci --prefix editors/vscode", body)
 
-    def test_marketplace_uses_federated_identity_not_pat(self):
+    def test_marketplace_authentication_modes_are_explicit_and_isolated(self):
+        workflow = (ROOT / ".github/workflows/release.yml").read_text()
+        self.assertRegex(workflow, r"      vscode_auth:\n"
+                         r"        description: .*\n        type: choice\n"
+                         r"        default: entra\n        options:\n"
+                         r"          - entra\n          - pat\n")
         marketplace = self.workflow_job("vscode_marketplace")
+        self.assertIn("inputs.vscode_auth != 'pat'", marketplace)
         self.assertIn("environment: vscode-marketplace", marketplace)
         self.assertIn("id-token: write", marketplace)
         self.assertIn("uses: azure/login@v2", marketplace)
@@ -206,6 +213,13 @@ class ReleaseTests(unittest.TestCase):
         self.assertNotIn("secrets.", marketplace)
         for name in ("AZURE_CLIENT_ID", "AZURE_TENANT_ID", "AZURE_SUBSCRIPTION_ID"):
             self.assertIn(f"vars.{name}", marketplace)
+        pat = self.workflow_job("vscode_marketplace_pat")
+        self.assertIn("inputs.vscode_auth == 'pat'", pat)
+        self.assertIn("secrets.VSCE_PAT", pat)
+        self.assertNotIn("id-token: write", pat)
+        self.assertNotIn("azure/login", pat)
+        self.assertNotIn("--azure-credential", pat)
+        self.assertNotIn("environment: vscode-marketplace", pat)
         openvsx = self.workflow_job("openvsx")
         self.assertIn("secrets.OVSX_PAT", openvsx)
         self.assertNotIn("id-token: write", openvsx)
@@ -233,6 +247,7 @@ class ReleaseTests(unittest.TestCase):
         npx.chmod(0o755)
         for job, step, client, auth in (
                 ("vscode_marketplace", "Visual Studio Marketplace", "vsce", ["--azure-credential"]),
+                ("vscode_marketplace_pat", "Visual Studio Marketplace", "vsce", []),
                 ("openvsx", "Open VSX", "ovsx", [])):
             with self.subTest(job=job):
                 match = re.search(rf"      - name: Publish verified VSIXs to {step}\n"

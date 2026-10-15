@@ -7,6 +7,10 @@ GitHub release only after its package metadata, bundled binaries, and
 `SHA256SUMS` have been verified. They upload the existing VSIXs without rebuilding,
 bumping versions, moving tags, or replacing GitHub assets.
 
+Marketplace authentication defaults to `vscode_auth=entra`. To use the repository
+secret `VSCE_PAT` instead, explicitly select `vscode_auth=pat`; there is no
+implicit fallback from Entra to a PAT.
+
 ## Visual Studio Marketplace: one-time setup
 
 We use the [secure automated publishing procedure](https://code.visualstudio.com/api/working-with-extensions/publishing-extension#secure-automated-publishing-to-visual-studio-marketplace):
@@ -67,6 +71,19 @@ and `vsce publish --azure-credential` uses the resulting Azure CLI session.
 7. In Marketplace publisher management, add that identity to `kksat` with the
    **Contributor** role. The identity must be authorized before the first upload.
 
+## Visual Studio Marketplace: optional PAT setup
+
+If explicitly selecting `vscode_auth=pat`, store an Azure DevOps PAT as the
+repository secret **`VSCE_PAT`**. The token needs **Marketplace: Manage** scope,
+**All accessible organizations**, and an account authorized to publish as
+`kksat`. The PAT job does not need Azure ID variables, the
+`vscode-marketplace` environment, or OIDC permissions. It exposes the PAT only
+to the credential check and publishing step, not dependency installation.
+
+Entra remains the recommended default. Microsoft's publishing guide notes that
+global Azure DevOps PATs retire on December 1, 2026; treat this mode as a
+transition path, not a replacement for setting up identity-based publishing.
+
 ## Open VSX: one-time setup
 
 1. Sign in at <https://open-vsx.org> and accept the Open VSX publisher agreement.
@@ -88,6 +105,14 @@ gh workflow run release.yml --ref main -f tag=v0.1.0 \
   -f publish_existing=true -f publish_vscode=true -f publish_openvsx=true
 ```
 
+To use the two repository PAT secrets instead of Entra:
+
+```sh
+gh workflow run release.yml --ref main -f tag=v0.1.0 \
+  -f publish_existing=true -f publish_vscode=true -f vscode_auth=pat \
+  -f publish_openvsx=true
+```
+
 Select either registry independently by omitting the other flag. For example,
 Open VSX can be published before Azure setup is complete:
 
@@ -103,6 +128,12 @@ Both clients are locked npm dependencies installed from the workflow revision,
 so publishing an older tag can use updated tooling without altering its VSIXs.
 Both use `--skip-duplicate` to allow retries after partial success. A duplicate
 is skipped, not replaced; this does not compare registry bytes with GitHub bytes.
+Adding a missing target platform does not require a version bump: Marketplace
+identifies each package by version **and** target platform. For example, if only
+`0.1.0/darwin-arm64` exists, the other four targets can be uploaded at `0.1.0`.
+The existing target is skipped and kept unchanged. Changing its contents requires
+a newer version; `--skip-duplicate` does not update that package.
+
 Other upload/authentication failures fail the job. The registries run
 independently, so a failure in one does not undo publication to the other.
 

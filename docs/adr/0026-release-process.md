@@ -61,7 +61,11 @@ Use **Google release-please** to drive releases from
   federates to a user-assigned Azure managed identity via `azure/login`, then
   `vsce publish --azure-credential` uses the Azure CLI session. Its job grants
   `id-token: write` at job scope and uses the protected `vscode-marketplace` environment.
-  Open VSX uses `OVSX_PAT`, scoped only to its credential check/upload steps.
+  An explicit `vscode_auth=pat` option instead selects an isolated Marketplace
+  job using `VSCE_PAT`, with no Azure setup or OIDC permission. Entra remains the
+  default; missing identity configuration never silently falls back to a PAT.
+  Both PAT secrets are scoped only to credential check/upload steps; Open VSX
+  uses `OVSX_PAT`.
   Registries are independent; a failure does not roll back another registry.
   See [setup instructions](../vscode-publishing.md) for federation and publisher
   authorization.
@@ -88,10 +92,12 @@ flow through release-please.
 - External publication is opt-in and independent for each registry.
   Existing verified GitHub assets can be published without moving a tag or
   replacing assets. VSIXs can still be installed locally.
-- Marketplace publishing stores no long-lived PAT/client secret. It requires
-  one-time Azure federation and Marketplace identity authorization, plus GitHub
-  environment branch restrictions. Open VSX requires namespace authorization
-  and a repository token secret.
+- Marketplace's default Entra mode stores no long-lived PAT/client secret. It
+  requires one-time Azure federation and Marketplace identity authorization,
+  plus GitHub environment branch restrictions. The explicitly selected PAT mode
+  is a transitional alternative, since Microsoft is retiring global Azure
+  DevOps PATs. Open VSX requires namespace authorization and a repository token
+  secret.
 - A public tap does not expose private GitHub release binaries; if the source
   repository remains private, installing the formula needs release access.
 - The Python wrapper and VS Code client do not reimplement the server; they
