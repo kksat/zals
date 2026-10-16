@@ -65,24 +65,27 @@ Collection and Role navigation. Module discovery scans those paths directly,
 even when `ansible --version` is unavailable, rather than only the startup
 `ansible-config dump` paths.
 
-Each module library is keyed by the **ordered** effective paths and the source
-file's directory (the subprocess working directory). It owns an immutable copy
-of the child environment. Relative environment/dump paths are made absolute
-against the server's directory before changing the child's working directory,
-preserving navigation's meaning. Every `ansible-doc` call and module-discovery version
-call uses that snapshot via the execution interface; no process-global
-`setenv`, activation script, or environment mutation is involved. Set
-`ANSIBLE_COLLECTIONS_PATH` to the effective path list, remove its legacy plural
-alias, and disable Python `sys.path` collection scanning so unrelated interpreter
-installations cannot bypass the selection. Completion items retain the source
-URI in LSP `data` so resolve can recover the current per-file context.
+Each module library is keyed by the **ordered** effective paths alone. It owns
+an immutable copy of the child environment. `ansible-doc` is the executable
+found on `PATH` and runs in the server's working directory; zals supplies no
+per-file working directory or `ansible.cfg`. The effective paths are already
+absolute (relative environment/dump entries keep their server-cwd meaning), and
+they reach the child only through the environment. Every `ansible-doc` call
+and module-discovery version call uses that snapshot via the execution
+interface; no process-global `setenv`, activation script, or environment
+mutation is involved. Set `ANSIBLE_COLLECTIONS_PATH` to the effective path
+list, remove its legacy plural alias, and disable Python `sys.path` collection
+scanning so unrelated interpreter installations cannot bypass the selection.
+Completion items retain the source URI in LSP `data` so resolve can recover the
+current per-file context.
 
 These contextual libraries cache catalogs and fetched docs **in memory only**,
 and are not loaded from or written to the existing process-wide version-only
 disk cache. That cache remains for the startup library/prefetch
 ([ADR-0008](0008-hybrid-docs-loading.md)); it cannot safely supply contextual
-filenames or documentation. Equal FQCNs in different Workspaces or path orders
-must not share module entries. Changed selections/configured paths select a
+filenames or documentation. Different ordered path lists must not share module
+entries; files with identical lists share one library, even across Workspaces,
+because the child resolves them identically. Changed selections/configured paths select a
 new context; unchanged contexts reuse their fetched docs. Contexts and their
 owned snapshots remain alive until server teardown; background prefetch only
 touches the separate startup library, and workers are joined before either is

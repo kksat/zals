@@ -43,7 +43,7 @@ Navigation hovers for variables, fields, roles, and collections resolve before
 opening a contextual module library: they do not need module docs. Config dumps
 are lazy fallbacks, skipped when the environment or `ansible.cfg` supplies the
 requested search paths. Contextual module libraries remain isolated by ordered
-collection paths and working directory (ADR-0037); their first module-specific
+collection paths (ADR-0037); their first module-specific
 request can still wait for uncached documentation.
 
 ## Consequences

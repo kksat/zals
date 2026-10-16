@@ -321,24 +321,11 @@ pub const Server = struct {
 
     /// Module lookup shares navigation's effective per-file collection paths,
     /// without mutating the process environment or sharing FQCN-only caches.
+    /// The paths are already absolute (relative entries keep their server-cwd
+    /// meaning), and `ansible-doc` runs in the server's working directory.
     pub fn docsForUri(self: *Server, a: Allocator, uri: []const u8) !*DocsLibrary {
         const path = try paths.uriToPath(a, uri);
-        const ctx = self.projectContext(a, path);
-        const collection_paths = try project_config.collectionsPaths(a, ctx, path);
-        // Navigation interprets relative environment/dump entries against the
-        // server cwd. Keep that meaning when the child runs beside the file.
-        const server_cwd = try std.process.getCwdAlloc(a);
-        const absolute_paths = try a.alloc([]const u8, collection_paths.len);
-        for (collection_paths, 0..) |p, i| {
-            absolute_paths[i] = if (std.fs.path.isAbsolute(p)) p else try std.fs.path.join(a, &.{ server_cwd, p });
-        }
-        const cwd = if (try project_config.nearestConfig(a, ctx, path)) |cfg|
-            std.fs.path.dirname(cfg) orelse "."
-        else if (ctx.workspace_root) |root|
-            root
-        else
-            std.fs.path.dirname(path) orelse ".";
-        return self.contextual_docs.forPaths(absolute_paths, cwd);
+        return self.contextual_docs.forPaths(try project_config.collectionsPaths(a, self.projectContext(a, path), path));
     }
 
     /// Search-path inputs for `file_path` (ADR-0032).
