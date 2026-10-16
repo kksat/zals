@@ -2,7 +2,7 @@
   "name": "zals",
   "displayName": "Ansible Language Server (zals)",
   "description": "Zig Ansible Language Server client for VS Code",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "kksat",
   "icon": "images/zig-ember.png",
   "license": "GPL-3.0-only",
