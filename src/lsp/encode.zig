@@ -85,6 +85,32 @@ pub fn locations(a: Allocator, locs: []const types.Location) !Value {
     return .{ .array = arr };
 }
 
+pub fn prepareRename(a: Allocator, item: ?types.PrepareRename) !Value {
+    const p = item orelse return Value.null;
+    var obj = json_util.obj(a);
+    try obj.put("range", .{ .object = try rangeObject(a, p.range) });
+    try obj.put("placeholder", json_util.str(p.placeholder));
+    return .{ .object = obj };
+}
+
+pub fn workspaceEditChanges(a: Allocator, locs: ?[]const types.Location, new_text: []const u8) !Value {
+    const items = locs orelse return Value.null;
+    var changes = json_util.obj(a);
+    for (items) |loc| {
+        var edit = json_util.obj(a);
+        try edit.put("range", .{ .object = try rangeObject(a, loc.range) });
+        try edit.put("newText", json_util.str(new_text));
+        const gop = try changes.getOrPut(loc.uri);
+        if (!gop.found_existing) {
+            gop.value_ptr.* = .{ .array = std.json.Array.init(a) };
+        }
+        try gop.value_ptr.array.append(.{ .object = edit });
+    }
+    var result = json_util.obj(a);
+    try result.put("changes", .{ .object = changes });
+    return .{ .object = result };
+}
+
 fn markupKind(kind: types.MarkupKind) []const u8 {
     return switch (kind) {
         .markdown => "markdown",

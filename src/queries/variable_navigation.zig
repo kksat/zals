@@ -108,6 +108,19 @@ pub const Query = struct {
         return try self.namedReferences(subject, current.name, .field, include_declaration);
     }
 
+    pub fn prepareRename(self: *Query, subject: *Subject) !?types.PrepareRename {
+        const current = (try self.occurrence(subject, .root)) orelse return null;
+        return .{
+            .range = subject.doc.rangeFromOffsets(current.start, current.end),
+            .placeholder = try self.cache.allocator.dupe(u8, current.name),
+        };
+    }
+
+    pub fn renameLocations(self: *Query, subject: *Subject) !?[]const types.Location {
+        const current = (try self.occurrence(subject, .root)) orelse return null;
+        return try self.namedReferences(subject, current.name, .root, true);
+    }
+
     fn namedReferences(self: *Query, subject: *Subject, name: []const u8, group: Group, include_declaration: bool) ![]const types.Location {
         const a = self.cache.allocator;
         const server = self.cache.files.server;

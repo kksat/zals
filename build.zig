@@ -153,6 +153,12 @@ pub fn build(b: *std.Build) void {
             .description = "Run unsaved role argument-spec navigation tests",
             .inputs = &.{ "test/fixtures/e2e-workspace", "test/dependencies" },
         },
+        .{
+            .name = "variable-rename-e2e",
+            .source = "test/variable_rename_e2e.zig",
+            .description = "Run root variable prepareRename and rename tests",
+            .inputs = &.{ "test/fixtures/e2e-workspace", "test/dependencies" },
+        },
     };
     for (suites) |suite| {
         const tests = b.addTest(.{ .root_module = b.createModule(.{

@@ -46,6 +46,12 @@ fn isIdentChar(c: u8) bool {
     return std.ascii.isAlphanumeric(c) or c == '_';
 }
 
+pub fn isValidIdentifier(word: []const u8) bool {
+    if (word.len == 0 or !isIdentStart(word[0]) or isKeyword(word)) return false;
+    for (word[1..]) |c| if (!isIdentChar(c)) return false;
+    return true;
+}
+
 /// Scan a scalar's raw source text for Jinja expressions and append every root
 /// identifier to `out`. `base` is the absolute offset of `raw` in the document.
 pub fn scanScalar(

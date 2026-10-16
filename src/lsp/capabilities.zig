@@ -51,6 +51,10 @@ pub fn build(a: Allocator, encoding: []const u8, workspace_folders: bool) !Value
     try caps.put("implementationProvider", json_util.booleanValue(true));
     try caps.put("referencesProvider", json_util.booleanValue(true));
 
+    var rename = json_util.obj(a);
+    try rename.put("prepareProvider", json_util.booleanValue(true));
+    try caps.put("renameProvider", .{ .object = rename });
+
     var doc_symbol = json_util.obj(a);
     try doc_symbol.put("label", json_util.str("zals"));
     try caps.put("documentSymbolProvider", .{ .object = doc_symbol });

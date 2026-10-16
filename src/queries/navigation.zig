@@ -90,6 +90,14 @@ pub const Query = struct {
         return self.bindings.references(subject, include_declaration);
     }
 
+    pub fn prepareRename(self: *Query, subject: *Subject) !?types.PrepareRename {
+        return self.bindings.prepareRename(subject);
+    }
+
+    pub fn rename(self: *Query, subject: *Subject) !?[]const types.Location {
+        return self.bindings.renameLocations(subject);
+    }
+
     /// Navigation-only hover terminates before contextual module catalog
     /// loading (which may shell out when cold). subjectAt/classification never
     /// need docs. Keyword/module formatting is the last, lazy fallback.
