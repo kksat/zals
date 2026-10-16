@@ -152,18 +152,19 @@ test "bootstrap remains pending until readiness is consumed" {
     try std.testing.expect(!service.takeReadyEvent());
 }
 
-/// Contextual module libraries. Each ordered path/cwd identity (shared across
-/// files with the same effective config or Workspace root and collection paths)
-/// owns an immutable subprocess environment and its own in-memory docs. Never
-/// load/save these libraries through the process-wide, version-only disk cache:
-/// identical FQCNs may resolve to different files in different Workspaces or
-/// configurations. Created/read on the main thread; no background task borrows
-/// these snapshots.
+/// Contextual module libraries. Each ordered collection-path list (shared by
+/// every file with the same effective paths) owns an immutable subprocess
+/// environment and its own in-memory docs. `ansible-doc` runs from `PATH` in
+/// the server's working directory; collection selection reaches it only via
+/// `ANSIBLE_COLLECTIONS_PATH`, so no per-file `ansible.cfg` or cwd is supplied.
+/// Never load/save these libraries through the process-wide, version-only disk
+/// cache: identical FQCNs may resolve to different files under different
+/// paths. Created/read on the main thread; no background task borrows these
+/// snapshots.
 pub const ContextLibraries = struct {
     const ContextLibrary = struct {
         lib: DocsLibrary,
         env: std.process.EnvMap,
-        cwd: []const u8,
     };
 
     allocator: Allocator,
@@ -180,18 +181,17 @@ pub const ContextLibraries = struct {
             const context = e.value_ptr.*;
             context.lib.deinit();
             context.env.deinit();
-            self.allocator.free(context.cwd);
             self.allocator.destroy(context);
             self.allocator.free(e.key_ptr.*);
         }
         self.libraries.deinit();
     }
 
-    pub fn forPaths(self: *ContextLibraries, paths: []const []const u8, cwd: []const u8) !*DocsLibrary {
+    pub fn forPaths(self: *ContextLibraries, paths: []const []const u8) !*DocsLibrary {
         const a = self.allocator;
         // JSON preserves ordering and component boundaries, unlike a bare hash
         // or delimiter-concatenated cache key.
-        const key = try std.json.Stringify.valueAlloc(a, .{ .cwd = cwd, .collections_paths = paths }, .{});
+        const key = try std.json.Stringify.valueAlloc(a, paths, .{});
         errdefer a.free(key);
         if (self.libraries.get(key)) |context| {
             a.free(key);
@@ -199,12 +199,9 @@ pub const ContextLibraries = struct {
         }
         const context = try a.create(ContextLibrary);
         errdefer a.destroy(context);
-        const owned_cwd = try a.dupe(u8, cwd);
-        errdefer a.free(owned_cwd);
         context.* = .{
             .lib = DocsLibrary.init(a, self.runner, "ansible-doc"),
             .env = try std.process.getEnvMap(a),
-            .cwd = owned_cwd,
         };
         errdefer context.lib.deinit();
         errdefer context.env.deinit();
@@ -214,7 +211,7 @@ pub const ContextLibraries = struct {
         context.env.remove("ANSIBLE_COLLECTIONS_PATHS");
         // Do not let Python's unrelated sys.path reintroduce unselected venvs.
         try context.env.put("ANSIBLE_COLLECTIONS_SCAN_SYS_PATH", "false");
-        context.lib.execution = .{ .env_map = &context.env, .cwd = context.cwd };
+        context.lib.execution = .{ .env_map = &context.env };
         context.lib.loadCatalog() catch {};
         context.lib.scanModulePaths(paths);
         try self.libraries.put(key, context);
@@ -222,15 +219,17 @@ pub const ContextLibraries = struct {
     }
 };
 
-test "ContextLibraries shares one library for identical cwd and collections paths" {
+test "ContextLibraries keys by collection paths and runs ansible-doc without a cwd" {
     const Fake = struct {
         calls: usize = 0,
+        cwd_supplied: bool = false,
         fn run(ptr: *anyopaque, a: Allocator, argv: []const []const u8) anyerror!exec.Result {
             return runWithOptions(ptr, a, argv, .{});
         }
-        fn runWithOptions(ptr: *anyopaque, a: Allocator, _: []const []const u8, _: exec.Options) anyerror!exec.Result {
+        fn runWithOptions(ptr: *anyopaque, a: Allocator, _: []const []const u8, options: exec.Options) anyerror!exec.Result {
             const self: *@This() = @ptrCast(@alignCast(ptr));
             self.calls += 1;
+            if (options.cwd != null) self.cwd_supplied = true;
             return .{
                 .stdout = try a.dupe(u8, "{}"),
                 .stderr = try a.dupe(u8, ""),
@@ -244,10 +243,17 @@ test "ContextLibraries shares one library for identical cwd and collections path
     var libs = ContextLibraries.init(std.testing.allocator, runner);
     defer libs.deinit();
 
-    const p1 = try libs.forPaths(&.{"/ws/.venv"}, "/ws");
-    const p2 = try libs.forPaths(&.{"/ws/.venv"}, "/ws");
+    const p1 = try libs.forPaths(&.{"/ws/.venv"});
+    const p2 = try libs.forPaths(&.{"/ws/.venv"});
     try std.testing.expectEqual(p1, p2);
     try std.testing.expectEqual(@as(usize, 1), libs.libraries.count());
+
+    const other = try libs.forPaths(&.{ "/ws/collections", "/ws/.venv" });
+    try std.testing.expect(other != p1);
+    try std.testing.expectEqual(@as(usize, 2), libs.libraries.count());
+
+    try std.testing.expect(fake.calls > 0);
+    try std.testing.expect(!fake.cwd_supplied);
 }
 
 /// Derive a cache fingerprint from the installed Ansible version. Returns null

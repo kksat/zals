@@ -45,15 +45,17 @@ and applies uniformly to Collection/Role navigation and module docs/discovery.
 
 ## Module documentation
 
-Module documentation is read using the `ansible-doc` on the server's PATH, with
-the effective per-file collections paths and the source directory supplied to
-that child process. Selecting a venv controls collection discovery; it does not
+Module documentation is read using the `ansible-doc` on the server's PATH, run
+in the server's working directory with the effective per-file collections paths
+supplied through `ANSIBLE_COLLECTIONS_PATH`. zals does not pass a per-file
+working directory or `ansible.cfg` to it. Selecting a venv controls collection discovery; it does not
 activate its Python interpreter. `ansible-doc` and `ansible` are still required
 for module docs and builtin discovery. Collection modules can be discovered on
 disk even when `ansible` is unavailable.
 
-Libraries are isolated per ordered collections paths and source directory, so
-the same module FQCN in two Workspaces can have different definitions and docs.
+Libraries are isolated per ordered collections paths, so the same module FQCN
+in two Workspaces with different paths can have different definitions and docs;
+files with identical paths share one library.
 Changing the selected environment or a configured path selects a different
 library. Contextual docs use an in-memory cache, not the process-wide disk cache;
 a restart still requires loading their catalog and lazily fetching full docs.
