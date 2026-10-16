@@ -4,6 +4,7 @@
   "description": "Zig Ansible Language Server client for VS Code",
   "version": "0.1.0",
   "publisher": "kksat",
+  "icon": "images/zig-ember.png",
   "license": "GPL-3.0-only",
   "homepage": "https://github.com/kksat/zals",
   "repository": {

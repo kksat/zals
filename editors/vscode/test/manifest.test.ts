@@ -12,6 +12,18 @@ test("manifest has required identity", () => {
   assert.equal(pkg.displayName, "Ansible Language Server (zals)");
 });
 
+test("manifest uses the selected Zig ember PNG at marketplace icon resolution", () => {
+  assert.equal(pkg.icon, "images/zig-ember.png");
+  const icon = fs.readFileSync(path.resolve(process.cwd(), pkg.icon));
+  assert.deepEqual(icon.subarray(0, 8), Buffer.from("89504e470d0a1a0a", "hex"));
+  assert.equal(icon.readUInt32BE(16), 256);
+  assert.equal(icon.readUInt32BE(20), 256);
+  const selectedLogo = path.resolve(
+    process.cwd(), "../../docs/design/yaml-rhythm/sizes/256/02-zig-ember.png",
+  );
+  assert.deepEqual(icon, fs.readFileSync(selectedLogo));
+});
+
 test("manifest disables untrusted workspaces", () => {
   assert.equal(pkg.capabilities?.untrustedWorkspaces?.supported, false);
 });
