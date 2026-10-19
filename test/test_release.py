@@ -243,6 +243,77 @@ class ReleaseTests(unittest.TestCase):
                    if "uses: ./.github/workflows/release.yml" in p.read_text()]
         self.assertEqual(callers, ["release-please.yml"])
 
+    def test_release_notes_gate_uses_trusted_tooling_and_preserves_initial_body(self):
+        automatic = (ROOT / ".github/workflows/release-please.yml").read_text()
+        self.assertIn("group: release-please-main", automatic)
+        self.assertIn("cancel-in-progress: false", automatic)
+        self.assertIn("fetch-depth: 0", automatic)
+        self.assertIn("npm ci --prefix tools/release", automatic)
+        self.assertIn("npm test --prefix tools/release", automatic)
+        self.assertIn("run: node tools/release/runner.mjs", automatic)
+        self.assertIn("statuses: write", self.workflow_job("release-please", ".github/workflows/release-please.yml"))
+        self.assertNotIn("statuses: write", self.workflow_job("publish", ".github/workflows/release-please.yml"))
+        self.assertNotIn("googleapis/release-please-action", automatic)
+        package = json.loads((ROOT / "tools/release/package.json").read_text())
+        lock = json.loads((ROOT / "tools/release/package-lock.json").read_text())
+        self.assertEqual(package["dependencies"]["release-please"], "17.3.0")
+        self.assertEqual(lock["packages"]["node_modules/release-please"]["version"], "17.3.0")
+        status = (ROOT / ".github/workflows/release-notes.yml").read_text()
+        self.assertIn("pull_request_target:", status)
+        self.assertIn("name: validate curated release notes", status)
+        self.assertIn("ref: ${{ github.event.pull_request.base.sha || steps.candidate.outputs.base_sha }}", status)
+        self.assertIn("ref: ${{ github.event.pull_request.head.sha || steps.candidate.outputs.head_sha }}", status)
+        self.assertIn("workflow_dispatch:", status)
+        self.assertIn("PR_NUMBER: ${{ inputs.pull_request }}", status)
+        self.assertIn('gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER"', status)
+        self.assertIn("python3 tooling/tools/release/notes.py --repo candidate verify", status)
+        self.assertIn("pull-requests: read", status)
+        self.assertNotIn(": write", status)
+        validate = self.workflow_job("validate")
+        self.assertIn("ref: ${{ github.sha }}", validate)
+        self.assertIn("path: release-source", validate)
+        self.assertIn("fetch-depth: 0", validate)
+        self.assertIn("notes.py --repo release-source retry", validate)
+        self.assertIn("notes.py --repo release-source verify", validate)
+        publish = self.workflow_job("release")
+        self.assertIn("ref: ${{ github.sha }}", publish)
+        self.assertIn("release-tools/tools/release/notes.py", publish)
+        self.assertIn("body_path: ${{ runner.temp }}/release-notes.md", publish)
+        self.assertIn("append_body: false", publish)
+        self.assertNotIn("generate_release_notes:", publish)
+        self.assertIn('notes.py --repo "$GITHUB_WORKSPACE" packages', publish)
+        self.assertLess(publish.index('verify.py assets'), publish.index('"$GITHUB_WORKSPACE" packages'))
+        publication_assets = self.workflow_job("publication_assets")
+        self.assertIn('if git cat-file -e "$TAG:docs/releases/${TAG}.json"', publication_assets)
+        self.assertIn('notes.py --repo "$GITHUB_WORKSPACE" packages', publication_assets)
+
+    def test_manual_notes_validation_chooses_retry_without_new_approval(self):
+        workflow = self.workflow_job("validate")
+        match = re.search(r"      - name: Verify approved notes or validate an existing-release retry\n"
+                          r".*?        run: \|\n((?:          .*\n)+)", workflow, re.DOTALL)
+        self.assertIsNotNone(match)
+        script = textwrap.dedent(match[1])
+        helper = self.directory / "release-tools/tools/release/notes.py"
+        helper.parent.mkdir(parents=True)
+        captured = self.directory / "arguments.json"
+        helper.write_text("import json, os, sys\nfrom pathlib import Path\n"
+                          "Path(os.environ['CAPTURE']).write_text(json.dumps(sys.argv[1:]))\n"
+                          "print('Approved body')\n"
+                          "sys.exit(int(os.environ.get('HELPER_EXIT', '0')))\n")
+        for existing, command, flag in (("true", "retry", "--tag"), ("false", "verify", "--ref")):
+            with self.subTest(publish_existing=existing):
+                env = {**os.environ, "TAG": self.tag, "PUBLISH_EXISTING": existing,
+                       "GITHUB_REPOSITORY": "kksat/zals", "CAPTURE": str(captured)}
+                result = subprocess.run(["bash", "-c", script], cwd=self.directory,
+                                        env=env, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                args = json.loads(captured.read_text())
+                self.assertEqual(args[:5], ["--repo", "release-source", command, flag, self.tag])
+                self.assertIn("--github-repository", args)
+                failed = subprocess.run(["bash", "-c", script], cwd=self.directory,
+                                        env={**env, "HELPER_EXIT": "42"}, capture_output=True, text=True)
+                self.assertEqual(failed.returncode, 42)
+
     def test_verification_uses_workflow_tools_against_tagged_sources_and_assets(self):
         for job in ("validate", "release", "publication_assets"):
             with self.subTest(job=job):

@@ -1,0 +1,74 @@
+name: release-notes
+
+on:
+  # Read-only: execute tooling from the trusted base, never from the PR branch.
+  pull_request_target:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+  # GITHUB_TOKEN-authored PR events do not trigger other workflows. A maintainer
+  # can request this read-only validation manually; the pre-tag gate always runs.
+  # Dispatch checks attach to main, not the checked-out PR SHA, and therefore do
+  # not publish the required commit status. release-please's runner publishes
+  # that status directly on the PR head after each main push (or a rerun).
+  # Keep this optional check name distinct from the commit-status context.
+  workflow_dispatch:
+    inputs:
+      pull_request:
+        description: "Release-please pull request number to validate"
+        type: number
+        required: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  release-notes:
+    name: validate curated release notes
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch' ||
+          (github.event.pull_request.user.login == 'github-actions[bot]' &&
+           github.event.pull_request.head.repo.full_name == github.repository &&
+           startsWith(github.event.pull_request.head.ref, 'release-please--branches--')) }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve a manually requested release-please candidate
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        id: candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pull_request }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$PR_NUMBER" =~ ^[0-9]+$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" | jq -er --arg repo "$GITHUB_REPOSITORY" '
+            select(.state == "open" and .base.ref == "main" and
+              .user.login == "github-actions[bot]" and .head.repo.full_name == $repo and
+              (.head.ref | startswith("release-please--branches--")) and
+              (.base.sha | test("^[a-f0-9]{40}$")) and (.head.sha | test("^[a-f0-9]{40}$"))) |
+            "base_sha=\(.base.sha)\nhead_sha=\(.head.sha)"' >> "$GITHUB_OUTPUT"
+      - name: Check out trusted base tooling
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha || steps.candidate.outputs.base_sha }}
+          path: tooling
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check out release candidate as data only
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || steps.candidate.outputs.head_sha }}
+          path: candidate
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify separately approved notes cover the complete candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || steps.candidate.outputs.head_sha }}
+        run: >-
+          python3 tooling/tools/release/notes.py --repo candidate verify
+          --ref "$CANDIDATE_SHA" --github-repository "$GITHUB_REPOSITORY"

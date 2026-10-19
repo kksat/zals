@@ -1,0 +1,14 @@
+{
+  "name": "zals-release-runner",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test runner.test.mjs"
+  },
+  "dependencies": {
+    "release-please": "17.3.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

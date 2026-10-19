@@ -8,18 +8,42 @@ permissions:
   contents: write
   pull-requests: write
 
+# A second push must not cancel a run between release creation and publication.
+concurrency:
+  group: release-please-main
+  cancel-in-progress: false
+
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      statuses: write
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
-      - uses: googleapis/release-please-action@v4
-        id: release
+      - uses: actions/checkout@v4
         with:
-          config-file: release-please-config.json
-          manifest-file: .release-please-manifest.json
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: tools/release/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: npm ci --prefix tools/release
+      - run: npm test --prefix tools/release
+      - name: Create releases with approved initial notes, then update release PRs
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node tools/release/runner.mjs
 
   publish:
     name: publish the newly created release
@@ -29,6 +53,7 @@ jobs:
     uses: ./.github/workflows/release.yml
     permissions:
       contents: write
+      pull-requests: read
       id-token: write
     with:
       tag: ${{ needs.release-please.outputs.tag_name }}
