@@ -296,6 +296,8 @@ def publication_state(github, version, body):
     except GitHubNotFound:
         return False
     require(release.get("tag_name") == tag, "Target release identity is inconsistent")
+    require(release.get("draft") is False and release.get("published_at"),
+            "Resolve the existing draft/unpublished release before publishing assets")
     require((release.get("body") or "").strip() == body.strip(),
             "Existing release prose differs from approved notes; corrections belong in the next release")
     return True
