@@ -26,13 +26,14 @@ class FakeGitHub:
     def __init__(self, fixture):
         self.fixture = fixture
         self.pr = {"number": 7, "merged": True, "merge_commit_sha": fixture.notes_commit,
+                   "merged_at": "2026-10-02T12:00:00Z",
                    "base": {"ref": "main", "repo": {"full_name": self.repository}},
                    "head": {"sha": fixture.notes_commit}, "user": {"login": "author"},
                    "changed_files": 3}
         self.files = [{"filename": path, "status": "added", "sha": fixture.blob(path)}
                       for path in (NOTES.PUBLIC, NOTES.EDITOR, NOTES.metadata_path("0.2.0"))]
         self.reviews = [{"state": "APPROVED", "user": {"login": "reviewer", "type": "User"},
-                         "commit_id": fixture.notes_commit}]
+                         "commit_id": fixture.notes_commit, "submitted_at": "2026-10-02T11:00:00Z"}]
         self.release = {"tag_name": "v0.1.0", "draft": False,
                         "published_at": "2026-10-01T00:00:00Z", "body": "Legacy notes"}
         self.target_release = None
@@ -261,6 +262,17 @@ class ReleaseNotesTest(unittest.TestCase):
                     self.verify()
         self.github.reviews = original
         self.verify()
+
+    def test_approval_must_precede_merge_not_be_added_retroactively(self):
+        for submitted in (None, "invalid", "2026-10-02T11:00:00", "2026-10-02T13:00:00Z"):
+            with self.subTest(submitted=submitted):
+                self.github.reviews[0]["submitted_at"] = submitted
+                with self.assertRaisesRegex(NOTES.NotesError, "before merge"):
+                    self.verify()
+        self.github.reviews[0]["submitted_at"] = "2026-10-02T11:00:00Z"
+        self.github.pr["merged_at"] = None
+        with self.assertRaisesRegex(NOTES.NotesError, "merge timestamp"):
+            self.verify()
 
     def test_coverage_only_followup_approves_existing_prose_at_exact_head(self):
         self.write("internal.py", "# Internal maintenance with no public prose change\n")
