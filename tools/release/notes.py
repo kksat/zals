@@ -6,6 +6,7 @@ prose; this tool binds a reviewed document to the exact product that will ship.
 """
 
 import argparse
+from datetime import datetime
 import hashlib
 import json
 import os
@@ -303,6 +304,16 @@ def publication_state(github, version, body):
     return True
 
 
+def api_time(value):
+    if not isinstance(value, str):
+        return None
+    try:
+        result = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return result if result.tzinfo is not None else None
+    except ValueError:
+        return None
+
+
 def verify_approval(repo, ref, version, github):
     body, metadata = check(repo, ref, version)
     path = metadata_path(metadata["version"])
@@ -353,11 +364,15 @@ def verify_approval(repo, ref, version, github):
     require(not any(review["state"] == "CHANGES_REQUESTED" for review in latest.values()),
             "Notes PR still has an outstanding change request")
     author = pr.get("user", {}).get("login", "").lower()
+    merged_at = api_time(pr.get("merged_at"))
+    require(merged_at, "Notes PR has no valid merge timestamp")
     require(any(login != author and review["state"] == "APPROVED"
                 and review.get("user", {}).get("type") == "User"
                 and review.get("commit_id") == head
+                and api_time(review.get("submitted_at")) is not None
+                and api_time(review["submitted_at"]) <= merged_at
                 for login, review in latest.items()),
-            "Notes PR requires another reviewer's approval of its final head")
+            "Notes PR requires another reviewer's approval of its final head before merge")
     previous = github.get(f"/releases/tags/{metadata['previous_tag']}")
     require(previous.get("tag_name") == metadata["previous_tag"] and not previous.get("draft")
             and previous.get("published_at"), "Previous tag is not a published GitHub release")
