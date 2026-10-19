@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-09-19
 - **Supersedes:** —
-- **Superseded by:** —
+- **Superseded by:** [ADR-0044](0044-user-facing-release-notes.md) (changelog ownership and release-body selection only)
 
 ## Context
 
@@ -22,12 +22,15 @@ Use **Google release-please** to drive releases from
 [Conventional Commits](https://www.conventionalcommits.org/):
 
 - `.github/workflows/release-please.yml` runs on every push to `main`. It opens
-  (or updates) a release PR that bumps the version, updates `CHANGELOG.md`, and
+  (or updates) a release PR that bumps the version, updates `TECHNICAL_CHANGELOG.md`, and
   rewrites the version in `src/main.zig`, `build.zig.zon`, and
   `python/pyproject.toml` via the generic updater (`x-release-please-version`
   annotations), plus the VS Code manifest and lockfile via JSON updaters.
-- Merging the release PR creates the `vX.Y.Z` tag and a GitHub release.
-  The action exposes `release_created` and `tag_name` as job outputs. A dependent
+- Merging the release PR creates the `vX.Y.Z` tag and a GitHub release only
+  after the approved user-facing notes gate described in
+  [ADR-0044](0044-user-facing-release-notes.md). The initial release body uses
+  the approved matching root changelog section, not the generated technical log.
+  The release runner exposes `release_created` and `tag_name` as job outputs. A dependent
   job calls the reusable release workflow only when `release_created == 'true'`,
   passing the exact tag and explicitly enabling Marketplace and Open VSX using
   the configured PAT secrets. Ordinary pushes that only update a release PR do
@@ -103,8 +106,10 @@ flow through release-please.
 
 ## Consequences
 
-- Versions, tags, and changelogs are derived from commit messages, so the
-  release PR is the single review point.
+- Versions, tags, and the technical changelog remain derived from commit
+  messages. [ADR-0044](0044-user-facing-release-notes.md) separates user-facing
+  prose into an approved notes-only PR and adds a candidate-coverage gate before
+  release. See [the maintainer workflow](../release-notes.md).
 - All five binaries build on one runner, which keeps the matrix small and cheap.
 - Windows support required making the transport, writer, logging, and cache
   directory portable (`std.fs.File` instead of raw POSIX fds,
