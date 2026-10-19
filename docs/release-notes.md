@@ -256,8 +256,14 @@ approved tagged root file:
 python3 tools/release/notes.py packages --tag vX.Y.Z --directory ./release-assets
 ```
 
-This rejects missing, duplicate, or mismatched `extension/CHANGELOG.md` entries.
-The separate asset verifier still checks the complete platform/package set.
+The source stays `editors/vscode/CHANGELOG.md` (uppercase), but VSCE packages it
+as **`extension/changelog.md`** (lowercase). `extension.vsixmanifest` registers
+that lowercase path as asset type
+`Microsoft.VisualStudio.Services.Content.Changelog`. The embedded bytes remain
+an exact copy of root `CHANGELOG.md`; the filename normalization is not a prose
+transformation. The helper rejects missing, duplicate, or mismatched packaged
+changelogs. The separate asset verifier still checks the complete
+platform/package set.
 
 Existing-release retries use:
 
