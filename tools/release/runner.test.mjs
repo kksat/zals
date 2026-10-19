@@ -427,6 +427,10 @@ function statusFixture({ getError, statusError, untrusted = false } = {}) {
         yield { data: [{ ...pull, head: { ...pull.head, sha: 'b'.repeat(40) } }] };
       } },
       async request(route, options) {
+        if (route.includes('/git/ref/')) {
+          return { data: { object: { type: 'commit', sha: 'c'.repeat(40) } } };
+        }
+        if (route.includes('/compare/')) return { data: { behind_by: 0 } };
         if (route.startsWith('GET')) {
           if (getError) throw new Error('PR read failed');
           return { data: untrusted ? { ...pull, user: { login: 'someone-else' } } : pull };
@@ -465,6 +469,74 @@ for (const failure of [{ getError: true }, { statusError: true }, { untrusted: t
     await assert.rejects(publishNotesStatuses({ github,
       validateHead: () => assert.fail('API/identity error must not reach validation') }));
     assert.ok(!statuses.some(status => status.state === 'success'));
+  });
+}
+
+for (const approvedHead of [true, false]) {
+  test(`unchanged bot PR automatically refreshes from main and statuses only updated head; approved=${approvedHead}`, async () => {
+    const { github, statuses } = statusFixture();
+    const request = github.octokit.request;
+    const newHead = 'e'.repeat(40);
+    const updates = [];
+    let polling = false;
+    let polls = 0;
+    github.octokit.request = async (route, args) => {
+      if (route.startsWith('PUT')) {
+        updates.push(args);
+        polling = true;
+        return { status: 202 };
+      }
+      if (route.includes('/compare/')) {
+        return { data: { behind_by: args.basehead.endsWith(newHead) ? 0 : 1 } };
+      }
+      const response = await request(route, args);
+      if (polling && route.includes('/pulls/')) {
+        polls++;
+        if (polls >= 2) return { data: { ...response.data, head: { ...response.data.head, sha: newHead } } };
+      }
+      return response;
+    };
+    await publishNotesStatuses({ github, refreshOptions: { wait: async () => {}, pollAttempts: 3 }, report() {},
+      validateHead: async head => {
+        assert.equal(head, newHead);
+        if (!approvedHead) throw new Error('notes expected to be incomplete while drafting');
+        return approved;
+      } });
+    assert.deepEqual(updates, [{ owner: 'kksat', repo: 'zals', pull_number: 42, expected_head_sha: sha }]);
+    assert.equal(polls, 2, 'must poll until GitHub actually returns a changed head');
+    assert.deepEqual(statuses.map(({ sha, state }) => [sha, state]),
+      [[sha, 'pending'], [newHead, 'pending'], [newHead, approvedHead ? 'success' : 'failure']]);
+  });
+}
+
+for (const problem of ['compare unavailable', 'malformed comparison', 'invalid base',
+  'update conflict', 'poll timeout', 'identity changed']) {
+  test(`branch refresh fails closed without green or validating stale head: ${problem}`, async () => {
+    const { github, statuses } = statusFixture();
+    const request = github.octokit.request;
+    let polling = false;
+    github.octokit.request = async (route, args) => {
+      if (route.includes('/git/ref/') && problem === 'invalid base') return { data: {} };
+      if (route.includes('/compare/')) {
+        if (problem === 'compare unavailable') throw new Error('compare unavailable');
+        if (problem === 'malformed comparison') return { data: {} };
+        return { data: { behind_by: 1 } };
+      }
+      if (route.startsWith('PUT')) {
+        if (problem === 'update conflict') throw Object.assign(new Error('update conflict'), { status: 422 });
+        polling = true;
+        return { status: 202 };
+      }
+      const response = await request(route, args);
+      if (polling && route.includes('/pulls/') && problem === 'identity changed') {
+        return { data: { ...response.data, user: { login: 'someone-else' } } };
+      }
+      return response;
+    };
+    await assert.rejects(publishNotesStatuses({ github,
+      refreshOptions: { wait: async () => {}, pollAttempts: 2 },
+      validateHead: () => assert.fail('must not validate an unrefreshed or untrusted head') }));
+    assert.deepEqual(statuses.map(status => status.state), ['pending', 'failure']);
   });
 }
 

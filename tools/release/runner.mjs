@@ -5,6 +5,7 @@ import { appendFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { GitHub, Manifest } from 'release-please';
 
 const exec = promisify(execFile);
@@ -143,11 +144,58 @@ function isReleasePullRequest(pull, repository) {
     pull.head.ref.startsWith('release-please--branches--');
 }
 
+function requireReleasePullRequest(pull, repository) {
+  if (!isReleasePullRequest(pull, repository) || !/^[a-f0-9]{40}$/.test(pull.head.sha ?? '')) {
+    throw new Error('Release PR identity changed while resolving its exact head');
+  }
+  return pull;
+}
+
+// release-please skips an unchanged PR body, even when approved notes merged on
+// main. Refresh only that strict bot branch, with GitHub's expected-head guard;
+// never force-push or validate the old head while an update is still pending.
+export async function refreshReleasePullRequest(github, pull, {
+  wait = sleep, pollAttempts = 30, pollDelay = 2000, maxRefreshes = 3,
+} = {}) {
+  const { owner, repo, defaultBranch } = github.repository;
+  const api = github.octokit;
+  requireReleasePullRequest(pull, github.repository);
+  for (let refresh = 0; refresh < maxRefreshes; refresh++) {
+    const { data: base } = await api.request('GET /repos/{owner}/{repo}/git/ref/{ref}',
+      { owner, repo, ref: `heads/${defaultBranch}` });
+    if (base.object?.type !== 'commit' || !/^[a-f0-9]{40}$/.test(base.object.sha ?? '')) {
+      throw new Error('Cannot resolve the current release base commit');
+    }
+    const { data: comparison } = await api.request('GET /repos/{owner}/{repo}/compare/{basehead}',
+      { owner, repo, basehead: `${base.object.sha}...${pull.head.sha}` });
+    if (!Number.isInteger(comparison.behind_by) || comparison.behind_by < 0) {
+      throw new Error('Cannot determine whether the release PR includes the current base');
+    }
+    if (comparison.behind_by === 0) return pull;
+    const expected = pull.head.sha;
+    await api.request('PUT /repos/{owner}/{repo}/pulls/{pull_number}/update-branch',
+      { owner, repo, pull_number: pull.number, expected_head_sha: expected });
+    let updated;
+    for (let attempt = 0; attempt < pollAttempts; attempt++) {
+      await wait(pollDelay);
+      const { data } = await api.request('GET /repos/{owner}/{repo}/pulls/{pull_number}',
+        { owner, repo, pull_number: pull.number });
+      updated = requireReleasePullRequest(data, github.repository);
+      if (updated.head.sha !== expected) break;
+    }
+    if (!updated || updated.head.sha === expected) {
+      throw new Error('Timed out waiting for the release PR branch update');
+    }
+    pull = updated;
+  }
+  throw new Error('Release base kept advancing while refreshing the release PR');
+}
+
 // GITHUB_TOKEN suppresses PR workflow events, so publish a commit status directly
 // after upstream PR creation/update. List also finds unchanged PRs for reruns.
 // This is not the pre-tag gate: missing notes are expected while drafting a PR.
 export async function publishNotesStatuses({ github, validateHead = validateNotesRef,
-  report = message => console.error(message), targetUrl }) {
+  report = message => console.error(message), targetUrl, refreshOptions }) {
   const { owner, repo, defaultBranch } = github.repository;
   const api = github.octokit;
   for await (const { data: pulls } of api.paginate.iterator('GET /repos/{owner}/{repo}/pulls',
@@ -156,16 +204,24 @@ export async function publishNotesStatuses({ github, validateHead = validateNote
       if (!isReleasePullRequest(listed, github.repository)) continue;
       // Never assume the upstream PullRequest.sha means head SHA (it denotes the
       // merge commit). Fetch the exact current head from the REST PR object.
-      const { data: pull } = await api.request('GET /repos/{owner}/{repo}/pulls/{pull_number}',
+      const { data } = await api.request('GET /repos/{owner}/{repo}/pulls/{pull_number}',
         { owner, repo, pull_number: listed.number });
-      if (!isReleasePullRequest(pull, github.repository) || !/^[a-f0-9]{40}$/.test(pull.head.sha ?? '')) {
-        throw new Error('Release PR identity changed while resolving its exact head');
+      let pull = requireReleasePullRequest(data, github.repository);
+      const status = (state, description) => api.request('POST /repos/{owner}/{repo}/statuses/{sha}',
+        { owner, repo, sha: pull.head.sha, state, description, context: NOTES_STATUS,
+          ...(targetUrl ? { target_url: targetUrl } : {}) });
+      await status('pending', 'Refreshing and validating approved notes for this release PR');
+      const originalHead = pull.head.sha;
+      try {
+        pull = await refreshReleasePullRequest(github, pull, refreshOptions);
+      } catch (error) {
+        await status('failure', 'Could not safely refresh the release PR from its current base');
+        throw error;
       }
       const sha = pull.head.sha;
-      const status = (state, description) => api.request('POST /repos/{owner}/{repo}/statuses/{sha}',
-        { owner, repo, sha, state, description, context: NOTES_STATUS,
-          ...(targetUrl ? { target_url: targetUrl } : {}) });
-      await status('pending', 'Validating separately approved notes for this exact release PR head');
+      if (sha !== originalHead) {
+        await status('pending', 'Validating approved notes for the refreshed release PR head');
+      }
       try {
         requireNotes(await validateHead(sha));
       } catch (error) {
