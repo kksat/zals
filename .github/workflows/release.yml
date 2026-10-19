@@ -338,6 +338,7 @@ jobs:
         working-directory: dist
         run: sha256sum -- *.tar.gz *.zip *.whl *.vsix > SHA256SUMS
       - name: Select the validated approved body outside the asset directory
+        id: notes
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -345,8 +346,12 @@ jobs:
           set -euo pipefail
           python3 release-tools/tools/release/notes.py --repo "$GITHUB_WORKSPACE" verify \
             --ref "$TAG" --version "${TAG#v}" --github-repository "$GITHUB_REPOSITORY" \
-            > "$RUNNER_TEMP/release-notes.md"
+            --github-output "$GITHUB_OUTPUT" > "$RUNNER_TEMP/release-notes.md"
           test -s "$RUNNER_TEMP/release-notes.md"
+      - name: Require a fail-closed target release decision
+        env:
+          RELEASE_EXISTS: ${{ steps.notes.outputs.release_exists }}
+        run: test "$RELEASE_EXISTS" = true || test "$RELEASE_EXISTS" = false
       - name: Check for identical published GitHub assets
         id: github_assets
         env:
@@ -354,15 +359,21 @@ jobs:
         run: |
           python release-tools/tools/release/check_github.py --tag "$TAG" \
             --repository "$GITHUB_REPOSITORY" --directory dist
-      - name: Publish assets to GitHub only
-        if: steps.github_assets.outputs.already_published != 'true'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ env.TAG }}
-          body_path: ${{ runner.temp }}/release-notes.md
-          append_body: false
-          files: dist/*
-          fail_on_unmatched_files: true
+      - name: Upload verified assets to an existing GitHub release
+        if: steps.github_assets.outputs.already_published != 'true' && steps.notes.outputs.release_exists == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
+      - name: Create a GitHub release with the approved initial body and assets
+        if: steps.github_assets.outputs.already_published != 'true' && steps.notes.outputs.release_exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release create "$TAG" --verify-tag --title "$TAG" \
+            --notes-file "$RUNNER_TEMP/release-notes.md" --repo "$GITHUB_REPOSITORY" dist/*
 
   publication_assets:
     name: verify assets for external publication
