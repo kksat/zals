@@ -189,10 +189,22 @@ For Neovim, see the [filetype and LSP setup](docs/neovim.md), including
 ## Releasing
 
 Releases are driven by [release-please](https://github.com/googleapis/release-please)
-from [Conventional Commits](https://www.conventionalcommits.org/). Push commits
-to `main`; release-please opens a release PR that updates the changelog and all
-server, Python, and VS Code versions in lockstep. Merging that PR creates the
-`vX.Y.Z` tag and a GitHub release. See
+from [Conventional Commits](https://www.conventionalcommits.org/). On `main`,
+release-please opens a release PR that updates `TECHNICAL_CHANGELOG.md` and all
+server, Python, and VS Code versions in lockstep; the version policy is unchanged.
+Before merging it, explicitly invoke **`/skill:release-notes`** in Pi to prepare
+capability-focused notes and meaningful fixes for Ansible editor users in a
+separate notes-only PR. Invocation prepares locally; pushing and PR creation
+require explicit permission. No mandatory per-change fragments are needed.
+
+Root [`CHANGELOG.md`](CHANGELOG.md) is authoritative user-facing prose; its exact
+copy ships in the extension. A merged notes-only PR with nonauthor human approval of
+its final head and current candidate coverage is required before the release
+runner creates the `vX.Y.Z` tag and GitHub release with that same prose at initial
+creation. Late product changes require refreshed coverage and approval. Published
+history stays unchanged; corrections go in the next release. See the
+[release-notes workflow and required-status setup](docs/release-notes.md),
+[ADR-0044](docs/adr/0044-user-facing-release-notes.md), and
 [ADR-0026](docs/adr/0026-release-process.md).
 
 When release-please creates a release after its release PR is merged, it calls
@@ -203,7 +215,8 @@ dispatch remains available and defaults to **GitHub-only** packaging. The workfl
 builds five native archives, five Python wheels, five platform-specific VSIXs,
 and `SHA256SUMS`. PyPI and Homebrew remain explicit manual opt-ins.
 
-To bootstrap or rebuild a release, push the version tag, then run:
+The existing initial baseline is `v0.1.0`. For manual packaging of an existing
+tag (new post-baseline releases must satisfy the notes gate), run:
 
 ```sh
 gh workflow run release.yml --ref main -f tag=v0.1.0
@@ -240,6 +253,8 @@ gh workflow run release.yml --ref main -f tag=v0.1.0 \
 ```
 
 Omit `publish_existing` to build a release and then publish it in one run.
+Existing-release retries reuse the tagged/published narrative and verified assets;
+they do not regenerate notes or require new editorial approval.
 PyPI uses trusted publishing (OIDC) configured for this repository's `release.yml`
 workflow; no API token is required. Homebrew uses `HOMEBREW_TAP_TOKEN` to update
 `kksat/homebrew-tap` (the repository behind `kksat/tap`), overridable with the
