@@ -64,11 +64,18 @@ those paths are unchanged, so prose cannot drift outside that approval.
 
 Gate release readiness deterministically and recheck before creating a tag or
 initial GitHub release, including manual new-release paths. Supply approved
-prose at initial creation, rather than patching a default body afterward.
-A required GitHub status complements this pre-tag guard but requires explicit
-external branch-protection/ruleset configuration; repository code alone does not
-enable it. The authoring agent has no merge/tag/release/publication role and
-needs no registry credentials.
+prose at initial creation, rather than patching a default body afterward. Bind
+the tag to that exact candidate, rejecting conflicting existing tags and
+creation races rather than moving tags. Asset recovery preserves existing prose;
+a differing published body or unresolved draft blocks distribution.
+
+Refresh bot release branches when main advances, then validate the exact new
+head. A required GitHub status complements the pre-tag guard, with a trusted
+not-applicable result for ordinary product/notes PRs so a global required check
+does not prevent their merge. Enabling that status requires explicit external
+branch-protection/ruleset configuration; repository code alone does not enable
+it. The authoring agent has no merge/tag/release/publication role and needs no
+registry credentials.
 
 Preserve published historical entries, starting with `0.1.0`. Corrections belong
 in the next release. Existing-release retries reuse tagged/published notes and

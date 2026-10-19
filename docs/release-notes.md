@@ -285,13 +285,31 @@ GitHub release creation**, not as a later correction after uncurated text has
 been visible. Packaging reuses that same section and never appends automatically
 generated notes. Root/editor equality makes the narrative part of the tagged
 source and VSIX; exact Marketplace/Open VSX presentation depends on the registry.
+The release tag must resolve to the approved candidate commit: an existing tag
+pointing elsewhere is an error, never permission to move that tag or publish a
+different product with the approved prose.
 
-Require the commit-status context **`approved curated release notes`** on
-release-please PRs through GitHub branch protection/rulesets. The automatic
-release runner validates each release PR candidate and posts pending, then
-success/failure directly on that **exact PR head SHA**, using this context.
-This avoids relying on ordinary PR workflow events that GitHub can suppress for
-PRs created or refreshed using `GITHUB_TOKEN`.
+Asset recovery uploads files without editing existing release prose. If a
+published target's body differs from its approved notes, publication stops;
+corrections belong in a later release. An absent target can be created with the
+approved body and an already-verified tag; an intervening release creation fails
+rather than turning into a prose update. Existing draft/unpublished targets must
+be resolved explicitly before this workflow can distribute their assets.
+
+Require the commit-status context **`approved curated release notes`** through
+GitHub branch protection/rulesets. The automatic release runner refreshes the
+strictly identified bot release branch from current main when it is behind,
+without force-pushing, then validates and posts pending/success/failure on that
+**exact refreshed PR head SHA**. An unchanged generated release-please body must
+not leave merged notes stranded outside the candidate. Failed or incomplete
+branch refreshes cannot produce a green readiness status.
+
+The trusted status workflow also posts **not applicable** success on ordinary
+product and notes-only PRs. Standard required-status rules apply to all PRs, so
+this lets them merge without pretending they are release candidates. This
+classification does not authorize any release: the independent pre-tag guard
+still validates every proposed release. Bot-PR statuses are posted directly,
+avoiding ordinary PR events that GitHub can suppress for `GITHUB_TOKEN` changes.
 
 A maintainer must enable that context for the default branch in repository
 settings, with required checks and the intended review policy. This is
@@ -316,8 +334,8 @@ a missing or old status is not approval. Do not bypass required checks.
 
 The pre-tag gate independently runs again in the release path even when branch
 settings are absent, bypassed, or stale. Manual new-release paths also validate
-notes before creating/updating a release; existing-release retries take the
-retry path instead.
+notes before creating a release or uploading its assets; existing-release
+retries take the retry path instead.
 
 Published history is immutable here: do not rewrite a released root section,
 GitHub narrative, tag, or packaged changelog to make a correction. Describe

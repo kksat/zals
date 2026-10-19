@@ -232,16 +232,18 @@ below only to redistribute their already published, verified assets.
 Build and asset verification jobs check out the requested tag, not the moving
 branch tip; verification and publishing tools come from the workflow revision. The workflow
 rejects mismatched source versions and verifies the complete asset set,
-platform metadata, and identical bundled binaries before creating or updating
-the GitHub release. Packaging must succeed for every platform before any assets
+platform metadata, and identical bundled binaries before creating a GitHub
+release or uploading assets without changing an existing release's prose. Packaging must succeed for every platform before any assets
 are published. The initial baseline is `0.1.0`.
 
 GitHub asset publication is idempotent: if all 15 assets and `SHA256SUMS` are
 already published with identical bytes, the upload step is skipped and the job
 succeeds, including for immutable releases. The check uses GitHub's SHA-256
 digests, downloading assets for comparison when a digest is unavailable. API or
-download errors are not treated as success. Draft releases still need final
-publication; mutable releases can upload missing or changed assets.
+download errors are not treated as success. An existing target must already be
+published with matching approved prose; draft/unpublished targets require explicit
+resolution. Mutable releases can upload missing or changed assets without
+rewriting their notes.
 
 The workflow also accepts component-prefixed tags such as `zals-v0.2.0`;
 package versions and asset filenames still use `0.2.0`. However, that particular
