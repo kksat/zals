@@ -52,7 +52,10 @@ pub const Definition = struct {
     site: Site,
 };
 
-pub const FileKind = enum { role_defaults, role_vars, role_meta, general };
+/// What a file's documents can bind (ADR-0045). `vars_file` and a loaded
+/// `general` file bind their map-rooted documents' top-level keys; an unloaded
+/// `general` file binds only the sites inside its plays and tasks.
+pub const FileKind = enum { role_defaults, role_vars, role_meta, vars_file, general };
 
 /// Collect every definition in `forest`. `text` is the source the offsets refer
 /// to (usually `forest.text`).
@@ -68,18 +71,24 @@ pub fn collect(
             .role_defaults => try topLevelKeys(root, .role_defaults, out),
             .role_vars => try topLevelKeys(root, .role_vars, out),
             .role_meta => try argumentSpecs(root, out),
-            .general => {
-                // A map-rooted file outside the conventional dirs is a
-                // `vars_files`/`include_vars` target: its top-level keys are
-                // variables. Playbooks and task files are seq-rooted.
-                if (root.isMap()) {
-                    try topLevelKeys(root, .vars_files, out);
-                } else {
-                    try walk(allocator, root, text, out);
-                }
+            // Playbooks and task files are seq-rooted. A map-rooted document
+            // is variable data only in a Variable file; elsewhere it is
+            // package, tool, or inventory configuration until a load targets
+            // the file (see `collectLoaded`).
+            .vars_file, .general => if (root.isMap()) {
+                if (kind == .vars_file) try topLevelKeys(root, .vars_files, out);
+            } else {
+                try walk(allocator, root, text, out);
             },
         }
     }
+}
+
+/// The bindings a `.general` file adds when a `vars_files`/`include_vars`
+/// load targets it: the top-level keys of its map-rooted documents. A loaded
+/// `.general` file binds exactly what a `.vars_file` binds.
+pub fn collectLoaded(forest: *const dom.Forest, out: *std.array_list.Managed(Definition)) !void {
+    for (forest.roots) |root| try topLevelKeys(root, .vars_files, out);
 }
 
 fn topLevelKeys(

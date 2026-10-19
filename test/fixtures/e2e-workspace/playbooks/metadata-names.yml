@@ -1,0 +1,12 @@
+---
+- name: Read variables spelled like metadata keys
+  hosts: localhost
+  gather_facts: false
+  vars_files:
+    - settings/release-metadata.yml
+  vars:
+    version: 2
+  tasks:
+    - name: Report metadata-like variables
+      ansible.builtin.debug:
+        msg: "{{ version }} {{ plugin_routing }} {{ platforms }}"

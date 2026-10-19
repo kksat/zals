@@ -28,6 +28,8 @@ explicit origin; a role or entry-point context does not narrow root references.
 Field cases exercise both declaration modes and ordered definition/implementation
 plus hover from every read, concrete key, and nested schema key in a small group.
 Schema-only, metadata, unbound, and same-named-root cases are deliberate controls.
+Variable-file cases check that package, execution-environment, Compose, and
+Molecule maps bind nothing, while a loaded file outside `vars/` still does.
 Escaped YAML keys retain quote-free source ranges. Reserved data keys such as
 `vars` do not introduce duplicate bindings; task-vars, vars-file, set-fact,
 and passed-role values exercise all actions, with module-argument negatives.

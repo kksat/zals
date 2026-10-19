@@ -18,6 +18,26 @@ Directory-style defaults and vars (for example `defaults/main/main.yml` and
 structured field bindings. See the [Neovim setup](neovim.md#standalone-role-repositories)
 for attaching zals to these buffers.
 
+### Variable files
+
+Top-level keys of a YAML map bind variables only in a **Variable file**:
+
+- a Role's `defaults/` or `vars/` file;
+- a file below a `group_vars/`, `host_vars/`, or `vars/` directory (outside a
+  Role's own `tasks/`, `templates/`, and other conventional directories);
+- the target of a static `vars_files` or `include_vars` load (without a `name`
+  prefix) anywhere in the owning Workspace, wherever the target lives.
+
+Other map-rooted YAML binds nothing: `galaxy.yml`, `requirements.yml`,
+`execution-environment.yml`, collection `meta/runtime.yml`, `molecule.yml`,
+`docker-compose.yml`, `mkdocs.yml`, changelogs, and YAML inventories (whose
+top-level keys are groups). A Role variable named `version` therefore never
+lists `version:` in `galaxy.yml`. A loaded file outside those directories binds
+only while a load targets it, so its keys are navigation entry points only in
+a Workspace that loads it. Dynamic load paths, `include_vars: dir:`, and
+`-e @file` extra vars are not resolved: put such files under `vars/` to
+navigate them. See [ADR-0045](adr/0045-variable-files.md).
+
 | Request | Answer |
 | --- | --- |
 | Find references, declarations off | Every read of the same root name in the owning Workspace |
@@ -72,8 +92,9 @@ A field without a declaration still finds its reads; its hover reports that no
 definition was found rather than showing a same-named root variable's value.
 
 Argument-spec `options:` maps explicitly declare fields. Structural properties
-like `type`, `description`, and `default` are not themselves fields, nor are
-package, requirements, or execution-environment metadata keys. A data key named
+like `type`, `description`, and `default` are not themselves fields. Keys in
+files that are not [Variable files](#variable-files), such as package,
+requirements, or execution-environment metadata, are not fields. A data key named
 `vars`, `roles`, or `set_fact` inside a structured value does not introduce a
 second binding scope. Likewise, data keys named `include_vars` or `vars_files`
 do not introduce file loads. Module argument data is not a variable binding
@@ -159,8 +180,10 @@ These are static, file-level approximations, not Ansible execution: task/block
 lexical lifetime, include order, inventory, extra-vars, and dynamically computed
 paths are not fully modeled. No-session requests retain the smaller enclosing
 role/playbook file set, so the same name in different such file sets need not
-produce the same answer. Nested Workspaces are separate until opened, and even
-then each source searches only its owning Workspace.
+produce the same answer. Without a session Workspace, a key in a loaded file
+outside `vars/`, `group_vars/`, and `host_vars/` is a binding only from the
+playbook whose file set loads it. Nested Workspaces are separate until opened,
+and even then each source searches only its owning Workspace.
 
 References to roles have a different rule: their possible resolved role
 directories must overlap (ADR-0034). An ambiguous fallback invocation can find

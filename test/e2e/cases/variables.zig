@@ -20,6 +20,10 @@ const pf_overrides = preflight ++ "vars/overrides.yml";
 const pf_specs = preflight ++ "meta/argument_specs.yml";
 const deploy_tasks = deploy ++ "tasks/main.yml";
 const deploy_defaults = deploy ++ "defaults/main.yml";
+const metadata_names = "playbooks/metadata-names.yml";
+const metadata_settings = "playbooks/settings/release-metadata.yml";
+const rollout_galaxy = "ansible_collections/example/rollout/galaxy.yml";
+const rollout_runtime = "ansible_collections/example/rollout/meta/runtime.yml";
 
 // Whole-Workspace, name-based reference answers. Each declaration mode is an
 // independent oracle: in particular, repeated reads on different lines are
@@ -959,5 +963,129 @@ pub const all = [_]m.Case{
             m.span("negative/roles.yml", "name: \"{{ <dynamic_role> }}\""),
             m.span("negative/roles.yml", "<dynamic_role>: example.rollout.deploy"),
         },
+    },
+    // Variable files are the files Ansible loads as variables (ADR-0045).
+    // Package, collection, execution-environment, Molecule, and Compose maps
+    // in the Workspace spell keys like these variables but bind nothing.
+    .{
+        .name = "variable file/metadata-spelled play var: definition excludes metadata maps",
+        .method = .definition,
+        .from = m.cursor(metadata_names, "msg: \"{{ <version> }}"),
+        .expected = &.{m.span(metadata_names, "    <version>: 2")},
+    },
+    .{
+        .name = "variable file/metadata-spelled play var: references without declarations",
+        .method = .references,
+        .from = m.cursor(metadata_names, "msg: \"{{ <version> }}"),
+        .include_declaration = false,
+        .expected = &.{m.span(metadata_names, "msg: \"{{ <version> }}")},
+    },
+    .{
+        .name = "variable file/metadata-spelled play var: references with declarations exclude metadata maps",
+        .method = .references,
+        .from = m.cursor(metadata_names, "msg: \"{{ <version> }}"),
+        .include_declaration = true,
+        .expected = &.{
+            m.span(metadata_names, "msg: \"{{ <version> }}"),
+            m.span(metadata_names, "    <version>: 2"),
+        },
+    },
+    .{
+        .name = "variable file/vars_files target outside a vars directory: definition",
+        .method = .definition,
+        .from = m.cursor(metadata_names, "{{ <plugin_routing> }}"),
+        .expected = &.{m.span(metadata_settings, "<plugin_routing>: disabled")},
+    },
+    .{
+        .name = "variable file/metadata-spelled play var: hover shows only the play binding",
+        .method = .hover,
+        .from = m.cursor(metadata_names, "msg: \"{{ <version> }}"),
+        .expected = &.{m.span(metadata_names, "msg: \"{{ <version> }}")},
+        .markdown_contains = &.{ "**Variable** `version`", "metadata-names.yml" },
+        .markdown_excludes = &.{ "galaxy.yml", "execution-environment.yml", "docker-compose.yml", "1.0.0", "3.8" },
+    },
+    .{
+        .name = "variable file/vars_files target outside a vars directory: implementation",
+        .method = .implementation,
+        .from = m.cursor(metadata_names, "{{ <plugin_routing> }}"),
+        .expected = &.{m.span(metadata_settings, "<plugin_routing>: disabled")},
+    },
+    .{
+        .name = "variable file/vars_files target outside a vars directory: key definition",
+        .method = .definition,
+        .from = m.cursor(metadata_settings, "<plugin_routing>: disabled"),
+        .expected = &.{m.span(metadata_settings, "<plugin_routing>: disabled")},
+    },
+    .{
+        .name = "variable file/vars_files target outside a vars directory: hover excludes runtime metadata",
+        .method = .hover,
+        .from = m.cursor(metadata_names, "{{ <plugin_routing> }}"),
+        .expected = &.{m.span(metadata_names, "{{ <plugin_routing> }}")},
+        .markdown_contains = &.{ "**Variable** `plugin_routing`", "disabled" },
+        .markdown_excludes = &.{ "runtime.yml", "redirect" },
+    },
+    .{
+        .name = "variable file/vars_files target outside a vars directory: references exclude runtime metadata",
+        .method = .references,
+        .from = m.cursor(metadata_settings, "<plugin_routing>: disabled"),
+        .include_declaration = true,
+        .expected = &.{
+            m.span(metadata_names, "{{ <plugin_routing> }}"),
+            m.span(metadata_settings, "<plugin_routing>: disabled"),
+        },
+    },
+    .{
+        .name = "variable file/unloaded Molecule platforms: no definition",
+        .method = .definition,
+        .from = m.cursor(metadata_names, "{{ <platforms> }}"),
+        .expected = &.{},
+    },
+    .{
+        .name = "variable file/unloaded Molecule platforms: references with declarations",
+        .method = .references,
+        .from = m.cursor(metadata_names, "{{ <platforms> }}"),
+        .include_declaration = true,
+        .expected = &.{m.span(metadata_names, "{{ <platforms> }}")},
+    },
+    .{
+        .name = "variable file/non-match: galaxy.yml key is not a definition",
+        .method = .definition,
+        .from = m.cursor(rollout_galaxy, "<version>: 1.0.0"),
+        .expected = &.{},
+    },
+    .{
+        .name = "variable file/non-match: galaxy.yml key is not a reference",
+        .method = .references,
+        .from = m.cursor(rollout_galaxy, "<version>: 1.0.0"),
+        .include_declaration = true,
+        .expected = &.{},
+    },
+    .{
+        .name = "variable file/non-match: collection runtime key is not a reference",
+        .method = .references,
+        .from = m.cursor(rollout_runtime, "<plugin_routing>:"),
+        .include_declaration = true,
+        .expected = &.{},
+    },
+    .{
+        .name = "variable file/non-match: execution-environment key is not a reference",
+        .method = .references,
+        .from = m.cursor("execution-environment.yml", "<version>: 3"),
+        .include_declaration = true,
+        .expected = &.{},
+    },
+    .{
+        .name = "variable file/non-match: Compose key is not a reference",
+        .method = .references,
+        .from = m.cursor("docker-compose.yml", "<version>: \"3.8\""),
+        .include_declaration = true,
+        .expected = &.{},
+    },
+    .{
+        .name = "variable file/non-match: Molecule key is not a reference",
+        .method = .references,
+        .from = m.cursor("molecule/default/molecule.yml", "<platforms>:"),
+        .include_declaration = true,
+        .expected = &.{},
     },
 };

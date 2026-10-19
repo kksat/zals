@@ -112,15 +112,23 @@ pub const Query = struct {
             if (loaded.contains(load.path)) continue;
             try loaded.put(load.path, {});
             const existing = view.find(files.items, load.path);
+            // A load target binds its load-only keys (ADR-0045).
             if (discover.isAnsibleFile(std.fs.path.basename(load.path))) {
-                if (existing != null) continue;
+                if (existing != null) {
+                    for (files.items) |*file| {
+                        if (std.mem.eql(u8, file.path, load.path)) file.facts = try file.facts.loaded(a);
+                    }
+                    continue;
+                }
                 if (open.get(load.path)) |doc| {
-                    try files.append(try self.fromDocument(root, load.path, doc));
+                    var file = try self.fromDocument(root, load.path, doc);
+                    file.facts = try file.facts.loaded(a);
+                    try files.append(file);
                     continue;
                 }
                 if (self.files.server.index.get(load.path)) |entry| {
                     if (std.mem.eql(u8, entry.root, root)) {
-                        try files.append(.{ .path = entry.path, .uri = try paths.pathToUri(a, entry.path), .facts = entry.facts });
+                        try files.append(.{ .path = entry.path, .uri = try paths.pathToUri(a, entry.path), .facts = try entry.facts.loaded(a) });
                         continue;
                     }
                 }

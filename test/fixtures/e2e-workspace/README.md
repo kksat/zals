@@ -40,6 +40,13 @@ exercise the separate field/root groups and all four navigation actions. Static
 quoted subscripts share the dot-read group; a called same-named member is a
 non-match for every action.
 
+`playbooks/metadata-names.yml` reads variables spelled like keys in the
+Workspace's `galaxy.yml`, `execution-environment.yml`, collection
+`meta/runtime.yml`, `docker-compose.yml`, and `molecule/default/molecule.yml`.
+None of those files is a Variable file, so none binds these names.
+`playbooks/settings/release-metadata.yml` lies outside any `vars/` directory
+and binds only because the playbook loads it.
+
 Files under `negative/` contain intentional non-matches or missing targets;
 positive playbooks remain structurally valid Ansible. The marker file is
 `fixture-workspace-root` because Git cannot check in a nested `.git` file.

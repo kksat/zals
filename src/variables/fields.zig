@@ -13,27 +13,11 @@ pub const Definition = struct {
     path: []const []const u8,
 };
 
-/// Every concrete field key below a recognized root binding. Names and paths
-/// are owned by `a`, not the YAML forest, so index facts can outlive the parse.
-pub fn collect(a: Allocator, forest: *const yaml.Forest, file_path: []const u8, kind: definitions.FileKind, out: *std.array_list.Managed(Definition)) !void {
-    if (kind == .general and isMetadata(file_path)) return;
-    var roots = std.array_list.Managed(definitions.Definition).init(a);
-    defer roots.deinit();
-    try definitions.collect(a, forest, kind, &roots);
-    return collectFromDefinitions(a, forest, file_path, kind, roots.items, out);
-}
-
-/// Collect field keys using root definitions already extracted from `forest`.
-pub fn collectFromDefinitions(
-    a: Allocator,
-    forest: *const yaml.Forest,
-    file_path: []const u8,
-    kind: definitions.FileKind,
-    root_defs: []const definitions.Definition,
-    out: *std.array_list.Managed(Definition),
-) !void {
-    if (kind == .general and isMetadata(file_path)) return;
-    for (root_defs) |root_def| {
+/// Every concrete field key below the given root bindings of `forest`; see
+/// `bindings.collect` for which roots a file binds. Names and paths are
+/// allocated with `a`, not borrowed from the forest.
+pub fn below(a: Allocator, forest: *const yaml.Forest, roots: []const definitions.Definition, out: *std.array_list.Managed(Definition)) !void {
+    for (roots) |root_def| {
         for (forest.roots) |root| {
             const pair = pairWithKeyAt(root, root_def.start) orelse continue;
             const value = pair.val orelse continue;
@@ -50,19 +34,6 @@ pub fn collectFromDefinitions(
 fn optionsOf(node: *const yaml.Node) ?*const yaml.Node {
     if (!node.isMap()) return null;
     return (yaml.dom.findPair(node, "options") orelse return null).val;
-}
-
-fn isMetadata(path: []const u8) bool {
-    const base = std.fs.path.basename(path);
-    for ([_][]const u8{ "requirements.yml", "requirements.yaml", "execution-environment.yml", "execution-environment.yaml", "galaxy.yml", "galaxy.yaml" }) |name| {
-        if (std.ascii.eqlIgnoreCase(base, name)) return true;
-    }
-    const parent = std.fs.path.dirname(path) orelse return false;
-    if (!std.mem.eql(u8, std.fs.path.basename(parent), "meta")) return false;
-    for ([_][]const u8{ "main.yml", "main.yaml", "runtime.yml", "runtime.yaml", "argument_specs.yml", "argument_specs.yaml" }) |name| {
-        if (std.ascii.eqlIgnoreCase(base, name)) return true;
-    }
-    return false;
 }
 
 fn pairWithKeyAt(node: *const yaml.Node, start: usize) ?*const yaml.Node {

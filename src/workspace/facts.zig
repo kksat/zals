@@ -59,6 +59,11 @@ pub const Facts = struct {
     var_refs: []const Span = &.{},
     /// Nested mapping keys in recognized variable values.
     field_defs: []const variables.fields.Definition = &.{},
+    /// Root and field bindings this file adds only when a vars load in the
+    /// Workspace targets it (ADR-0045). Classification is per file, so the
+    /// index records them here and query time decides; see `loaded`.
+    load_var_defs: []const Definition = &.{},
+    load_field_defs: []const variables.fields.Definition = &.{},
     /// Member reads, name-matched independently of their receiver.
     field_refs: []const Span = &.{},
     /// Role references (role invocations, `include_role`/`import_role`
@@ -74,6 +79,20 @@ pub const Facts = struct {
     shape: symbols.Shape = .other,
     /// Named plays, tasks, and handlers.
     symbols: []const symbols.Symbol = &.{},
+
+    /// These facts as a vars-load target: load-only bindings join the
+    /// file's other bindings. Facts without them are returned unchanged.
+    /// Only the two binding slices are allocated with `a`; strings stay
+    /// shared with the original facts.
+    pub fn loaded(self: Facts, a: Allocator) !Facts {
+        if (self.load_var_defs.len == 0 and self.load_field_defs.len == 0) return self;
+        var out = self;
+        out.var_defs = try std.mem.concat(a, Definition, &.{ self.var_defs, self.load_var_defs });
+        out.field_defs = try std.mem.concat(a, variables.fields.Definition, &.{ self.field_defs, self.load_field_defs });
+        out.load_var_defs = &.{};
+        out.load_field_defs = &.{};
+        return out;
+    }
 };
 
 /// Facts for the file at `path` with contents `text`.
@@ -99,9 +118,10 @@ pub fn extractInWithParser(a: Allocator, parser_allocator: Allocator, root: ?[]c
 
 /// Explicit vars-file loads are Ansible data regardless of their extension.
 /// Keep this separate from Workspace discovery so Python DOCUMENTATION and
-/// unrelated JSON files still cannot introduce navigation facts.
+/// unrelated JSON files still cannot introduce navigation facts. The result
+/// is a load target, so it includes load-only bindings.
 pub fn extractDependencyIn(a: Allocator, root: ?[]const u8, path: []const u8, text: []const u8) !Facts {
-    return extractDependencyWithParser(a, a, root, path, text);
+    return (try extractDependencyWithParser(a, a, root, path, text)).loaded(a);
 }
 
 const Interner = struct {
@@ -125,17 +145,15 @@ fn extractDependencyWithParser(a: Allocator, parser_allocator: Allocator, root: 
     var interner = Interner{ .arena = a, .scratch = scratch };
 
     const kind = variables.scope.fileKind(path, role_resolve.enclosingRole(path));
-    var raw_defs = std.array_list.Managed(Definition).init(scratch);
-    variables.definitions.collect(scratch, &forest, kind, &raw_defs) catch {};
-    const defs = try internDefinitions(a, &interner, raw_defs.items);
+    const bound = variables.bindings.collect(scratch, &forest, kind) catch variables.bindings.Bindings{};
+    const defs = try internDefinitions(a, &interner, bound.roots);
+    const field_defs = try internFieldDefinitions(a, &interner, bound.fields);
+    const load_defs = try internDefinitions(a, &interner, bound.loaded_roots);
+    const load_field_defs = try internFieldDefinitions(a, &interner, bound.loaded_fields);
 
     var idents = std.array_list.Managed(variables.jinja.Ident).init(scratch);
     variables.index.collectReferences(scratch, &forest, &idents) catch {};
     const refs = try internIdents(a, &interner, idents.items);
-
-    var raw_field_defs = std.array_list.Managed(variables.fields.Definition).init(scratch);
-    variables.fields.collectFromDefinitions(scratch, &forest, path, kind, raw_defs.items, &raw_field_defs) catch {};
-    const field_defs = try internFieldDefinitions(a, &interner, raw_field_defs.items);
 
     var field_idents = std.array_list.Managed(variables.jinja.Ident).init(scratch);
     variables.index.collectFieldReferences(scratch, &forest, &field_idents) catch {};
@@ -160,10 +178,12 @@ fn extractDependencyWithParser(a: Allocator, parser_allocator: Allocator, root: 
 
     return .{
         .source_fingerprint = sourceFingerprint(text),
-        .binding_lines = try bindingLines(a, text, defs, field_defs),
+        .binding_lines = try bindingLines(a, text, &.{ defs, load_defs }, &.{ field_defs, load_field_defs }),
         .var_defs = defs,
         .var_refs = refs,
         .field_defs = field_defs,
+        .load_var_defs = load_defs,
+        .load_field_defs = load_field_defs,
         .field_refs = field_refs,
         .role_refs = role_refs,
         .var_loads = var_loads,
@@ -174,12 +194,23 @@ fn extractDependencyWithParser(a: Allocator, parser_allocator: Allocator, root: 
     };
 }
 
-fn bindingLines(a: Allocator, text: []const u8, defs: []const Definition, fields: []const variables.fields.Definition) ![]const BindingLine {
-    const total = defs.len + fields.len;
+/// Load-only bindings are included, so a description stays revision-safe
+/// whether or not the file is loaded at query time.
+fn bindingLines(a: Allocator, text: []const u8, defs: []const []const Definition, fields: []const []const variables.fields.Definition) ![]const BindingLine {
+    var total: usize = 0;
+    for (defs) |group| total += group.len;
+    for (fields) |group| total += group.len;
     if (total == 0) return &.{};
     const lines = try a.alloc(BindingLine, total);
-    for (defs, 0..) |def, i| lines[i] = .{ .start = def.start, .line = 1 };
-    for (fields, defs.len..) |def, i| lines[i] = .{ .start = def.start, .line = 1 };
+    var i: usize = 0;
+    for (defs) |group| for (group) |def| {
+        lines[i] = .{ .start = def.start, .line = 1 };
+        i += 1;
+    };
+    for (fields) |group| for (group) |def| {
+        lines[i] = .{ .start = def.start, .line = 1 };
+        i += 1;
+    };
     std.mem.sort(BindingLine, lines, {}, struct {
         fn less(_: void, left: BindingLine, right: BindingLine) bool {
             return left.start < right.start;
@@ -465,4 +496,26 @@ test "extract interns repeated names and play labels within an entry" {
     try testing.expectEqual(f.collection_refs[0].name.ptr, f.collection_refs[1].name.ptr);
     try testing.expectEqual(f.symbols[0].name.ptr, f.symbols[1].play.ptr);
     try testing.expectEqual(f.symbols[1].play.ptr, f.symbols[2].play.ptr);
+}
+
+test "map-rooted metadata binds only as a vars-load target" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const galaxy = try extract(a, "/w/galaxy.yml", "namespace: acme\nversion: 1.0.0\ndependencies:\n  acme.base: '*'\n");
+    try testing.expectEqual(@as(usize, 0), galaxy.var_defs.len);
+    try testing.expectEqual(@as(usize, 0), galaxy.field_defs.len);
+    const loaded = try galaxy.loaded(a);
+    try testing.expectEqual(@as(usize, 3), loaded.var_defs.len);
+    try testing.expectEqualStrings("version", loaded.var_defs[1].name);
+    try testing.expectEqualStrings("acme.base", loaded.field_defs[0].name);
+    try testing.expectEqual(@as(usize, 0), loaded.load_var_defs.len);
+
+    // Load-only names share the entry's interned strings.
+    const settings = try extract(a, "/w/settings.yml", "version: 2\nlabel: \"{{ version }}\"\n");
+    try testing.expectEqual(settings.var_refs[0].name.ptr, settings.load_var_defs[0].name.ptr);
+
+    const group_vars = try extract(a, "/w/inventory/group_vars/all.yml", "version: 2\n");
+    try testing.expectEqualStrings("version", group_vars.var_defs[0].name);
+    try testing.expectEqual(variables.Site.vars_files, group_vars.var_defs[0].site);
 }
