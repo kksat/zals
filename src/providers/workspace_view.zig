@@ -24,12 +24,15 @@ pub const View = struct {
     a: Allocator,
     root: []const u8,
     files: []const File,
+    /// Targets of every vars load in the Workspace (ADR-0045).
+    loaded: std.StringHashMap(void),
     texts: std.StringHashMap([]const u8),
     line_indices: std.StringHashMap(LineIndex),
     collections: ?[]const roles.resolve.WorkspaceCollection = null,
 
     /// The files of the Workspace rooted at `root`. Open documents replace
-    /// their indexed copy, so unsaved edits win.
+    /// their indexed copy, so unsaved edits win. A file that some vars load
+    /// targets binds its load-only keys, so every query sees one answer.
     pub fn init(server: *Server, a: Allocator, root: []const u8) !View {
         var open = std.StringHashMap(*Document).init(a);
         var it = server.documents.docs.valueIterator();
@@ -51,14 +54,28 @@ pub const View = struct {
         var rest = open.iterator();
         while (rest.next()) |kv| try files.append(try fromDocument(a, root, kv.key_ptr.*, kv.value_ptr.*));
 
+        var loaded = std.StringHashMap(void).init(a);
+        for (files.items) |f| {
+            for (f.facts.var_loads) |load| try loaded.put(load.path, {});
+        }
+        for (files.items) |*f| {
+            if (loaded.contains(f.path)) f.facts = try f.facts.loaded(a);
+        }
+
         return .{
             .server = server,
             .a = a,
             .root = root,
             .files = try files.toOwnedSlice(),
+            .loaded = loaded,
             .texts = std.StringHashMap([]const u8).init(a),
             .line_indices = std.StringHashMap(LineIndex).init(a),
         };
+    }
+
+    /// Whether a vars load in this Workspace targets `path`.
+    pub fn isLoaded(self: *const View, path: []const u8) bool {
+        return self.loaded.contains(path);
     }
 
     /// The Workspace view for the file at `uri`, or null when it has no

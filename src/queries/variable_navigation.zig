@@ -39,16 +39,27 @@ pub const Query = struct {
         var index = variables.Index.init(self.cache.allocator, self.cache.source());
         if (group == .field) {
             if (!subject.field_checked) {
-                subject.field = try index.fieldOccurrenceAt(self.cache.allocator, subject.doc.uri, subject.offset);
+                subject.field = try self.bound(subject, try index.fieldOccurrenceAt(self.cache.allocator, subject.doc.uri, subject.offset));
                 subject.field_checked = true;
             }
             return subject.field;
         }
         if (!subject.root_checked) {
-            subject.root = try index.occurrenceAt(self.cache.allocator, subject.doc.uri, subject.offset);
+            subject.root = try self.bound(subject, try index.occurrenceAt(self.cache.allocator, subject.doc.uri, subject.offset));
             subject.root_checked = true;
         }
         return subject.root;
+    }
+
+    /// A load-only key is a binding only when a vars load in the owning
+    /// Workspace targets its file (ADR-0045). Without a session Workspace no
+    /// loader is known, so the key binds nothing.
+    fn bound(self: *Query, subject: *Subject, cursor: ?variables.Cursor) !?variables.Cursor {
+        const found = cursor orelse return null;
+        if (!found.requires_load) return found;
+        const a = self.cache.allocator;
+        const view = (try subject.workspace(self.cache.files.server, a)) orelse return null;
+        return if (view.isLoaded(try paths.uriToPath(a, subject.doc.uri))) found else null;
     }
 
     /// Field before passed root parameter before ordinary root. Null skips;

@@ -15,6 +15,8 @@ const jinja = @import("jinja.zig");
 const scalar_expression = @import("scalar_expression.zig");
 const definitions_mod = @import("definitions.zig");
 const scope = @import("scope.zig");
+const bindings = @import("bindings.zig");
+const fields_mod = @import("fields.zig");
 const source_mod = @import("source.zig");
 const roles = @import("../roles/resolve.zig");
 
@@ -43,6 +45,9 @@ pub const Cursor = struct {
     /// only needed the name.
     start: usize = 0,
     end: usize = 0,
+    /// A key that binds only if a vars load targets its file (ADR-0045). The
+    /// caller decides, because loads live in other files.
+    requires_load: bool = false,
 };
 
 pub const Index = struct {
@@ -75,6 +80,15 @@ pub const Index = struct {
                 .end = r.end,
             };
         }
+        for (scan.loaded_field_defs) |d| {
+            if (d.start <= offset and offset <= d.end) return .{
+                .name = d.name,
+                .kind = .definition,
+                .start = d.start,
+                .end = d.end,
+                .requires_load = true,
+            };
+        }
         return null;
     }
 
@@ -84,7 +98,8 @@ pub const Index = struct {
         for (files.uris) |file_uri| {
             const path = try scope.uriToPath(a, file_uri);
             const scan = try self.scanFile(a, file_uri, path);
-            for (scan.field_defs) |d| {
+            const field_defs = if (isLoaded(files.loads, path)) try std.mem.concat(a, fields_mod.Definition, &.{ scan.field_defs, scan.loaded_field_defs }) else scan.field_defs;
+            for (field_defs) |d| {
                 if (!std.mem.eql(u8, d.name, name)) continue;
                 var site = d.site;
                 for (files.loads) |load| {
@@ -127,6 +142,11 @@ pub const Index = struct {
                 return .{ .name = r.name, .kind = .reference, .start = r.start, .end = r.end };
             }
         }
+        for (scan.loaded_definitions) |d| {
+            if (d.start <= offset and offset <= d.end) {
+                return .{ .name = d.name, .kind = .definition, .start = d.start, .end = d.end, .requires_load = true };
+            }
+        }
         return null;
     }
 
@@ -165,7 +185,8 @@ pub const Index = struct {
         for (files.uris) |file_uri| {
             const path = try scope.uriToPath(a, file_uri);
             const scan = try self.scanFile(a, file_uri, path);
-            for (scan.definitions) |d| {
+            const defs = if (isLoaded(files.loads, path)) try std.mem.concat(a, Definition, &.{ scan.definitions, scan.loaded_definitions }) else scan.definitions;
+            for (defs) |d| {
                 if (std.mem.eql(u8, d.name, name)) {
                     var site = d.site;
                     for (files.loads) |load| {
@@ -211,11 +232,14 @@ pub const Index = struct {
     }
 
     const FileScan = struct {
-        definitions: []Definition,
-        references: []jinja.Ident,
+        definitions: []Definition = &.{},
+        references: []jinja.Ident = &.{},
         field_refs: []jinja.Ident = &.{},
-        field_defs: []@import("fields.zig").Definition = &.{},
+        field_defs: []fields_mod.Definition = &.{},
         loads: []const scope.VarFileLoad = &.{},
+        /// Bindings that apply only when a vars load targets the file.
+        loaded_definitions: []Definition = &.{},
+        loaded_field_defs: []fields_mod.Definition = &.{},
     };
 
     fn cachedRoleRoot(self: *Index, a: Allocator, path: []const u8) !?[]const u8 {
@@ -230,13 +254,13 @@ pub const Index = struct {
         if (self.scans.get(uri)) |cached| return cached;
 
         const text = (try self.source.read(a, uri)) orelse {
-            const empty = FileScan{ .definitions = &.{}, .references = &.{} };
+            const empty = FileScan{};
             try self.scans.put(a, try a.dupe(u8, uri), empty);
             return empty;
         };
         defer a.free(text);
         var forest = yaml.parse(a, text) catch {
-            const empty = FileScan{ .definitions = &.{}, .references = &.{} };
+            const empty = FileScan{};
             try self.scans.put(a, try a.dupe(u8, uri), empty);
             return empty;
         };
@@ -244,26 +268,23 @@ pub const Index = struct {
         const scratch = forest.allocator();
 
         const role_root = try self.cachedRoleRoot(a, path);
-        const kind = scope.fileKind(path, role_root);
-
-        var defs = std.array_list.Managed(Definition).init(scratch);
-        try definitions_mod.collect(scratch, &forest, kind, &defs);
+        const bound = try bindings.collect(scratch, &forest, scope.fileKind(path, role_root));
 
         var refs = std.array_list.Managed(jinja.Ident).init(scratch);
         for (forest.roots) |root| try collectRefs(scratch, root, forest.text, &refs);
 
         var field_refs = std.array_list.Managed(jinja.Ident).init(scratch);
         try collectFieldReferences(scratch, &forest, &field_refs);
-        var field_defs = std.array_list.Managed(@import("fields.zig").Definition).init(a);
-        try @import("fields.zig").collectFromDefinitions(a, &forest, path, kind, defs.items, &field_defs);
         const loads = scope.varFileLoads(a, &forest, path, null) catch &.{};
 
         const scan = FileScan{
-            .definitions = try dupeDefinitions(a, defs.items),
+            .definitions = try dupeDefinitions(a, bound.roots),
             .references = try dupeIdents(a, refs.items),
             .field_refs = try dupeIdents(a, field_refs.items),
-            .field_defs = try field_defs.toOwnedSlice(),
+            .field_defs = try dupeFieldDefinitions(a, bound.fields),
             .loads = loads,
+            .loaded_definitions = try dupeDefinitions(a, bound.loaded_roots),
+            .loaded_field_defs = try dupeFieldDefinitions(a, bound.loaded_fields),
         };
         try self.scans.put(a, try a.dupe(u8, uri), scan);
         return scan;
@@ -316,6 +337,11 @@ pub const Index = struct {
     }
 };
 
+fn isLoaded(loads: []const scope.VarFileLoad, path: []const u8) bool {
+    for (loads) |load| if (std.mem.eql(u8, load.path, path)) return true;
+    return false;
+}
+
 fn appendUnique(a: Allocator, list: *std.array_list.Managed([]const u8), uri: []const u8) !void {
     for (list.items) |existing| {
         if (std.mem.eql(u8, existing, uri)) return;
@@ -337,6 +363,23 @@ fn dupeDefinitions(a: Allocator, defs: []const Definition) ![]Definition {
             .start = d.start,
             .end = d.end,
             .site = d.site,
+        };
+    }
+    return out;
+}
+
+/// Field names and paths come from parse-lifetime scratch storage.
+fn dupeFieldDefinitions(a: Allocator, defs: []const fields_mod.Definition) ![]fields_mod.Definition {
+    const out = try a.alloc(fields_mod.Definition, defs.len);
+    for (defs, 0..) |d, i| {
+        const path = try a.alloc([]const u8, d.path.len);
+        for (d.path, 0..) |segment, j| path[j] = try a.dupe(u8, segment);
+        out[i] = .{
+            .name = if (path.len > 0) path[path.len - 1] else try a.dupe(u8, d.name),
+            .start = d.start,
+            .end = d.end,
+            .site = d.site,
+            .path = path,
         };
     }
     return out;
@@ -541,6 +584,41 @@ test "definitions are ranked" {
     // role vars (rank 7) before role defaults (rank 11)
     try testing.expectEqual(Site.role_vars, defs[0].site.?);
     try testing.expectEqual(Site.role_defaults, defs[1].site.?);
+}
+
+test "without a Workspace, a map-rooted file binds only through a load in the file set" {
+    var files = std.StringHashMap([]const u8).init(testing.allocator);
+    defer files.deinit();
+    try files.put("file:///p/site.yml",
+        \\- hosts: all
+        \\  vars_files: [settings.yml]
+        \\  tasks:
+        \\    - debug: msg="{{ version }} {{ channel }}"
+        \\
+    );
+    try files.put("file:///p/settings.yml", "channel: stable\nconfig:\n  version: 3\n");
+    try files.put("file:///p/galaxy.yml", "version: 1.0.0\n");
+    var src = MapSource{ .files = files };
+
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var index = Index.init(a, src.source());
+
+    const channel = try index.definitions(a, "file:///p/site.yml", "channel");
+    try testing.expectEqual(@as(usize, 1), channel.len);
+    try testing.expectEqualStrings("file:///p/settings.yml", channel[0].uri);
+    try testing.expectEqual(Site.vars_files, channel[0].site.?);
+    const field = try index.fieldDefinitions(a, "file:///p/site.yml", "version");
+    try testing.expectEqual(@as(usize, 1), field.len);
+    try testing.expectEqualStrings("file:///p/settings.yml", field[0].uri);
+    try testing.expectEqual(@as(usize, 0), (try index.definitions(a, "file:///p/site.yml", "version")).len);
+
+    // The caller decides whether a load-only key binds; nothing here loads galaxy.yml.
+    const cur = (try index.occurrenceAt(a, "file:///p/galaxy.yml", 0)).?;
+    try testing.expectEqualStrings("version", cur.name);
+    try testing.expect(cur.requires_load);
+    try testing.expectEqual(@as(usize, 0), (try index.definitions(a, "file:///p/galaxy.yml", "version")).len);
 }
 
 /// Disk-backed source for fixture tests. Paths are relative to the repo root,

@@ -57,15 +57,33 @@ fn isRoleRoot(allocator: Allocator, source: FileSource, dir: []const u8) bool {
     return false;
 }
 
-/// Only files in a known Role's conventional directories are Role metadata,
-/// defaults, or vars. A playbook's `vars/` directory is a loaded vars file.
+/// Where a file sits decides what it binds (ADR-0045). A Role's own
+/// `defaults/`, `vars/`, and `meta/` files are Role data. Outside a Role's
+/// conventional directories, a file below a `group_vars/`, `host_vars/`, or
+/// `vars/` directory is a Variable file. Only the path decides, so the
+/// Workspace index and per-request scans agree without knowing the Workspace.
+/// Every other file is `.general`: its map-rooted documents bind variables
+/// only when a vars load targets the file.
 pub fn fileKind(path: []const u8, role_root: ?[]const u8) FileKind {
-    const role = role_root orelse return .general;
-    const file_dir = std.fs.path.dirname(path) orelse return .general;
+    if (role_root) |role| {
+        if (roleFileKind(path, role)) |kind| return kind;
+    }
+    const role = if (role_root) |r| if (isBelow(path, r)) r else null else null;
+    return if (inVariableDirectory(path, role)) .vars_file else .general;
+}
+
+fn isBelow(path: []const u8, dir: []const u8) bool {
+    return path.len > dir.len and std.mem.startsWith(u8, path, dir) and std.fs.path.isSep(path[dir.len]);
+}
+
+/// The kind of a file in one of the Role's conventional directories, or null
+/// when the file lies elsewhere (for example in the Role's `molecule/`).
+fn roleFileKind(path: []const u8, role: []const u8) ?FileKind {
+    const file_dir = std.fs.path.dirname(path) orelse return null;
     var dir = file_dir;
-    while (!std.mem.eql(u8, std.fs.path.dirname(dir) orelse return .general, role)) {
-        const parent = std.fs.path.dirname(dir) orelse return .general;
-        if (std.mem.eql(u8, parent, dir)) return .general;
+    while (!std.mem.eql(u8, std.fs.path.dirname(dir) orelse return null, role)) {
+        const parent = std.fs.path.dirname(dir) orelse return null;
+        if (std.mem.eql(u8, parent, dir)) return null;
         dir = parent;
     }
     const parent = std.fs.path.basename(dir);
@@ -74,7 +92,26 @@ pub fn fileKind(path: []const u8, role_root: ?[]const u8) FileKind {
     if (std.mem.eql(u8, parent, "defaults")) return .role_defaults;
     if (std.mem.eql(u8, parent, "vars")) return .role_vars;
     if (std.mem.eql(u8, parent, "meta") and std.mem.eql(u8, dir, file_dir)) return .role_meta;
-    return .general;
+    for (conventional_dirs) |name| {
+        if (std.mem.eql(u8, parent, name)) return .general;
+    }
+    return null;
+}
+
+/// Whether a directory between `base` (exclusive) and the file is named
+/// `group_vars`, `host_vars`, or `vars`.
+fn inVariableDirectory(path: []const u8, base: ?[]const u8) bool {
+    var dir = std.fs.path.dirname(path) orelse return false;
+    while (true) {
+        if (base) |b| if (std.mem.eql(u8, dir, b)) return false;
+        const name = std.fs.path.basename(dir);
+        for ([_][]const u8{ "group_vars", "host_vars", "vars" }) |allowed| {
+            if (std.mem.eql(u8, name, allowed)) return true;
+        }
+        const parent = std.fs.path.dirname(dir) orelse return false;
+        if (parent.len == 0 or std.mem.eql(u8, parent, dir)) return false;
+        dir = parent;
+    }
 }
 
 /// Every `.yml`/`.yaml`/`.j2` file under the role's conventional directories.
@@ -250,12 +287,38 @@ test "file kind is based on the actual Role root, not the directory name alone" 
     try testing.expectEqual(FileKind.role_vars, fileKind("/w/roles/r/vars/main.yml", "/w/roles/r"));
     try testing.expectEqual(FileKind.role_meta, fileKind("/w/roles/r/meta/main.yml", "/w/roles/r"));
     try testing.expectEqual(FileKind.general, fileKind("/w/roles/r/tasks/main.yml", "/w/roles/r"));
-    try testing.expectEqual(FileKind.general, fileKind("/w/playbooks/vars/release.yml", null));
     try testing.expectEqual(FileKind.role_defaults, fileKind("/w/standalone/defaults/main/settings.yml", "/w/standalone"));
     try testing.expectEqual(FileKind.role_vars, fileKind("/w/standalone/vars/main/nested/settings.yaml", "/w/standalone"));
     try testing.expectEqual(FileKind.general, fileKind("/w/standalone-other/defaults/main.yml", "/w/standalone"));
     try testing.expectEqual(FileKind.general, fileKind("/w/standalone/tasks/vars/data.yml", "/w/standalone"));
     try testing.expectEqual(FileKind.general, fileKind("/w/standalone/meta/nested/data.yml", "/w/standalone"));
+}
+
+test "Variable file locations are an allowlist, not every map-rooted file" {
+    // Locations Ansible reads as variables without an explicit load.
+    try testing.expectEqual(FileKind.vars_file, fileKind("/w/group_vars/all.yml", null));
+    try testing.expectEqual(FileKind.vars_file, fileKind("/w/inventories/prod/group_vars/web/main.yml", null));
+    try testing.expectEqual(FileKind.vars_file, fileKind("/w/host_vars/db1.yaml", null));
+    // A playbook-adjacent `vars/` directory is a conventional load location.
+    try testing.expectEqual(FileKind.vars_file, fileKind("/w/playbooks/vars/release.yml", null));
+    try testing.expectEqual(FileKind.vars_file, fileKind("/w/playbooks/vars/prod/release.yml", null));
+    // Everything else binds variables only when a load targets it.
+    for ([_][]const u8{
+        "/w/galaxy.yml",
+        "/w/requirements.yml",
+        "/w/collections/requirements.yaml",
+        "/w/execution-environment.yml",
+        "/w/ansible_collections/ns/c/meta/runtime.yml",
+        "/w/molecule/default/molecule.yml",
+        "/w/docker-compose.yml",
+        "/w/mkdocs.yml",
+        "/w/changelogs/changelog.yaml",
+        "/w/inventory.yml",
+        "/w/playbooks/settings/release.yml",
+    }) |path| try testing.expectEqual(FileKind.general, fileKind(path, null));
+    // Inside a Role only its own defaults/ and vars/ are Variable files.
+    try testing.expectEqual(FileKind.general, fileKind("/w/roles/r/templates/vars/app.yml.j2", "/w/roles/r"));
+    try testing.expectEqual(FileKind.vars_file, fileKind("/w/roles/r/molecule/default/group_vars/all.yml", "/w/roles/r"));
 }
 
 test "vars_files and include_vars targets" {

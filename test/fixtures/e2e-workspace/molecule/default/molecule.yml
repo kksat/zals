@@ -1,0 +1,5 @@
+---
+driver:
+  name: default
+platforms:
+  - name: instance
