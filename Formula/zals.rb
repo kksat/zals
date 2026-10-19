@@ -12,22 +12,22 @@ class Zals < Formula
 
   on_macos do
     on_arm do
-      url "https://github.com/kksat/zals/releases/download/v__VERSION__/zals-__VERSION__-aarch64-macos.tar.gz"
+      url "https://github.com/kksat/zals/releases/download/__TAG__/zals-__VERSION__-aarch64-macos.tar.gz"
       sha256 "__SHA256_AARCH64_MACOS__"
     end
     on_intel do
-      url "https://github.com/kksat/zals/releases/download/v__VERSION__/zals-__VERSION__-x86_64-macos.tar.gz"
+      url "https://github.com/kksat/zals/releases/download/__TAG__/zals-__VERSION__-x86_64-macos.tar.gz"
       sha256 "__SHA256_X86_64_MACOS__"
     end
   end
 
   on_linux do
     on_arm do
-      url "https://github.com/kksat/zals/releases/download/v__VERSION__/zals-__VERSION__-aarch64-linux.tar.gz"
+      url "https://github.com/kksat/zals/releases/download/__TAG__/zals-__VERSION__-aarch64-linux.tar.gz"
       sha256 "__SHA256_AARCH64_LINUX__"
     end
     on_intel do
-      url "https://github.com/kksat/zals/releases/download/v__VERSION__/zals-__VERSION__-x86_64-linux.tar.gz"
+      url "https://github.com/kksat/zals/releases/download/__TAG__/zals-__VERSION__-x86_64-linux.tar.gz"
       sha256 "__SHA256_X86_64_LINUX__"
     end
   end

@@ -5,6 +5,7 @@ import csv
 import hashlib
 import importlib.util
 import io
+import itertools
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -12,6 +13,7 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
 import textwrap
@@ -65,7 +67,13 @@ class ReleaseTests(unittest.TestCase):
 
     def test_repository_versions_match_baseline(self):
         version = (ROOT / "version.txt").read_text().strip()
-        release.verify_versions(ROOT, f"v{version}")
+        for tag in (f"v{version}", f"zals-v{version}"):
+            with self.subTest(tag=tag):
+                release.verify_versions(ROOT, tag)
+
+    def test_release_please_uses_unprefixed_tags(self):
+        config = json.loads((ROOT / "release-please-config.json").read_text())
+        self.assertIs(config["packages"]["."].get("include-component-in-tag"), False)
 
     def test_rejects_mismatched_source_version(self):
         for filename in ("version.txt", ".release-please-manifest.json", "src/main.zig",
@@ -122,13 +130,35 @@ class ReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Wrong wheel version"):
             pypi.prepare_wheel(self.make_legacy_wheel(), self.directory / "bad.whl", "0.2.0")
 
+    def test_pypi_cli_accepts_both_tag_formats(self):
+        self.make_assets()
+        # Fixture wheels have no classifiers; provide an offline vocabulary.
+        (self.directory / "trove_classifiers.py").write_text("classifiers = set()\n")
+        for tag in (self.tag, f"zals-{self.tag}"):
+            with self.subTest(tag=tag):
+                output = self.directory / tag
+                result = subprocess.run(
+                    [sys.executable, str(ROOT / "tools/release/prepare_pypi.py"),
+                     "--tag", tag, "--source", str(self.directory), "--output", str(output)],
+                    env={**os.environ, "PYTHONPATH": str(self.directory)},
+                    capture_output=True, text=True,
+                )
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(len(list(output.glob("*.whl"))), 5)
+                for wheel in self.directory.glob("*.whl"):
+                    self.assertEqual((output / wheel.name).read_bytes(), wheel.read_bytes())
+
     def test_rejects_invalid_tag(self):
-        with self.assertRaisesRegex(ValueError, "Invalid release tag"):
-            release.tag_version("main")
+        for tag in ("main", "0.2.0", "other-v0.2.0", "zals-0.2.0", "v0.2.0-rc.1",
+                    "zals-v0.2.0-extra", "zals-v0.2.0\n"):
+            with self.subTest(tag=tag), self.assertRaisesRegex(ValueError, "Invalid release tag"):
+                release.tag_version(tag)
 
     def test_complete_asset_set(self):
         self.make_assets()
-        release.verify_assets(self.directory, self.tag)
+        for tag in (self.tag, f"zals-{self.tag}"):
+            with self.subTest(tag=tag):
+                release.verify_assets(self.directory, tag)
         self.assertEqual(len(release.asset_names(self.version)), 15)
 
     def test_missing_asset(self):
@@ -159,20 +189,25 @@ class ReleaseTests(unittest.TestCase):
             r"        shell: bash\n        run: \|\n((?:          .*\n)+)", workflow,
         )
         self.assertIsNotNone(match)
-        script = textwrap.dedent(match[1]).replace('version="${TAG#v}"',
-                                                  f'version="{self.version}"')
+        script = textwrap.dedent(match[1])
         (self.directory / "dist").mkdir()
         for asset in self.directory.glob("*.tar.gz"):
             shutil.copy2(asset, self.directory / "dist" / asset.name)
-        result = subprocess.run(["bash", "-c", script], cwd=self.directory,
-                                capture_output=True, text=True)
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        formula = (self.directory / "tap/Formula/zals.rb").read_text()
-        self.assertIn('# tokens with the released version', formula)
-        self.assertIn(f'version "{self.version}"', formula)
-        self.assertIn('--version 2>&1', formula)
-        for asset in (self.directory / "dist").glob("*.tar.gz"):
-            self.assertIn(hashlib.sha256(asset.read_bytes()).hexdigest(), formula)
+        for tag in (self.tag, f"zals-{self.tag}"):
+            with self.subTest(tag=tag):
+                result = subprocess.run(["bash", "-c", script], cwd=self.directory,
+                                        env={**os.environ, "TAG": tag},
+                                        capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                formula = (self.directory / "tap/Formula/zals.rb").read_text()
+                self.assertIn('# tokens with the released version', formula)
+                self.assertIn(f'version "{self.version}"', formula)
+                self.assertIn('--version 2>&1', formula)
+                for target, _, _ in release.PLATFORMS:
+                    if not target.endswith("windows"):
+                        self.assertIn(f'/download/{tag}/zals-{self.version}-{target}.tar.gz', formula)
+                for asset in (self.directory / "dist").glob("*.tar.gz"):
+                    self.assertIn(hashlib.sha256(asset.read_bytes()).hexdigest(), formula)
 
     def workflow_job(self, name, path=".github/workflows/release.yml"):
         workflow = (ROOT / path).read_text()
@@ -207,6 +242,31 @@ class ReleaseTests(unittest.TestCase):
         callers = [p.name for p in (ROOT / ".github/workflows").glob("*.yml")
                    if "uses: ./.github/workflows/release.yml" in p.read_text()]
         self.assertEqual(callers, ["release-please.yml"])
+
+    def test_verification_uses_workflow_tools_against_tagged_sources_and_assets(self):
+        for job in ("validate", "release", "publication_assets"):
+            with self.subTest(job=job):
+                body = self.workflow_job(job)
+                self.assertIn("ref: ${{ env.TAG }}", body)
+                self.assertIn("ref: ${{ github.sha }}", body)
+                self.assertIn("path: release-tools", body)
+                self.assertIn("sparse-checkout: tools/release", body)
+                self.assertIn("python release-tools/tools/release/verify.py", body)
+
+    def test_workflow_version_extraction_supports_both_tag_formats(self):
+        for job in ("build", "python", "vscode", "vscode_marketplace",
+                    "vscode_marketplace_pat", "openvsx", "homebrew"):
+            body = self.workflow_job(job)
+            assignments = re.findall(r'^ *version=".*"$', body, re.MULTILINE)
+            self.assertTrue(assignments, f"Missing version extraction: {job}")
+            for tag in (self.tag, f"zals-{self.tag}"):
+                with self.subTest(job=job, tag=tag):
+                    script = "\n".join(assignments) + '\nprintf "%s" "$version"'
+                    result = subprocess.run(["bash", "-c", script],
+                                            env={**os.environ, "TAG": tag},
+                                            capture_output=True, text=True)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(result.stdout, self.version)
 
     def test_registry_publication_is_opt_in_and_requires_verified_assets(self):
         workflow = (ROOT / ".github/workflows/release.yml").read_text()
@@ -275,18 +335,18 @@ class ReleaseTests(unittest.TestCase):
                        "Path(os.environ['CAPTURE']).write_text(json.dumps(sys.argv[1:]))\n"
                        "sys.exit(int(os.environ.get('PUBLISH_EXIT', '0')))\n")
         npx.chmod(0o755)
-        for job, step, client, auth in (
+        for (job, step, client, auth), tag in itertools.product((
                 ("vscode_marketplace", "Visual Studio Marketplace", "vsce", ["--azure-credential"]),
                 ("vscode_marketplace_pat", "Visual Studio Marketplace", "vsce", []),
-                ("openvsx", "Open VSX", "ovsx", [])):
-            with self.subTest(job=job):
+                ("openvsx", "Open VSX", "ovsx", [])), (self.tag, f"zals-{self.tag}")):
+            with self.subTest(job=job, tag=tag):
                 match = re.search(rf"      - name: Publish verified VSIXs to {step}\n"
                                   r".*?        run: \|\n((?:          .*\n)+)",
                                   self.workflow_job(job), re.DOTALL)
                 self.assertIsNotNone(match)
                 script = textwrap.dedent(match[1])
                 result = subprocess.run(["bash", "-c", script], cwd=cwd,
-                                        env={**os.environ, "TAG": self.tag,
+                                        env={**os.environ, "TAG": tag,
                                              "PATH": f"{bin_dir}:{os.environ['PATH']}",
                                              "CAPTURE": str(captured)},
                                         capture_output=True, text=True)
@@ -300,7 +360,7 @@ class ReleaseTests(unittest.TestCase):
                 self.assertEqual(len(packages), 5)
                 # Authentication/upload failures must not be silently ignored.
                 failed = subprocess.run(["bash", "-c", script], cwd=cwd,
-                                        env={**os.environ, "TAG": self.tag,
+                                        env={**os.environ, "TAG": tag,
                                              "PATH": f"{bin_dir}:{os.environ['PATH']}",
                                              "CAPTURE": str(captured), "PUBLISH_EXIT": "42"},
                                         capture_output=True, text=True)

@@ -69,6 +69,7 @@ def prepare_wheel(source: Path, destination: Path, version: str) -> bool:
 def main() -> None:
     # PyPI's published classifier vocabulary; fail locally before any upload.
     from trove_classifiers import classifiers
+    from verify import tag_version
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tag", required=True)
@@ -78,9 +79,10 @@ def main() -> None:
     sources = sorted(args.source.glob("*.whl"))
     if len(sources) != 5:
         raise ValueError(f"Expected five verified wheels, got {len(sources)}")
+    version = tag_version(args.tag)
     for source in sources:
         output = args.output / source.name
-        repaired = prepare_wheel(source, output, args.tag.removeprefix("v"))
+        repaired = prepare_wheel(source, output, version)
         with zipfile.ZipFile(output) as wheel:
             name = next(name for name in wheel.namelist() if name.endswith(".dist-info/METADATA"))
             metadata = BytesParser().parsebytes(wheel.read(name))
