@@ -5,7 +5,7 @@ on:
   # write permission publishes the readiness status on the exact candidate head.
   pull_request_target:
     branches: [main]
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, edited, ready_for_review]
   # GITHUB_TOKEN-authored PR events do not trigger other workflows. A maintainer
   # can request validation manually; the pre-tag gate always runs. A dispatch's
   # Actions check attaches to main, so explicitly publish the shared commit
@@ -23,6 +23,44 @@ permissions:
   statuses: write
 
 jobs:
+  not-a-release:
+    name: non-release PR readiness
+    # Reserved bot identities/branch names must never reach the N/A writer,
+    # including malformed bot PRs that fail the strict release classification.
+    if: >-
+      ${{ github.event_name == 'pull_request_target' &&
+          github.event.pull_request.user.login != 'github-actions[bot]' &&
+          !startsWith(github.event.pull_request.head.ref, 'release-please--branches--') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish trusted not-applicable readiness for an ordinary PR head
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$PR_NUMBER" =~ ^[0-9]+$ ]]
+          [[ "$CANDIDATE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          # Re-read immutable author/current head rather than trusting routing
+          # alone. Never overwrite the bot's real gate with an N/A success.
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" | jq -e --arg sha "$CANDIDATE_SHA" '
+            .state == "open" and .base.ref == "main" and .head.sha == $sha and
+            (.user.login | type == "string") and .user.login != "github-actions[bot]" and
+            (.head.ref | startswith("release-please--branches--") | not)' > /dev/null
+          # Statuses are keyed by commit, not PR. An ordinary PR can share a bot
+          # PR head, so check every open PR page before writing an N/A success.
+          gh api --paginate "repos/$GITHUB_REPOSITORY/pulls?state=open&base=main&per_page=100" --jq '.[]' |
+            jq -s -e --arg sha "$CANDIDATE_SHA" '
+              [.[] | select(.head.sha == $sha and
+                (.user.login == "github-actions[bot]" or
+                 (.head.ref | startswith("release-please--branches--"))))] | length == 0' > /dev/null
+          gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$CANDIDATE_SHA" \
+            -f state=success -f context='approved curated release notes' \
+            -f description='Not a release PR; curated release notes are not applicable' \
+            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+
   release-notes:
     name: validate curated release notes
     if: >-

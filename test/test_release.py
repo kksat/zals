@@ -211,7 +211,7 @@ class ReleaseTests(unittest.TestCase):
 
     def workflow_job(self, name, path=".github/workflows/release.yml"):
         workflow = (ROOT / path).read_text()
-        match = re.search(rf"^  {name}:\n(.*?)(?=^  \w+:\n|\Z)",
+        match = re.search(rf"^  {name}:\n(.*?)(?=^  [\w-]+:\n|\Z)",
                           workflow, re.MULTILINE | re.DOTALL)
         self.assertIsNotNone(match, f"Missing workflow job: {name}")
         return match[1]
@@ -384,6 +384,66 @@ class ReleaseTests(unittest.TestCase):
         for value in ("true", "false", "", "unknown"):
             result = subprocess.run(["bash", "-c", decision], env={**os.environ, "RELEASE_EXISTS": value})
             self.assertEqual(result.returncode == 0, value in ("true", "false"))
+
+    @unittest.skipUnless(shutil.which("jq"), "workflow classification fixture requires jq")
+    def test_not_applicable_status_cannot_overwrite_a_bot_release_gate(self):
+        workflow = self.workflow_job("not-a-release", ".github/workflows/release-notes.yml")
+        self.assertNotIn("actions/checkout", workflow)
+        self.assertIn("--paginate", workflow)
+        match = re.search(r"        run: \|\n((?:          [^\n]*\n)+)", workflow)
+        self.assertIsNotNone(match)
+        script = textwrap.dedent(match[1])
+        bin_dir = self.directory / "bin"
+        bin_dir.mkdir()
+        captured = self.directory / "status.json"
+        gh = bin_dir / "gh"
+        gh.write_text(f"#!{shutil.which('python3')}\nimport json, os, sys\nfrom pathlib import Path\n"
+                      "args = sys.argv[1:]\n"
+                      "if '--method' in args:\n"
+                      "    Path(os.environ['CAPTURE']).write_text(json.dumps(args))\n"
+                      "    sys.exit(int(os.environ.get('STATUS_EXIT', '0')))\n"
+                      "elif '--paginate' in args:\n"
+                      "    for item in json.loads(os.environ['OPEN_PRS']): print(json.dumps(item))\n"
+                      "else: print(os.environ['PR_JSON'])\n"
+                      "sys.exit(int(os.environ.get('READ_EXIT', '0')))\n")
+        gh.chmod(0o755)
+        head = "a" * 40
+        ordinary = {"state": "open", "base": {"ref": "main"}, "user": {"login": "contributor"},
+                    "head": {"sha": head, "ref": "product-fix", "repo": {"full_name": "fork/zals"}}}
+        bot = {**ordinary, "user": {"login": "github-actions[bot]"},
+               "head": {"sha": head, "ref": "release-please--branches--main"}}
+        env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "CAPTURE": str(captured),
+               "PR_NUMBER": "123", "CANDIDATE_SHA": head, "GITHUB_REPOSITORY": "kksat/zals",
+               "GITHUB_SERVER_URL": "https://example.test", "GITHUB_RUN_ID": "123",
+               "OPEN_PRS": "[]"}
+        for label, pr, open_prs, allowed in (
+                ("ordinary fork PR", ordinary, [], True),
+                ("ordinary shares bot head", ordinary, [bot], False),
+                ("shared bot head after first API page", ordinary, [ordinary] * 101 + [bot], False),
+                ("ordinary shares reserved branch head", ordinary,
+                 [{**bot, "user": {"login": "contributor"}}], False),
+                ("actual bot release PR", bot, [], False),
+                ("bot on unexpected branch", {**ordinary, "user": bot["user"]}, [], False),
+                ("human reserved branch", {**ordinary, "head": bot["head"]}, [], False),
+                ("head changed", {**ordinary, "head": {**ordinary["head"], "sha": "b" * 40}}, [], False),
+                ("wrong base", {**ordinary, "base": {"ref": "other"}}, [], False)):
+            with self.subTest(label=label):
+                captured.unlink(missing_ok=True)
+                result = subprocess.run(["bash", "-c", script], cwd=self.directory,
+                                        env={**env, "PR_JSON": json.dumps(pr), "OPEN_PRS": json.dumps(open_prs)},
+                                        capture_output=True, text=True)
+                self.assertEqual(result.returncode == 0, allowed, result.stdout + result.stderr)
+                self.assertEqual(captured.exists(), allowed)
+                if allowed:
+                    args = json.loads(captured.read_text())
+                    self.assertIn(f"repos/kksat/zals/statuses/{head}", args)
+                    self.assertIn("state=success", args)
+                    self.assertIn("context=approved curated release notes", args)
+        for error in ({"READ_EXIT": "1"}, {"STATUS_EXIT": "42"}):
+            result = subprocess.run(["bash", "-c", script], cwd=self.directory,
+                                    env={**env, "PR_JSON": json.dumps(ordinary), **error},
+                                    capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
 
     def test_manual_readiness_status_uses_exact_head_and_fails_closed(self):
         workflow = self.workflow_job("release-notes", ".github/workflows/release-notes.yml")
