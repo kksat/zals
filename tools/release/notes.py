@@ -23,6 +23,7 @@ EDITOR = "editors/vscode/CHANGELOG.md"
 TECHNICAL = "TECHNICAL_CHANGELOG.md"
 VERSION = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+\Z")
 TAG = re.compile(r"v([0-9]+\.[0-9]+\.[0-9]+)\Z")
+LEGACY_TAG = re.compile(r"(?:zals-)?v([0-9]+\.[0-9]+\.[0-9]+)\Z")
 SHA = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
 DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 METADATA = re.compile(r"docs/releases/v[0-9]+\.[0-9]+\.[0-9]+\.json\Z")
@@ -341,12 +342,14 @@ def verify_approval(repo, ref, version, github):
 
 
 def retry(repo, tag, github):
-    require(TAG.fullmatch(tag), "Expected release tag vX.Y.Z")
+    match = LEGACY_TAG.fullmatch(tag)
+    require(match, "Expected release tag vX.Y.Z or legacy zals-vX.Y.Z")
+    version = match[1]
     release = github.get(f"/releases/tags/{tag}")
     require(release.get("tag_name") == tag and not release.get("draft") and release.get("published_at"),
             "Publication retries require an already-published GitHub release")
-    if repo.exists(tag, metadata_path(tag[1:])):
-        body, _ = check(repo, tag, tag[1:])
+    if repo.exists(tag, metadata_path(version)):
+        body, _ = check(repo, tag, version)
         require((release.get("body") or "").strip() == body.strip(),
                 "Published release prose differs from the immutable tagged notes")
     # Legacy releases have no coverage metadata. Their existing assets and prose

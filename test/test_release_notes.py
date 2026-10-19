@@ -334,6 +334,14 @@ class ReleaseNotesTest(unittest.TestCase):
         with self.assertRaisesRegex(NOTES.NotesError, "already-published"):
             NOTES.retry(self.repo, "v0.1.0", self.github)
 
+    def test_component_prefixed_legacy_retry_preserves_existing_assets_and_prose(self):
+        self.git("tag", "zals-v0.1.0", "v0.1.0")
+        self.github.release["tag_name"] = "zals-v0.1.0"
+        NOTES.retry(self.repo, "zals-v0.1.0", self.github)
+        self.assertEqual(self.github.calls, ["/releases/tags/zals-v0.1.0"])
+        with self.assertRaises(NOTES.NotesError):
+            NOTES.retry(self.repo, "unrecognized-v0.1.0", self.github)
+
     def test_packaged_extension_notes_match_tagged_public_history(self):
         self.git("tag", "v0.2.0")
         directory = self.root / "dist"
