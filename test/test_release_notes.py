@@ -49,6 +49,9 @@ class FakeGitHub:
         self.calls.append(path)
         if path == "/pulls/7":
             return self.pr
+        if path.startswith("/contents/"):
+            filename = path[len("/contents/"):].split("?", 1)[0]
+            return {"sha": self.fixture.blob(filename, self.pr["head"]["sha"])}
         if path.startswith("/releases/tags/"):
             return self.release
         raise AssertionError(path)
@@ -242,13 +245,32 @@ class ReleaseNotesTest(unittest.TestCase):
     def test_approval_must_be_from_another_reviewer_on_final_head(self):
         original = copy.deepcopy(self.github.reviews)
         for changes in ({"commit_id": "0" * 40}, {"state": "DISMISSED"},
-                        {"state": "COMMENTED"}, {"user": {"login": "author"}}):
+                        {"state": "COMMENTED"}, {"user": {"login": "author", "type": "User"}},
+                        {"user": {"login": "automation[bot]", "type": "Bot"}}):
             with self.subTest(changes=changes):
                 self.github.reviews = [dict(original[0], **changes)]
                 with self.assertRaisesRegex(NOTES.NotesError, "final head"):
                     self.verify()
         self.github.reviews = original
         self.verify()
+
+    def test_coverage_only_followup_approves_existing_prose_at_exact_head(self):
+        self.write("internal.py", "# Internal maintenance with no public prose change\n")
+        candidate = self.commit("refactor: internal maintenance")
+        NOTES.prepare(self.repo, "0.2.0", "v0.1.0", candidate)
+        self.notes_commit = self.commit("docs(release): refresh reviewed coverage")
+        self.github = FakeGitHub(self)
+        self.github.files = [item for item in self.github.files if item["filename"].endswith(".json")]
+        self.github.pr["changed_files"] = 1
+        self.assertEqual(self.verify(), self.body)
+        content_calls = [call for call in self.github.calls if call.startswith("/contents/")]
+        self.assertEqual(len(content_calls), 2)
+        self.assertTrue(all(call.endswith(f"?ref={self.notes_commit}") for call in content_calls))
+        original_get = self.github.get
+        self.github.get = lambda path: ({"sha": "0" * 40} if path.startswith("/contents/")
+                                        else original_get(path))
+        with self.assertRaisesRegex(NOTES.NotesError, "differ"):
+            self.verify()
 
     def test_change_request_blocks_even_with_another_approval(self):
         self.github.reviews.append({"user": {"login": "concerned"}, "state": "CHANGES_REQUESTED",

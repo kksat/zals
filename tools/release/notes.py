@@ -301,13 +301,24 @@ def verify_approval(repo, ref, version, github):
     number = int(pr["number"])
     files = github.pages(f"/pulls/{number}/files")
     allowed = {PUBLIC, EDITOR, path}
-    require(len(files) == pr.get("changed_files") and {item["filename"] for item in files} == allowed,
-            "Notes PR must change only the public/editor changelogs and this release's coverage metadata")
+    filenames = {item["filename"] for item in files}
+    require(len(files) == pr.get("changed_files") and len(filenames) == len(files)
+            and filenames in (allowed, {path}),
+            "Notes PR may change only this release's metadata and, together, both public changelogs")
+    head = pr.get("head", {}).get("sha")
+    require(isinstance(head, str) and SHA.fullmatch(head), "Notes PR has no valid final head")
+    reviewed_blobs = {}
     for item in files:
         require(item.get("status") in {"added", "modified"} and not item.get("previous_filename"),
                 "Notes PR must not rename or remove files")
-        blob = repo.git("rev-parse", f"{repo.commit(ref)}:{item['filename']}").stdout.decode().strip()
-        require(blob == item.get("sha"), "Released notes differ from the reviewed PR head")
+        reviewed_blobs[item["filename"]] = item.get("sha")
+    for filename in allowed:
+        # Coverage-only refreshes still approve the exact existing prose. Query
+        # its blob at the approved head, not at a moving main branch revision.
+        if filename not in reviewed_blobs:
+            reviewed_blobs[filename] = github.get(f"/contents/{filename}?ref={head}").get("sha")
+        blob = repo.git("rev-parse", f"{repo.commit(ref)}:{filename}").stdout.decode().strip()
+        require(blob == reviewed_blobs[filename], "Released notes differ from the reviewed PR head")
     reviews = github.pages(f"/pulls/{number}/reviews")
     latest = {}
     for review in reviews:
@@ -320,7 +331,7 @@ def verify_approval(repo, ref, version, github):
     author = pr.get("user", {}).get("login", "").lower()
     require(any(login != author and review["state"] == "APPROVED"
                 and review.get("user", {}).get("type") == "User"
-                and review.get("commit_id") == pr.get("head", {}).get("sha")
+                and review.get("commit_id") == head
                 for login, review in latest.items()),
             "Notes PR requires another reviewer's approval of its final head")
     previous = github.get(f"/releases/tags/{metadata['previous_tag']}")
