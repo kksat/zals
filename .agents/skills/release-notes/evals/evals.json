@@ -44,6 +44,20 @@
         "Unresolved factual questions are visible in PR-description coverage and block declaring the draft ready.",
         "Neither variant rewrites published 0.1.0 history, changes product/version/technical-log files, or performs a network write."
       ]
+    },
+    {
+      "id": 4,
+      "prompt": "Evaluate an explicit /skill:release-notes follow-up in a disposable fixture with mocked read-only GitHub evidence. The original approved notes-only PR for release-please's unchanged 0.2.0 proposal is already merged; its root and editor changelog blobs match exactly. A late internal allocation change with regression tests changes the product digest but has no additional user-facing impact and no supported performance claim. The existing prose is still accurate, and no notes PR is open. I authorize a new local follow-up branch and checked commit, but no push or PR writes. Refresh coverage without inventing prose changes. The proposed follow-up must still be approved by another human on its final head and merged. In a negative variant, the release tree's root/editor prose differs from the unchanged blobs available through mocked GitHub contents at the approved follow-up's final head. Record the allowed path set and expected gate result; do not contact real write endpoints or publish anything.",
+      "expected_output": "A metadata-only follow-up on a new local branch, with unchanged root/editor blobs, refreshed full-range checklist including an evidence-backed exclusion for the internal change, and freshly checked metadata. The proposed PR requests nonauthor human approval of its final head instead of reusing the merged PR's approval. The negative prose-drift variant is expected to fail online verification against the approved final-head snapshot even though the PR itself changed only metadata.",
+      "files": [],
+      "expectations": [
+        "The merged original PR is not treated as an open rerun target; a new follow-up is prepared only after confirming no notes PR is open.",
+        "The tracked follow-up changes only the target version's generated metadata; root and editor changelog blobs are byte-for-byte unchanged.",
+        "The full-range PR-description checklist includes the late internal commit with exclusion evidence and rationale; no unsupported user-facing or performance claim is invented.",
+        "The follow-up requires its own nonauthor human approval of the final head and must merge before online verify succeeds.",
+        "The agent explains that verification compares root/editor blobs with GitHub contents at the approved final PR head, including unchanged paths, and rejects the negative prose-drift variant.",
+        "make check and explicit-version offline validation are reported truthfully, and no push, PR write, tag, release, or publishing action occurs."
+      ]
     }
   ]
 }
