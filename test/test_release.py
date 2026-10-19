@@ -288,8 +288,14 @@ class ReleaseTests(unittest.TestCase):
         publish = self.workflow_job("release")
         self.assertIn("ref: ${{ github.sha }}", publish)
         self.assertIn("release-tools/tools/release/notes.py", publish)
-        self.assertIn("body_path: ${{ runner.temp }}/release-notes.md", publish)
-        self.assertIn("append_body: false", publish)
+        self.assertIn("id: notes", publish)
+        self.assertIn('--github-output "$GITHUB_OUTPUT"', publish)
+        self.assertIn('gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"', publish)
+        self.assertIn('gh release create "$TAG" --verify-tag --title "$TAG"', publish)
+        self.assertIn('--notes-file "$RUNNER_TEMP/release-notes.md"', publish)
+        self.assertIn("steps.notes.outputs.release_exists == 'true'", publish)
+        self.assertIn("steps.notes.outputs.release_exists == 'false'", publish)
+        self.assertNotIn("softprops/action-gh-release", publish)
         self.assertNotIn("generate_release_notes:", publish)
         self.assertIn('notes.py --repo "$GITHUB_WORKSPACE" packages', publish)
         self.assertLess(publish.index('verify.py assets'), publish.index('"$GITHUB_WORKSPACE" packages'))
@@ -325,6 +331,59 @@ class ReleaseTests(unittest.TestCase):
                 failed = subprocess.run(["bash", "-c", script], cwd=self.directory,
                                         env={**env, "HELPER_EXIT": "42"}, capture_output=True, text=True)
                 self.assertEqual(failed.returncode, 42)
+
+    def test_github_asset_commands_never_rewrite_existing_release_prose(self):
+        workflow = self.workflow_job("release")
+        bin_dir = self.directory / "bin"
+        bin_dir.mkdir()
+        captured = self.directory / "github.json"
+        gh = bin_dir / "gh"
+        gh.write_text(f"#!{shutil.which('python3')}\nimport json, os, sys\nfrom pathlib import Path\n"
+                      "Path(os.environ['CAPTURE']).write_text(json.dumps(sys.argv[1:]))\n"
+                      "sys.exit(int(os.environ.get('GH_EXIT', '0')))\n")
+        gh.chmod(0o755)
+        dist = self.directory / "dist"
+        dist.mkdir()
+        for filename in ("binary.tar.gz", "extension.vsix", "SHA256SUMS"):
+            (dist / filename).write_bytes(b"already verified fixture")
+        notes = self.directory / "release-notes.md"
+        notes.write_text("Approved selected release body")
+        env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "CAPTURE": str(captured),
+               "TAG": self.tag, "GITHUB_REPOSITORY": "kksat/zals", "RUNNER_TEMP": str(self.directory)}
+        for name, exists, command in (("Upload verified assets to an existing GitHub release", "true", "upload"),
+                                      ("Create a GitHub release with the approved initial body and assets", "false", "create")):
+            with self.subTest(command=command):
+                match = re.search(rf"      - name: {name}\n(.*?)        run: \|\n((?:          [^\n]*\n)+)",
+                                  workflow, re.DOTALL)
+                self.assertIsNotNone(match)
+                self.assertIn("steps.github_assets.outputs.already_published != 'true'", match[1])
+                self.assertIn(f"steps.notes.outputs.release_exists == '{exists}'", match[1])
+                script = textwrap.dedent(match[2])
+                result = subprocess.run(["bash", "-c", script], cwd=self.directory,
+                                        env=env, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                args = json.loads(captured.read_text())
+                self.assertEqual(args[:3], ["release", command, self.tag])
+                self.assertEqual(sorted(arg for arg in args if arg.startswith("dist/")),
+                                 ["dist/SHA256SUMS", "dist/binary.tar.gz", "dist/extension.vsix"])
+                if command == "upload":
+                    self.assertIn("--clobber", args)
+                    self.assertNotIn("--notes-file", args)
+                    self.assertNotIn("create", args)
+                else:
+                    self.assertIn("--verify-tag", args)
+                    self.assertEqual(args[args.index("--notes-file") + 1], str(notes))
+                    self.assertNotIn("--clobber", args)
+                # An existing-release race or failed upload cannot fall back to
+                # creating/updating a different body or hiding the API error.
+                failed = subprocess.run(["bash", "-c", script], cwd=self.directory,
+                                        env={**env, "GH_EXIT": "42"}, capture_output=True, text=True)
+                self.assertEqual(failed.returncode, 42)
+        decision = 'test "$RELEASE_EXISTS" = true || test "$RELEASE_EXISTS" = false'
+        self.assertIn(decision, workflow)
+        for value in ("true", "false", "", "unknown"):
+            result = subprocess.run(["bash", "-c", decision], env={**os.environ, "RELEASE_EXISTS": value})
+            self.assertEqual(result.returncode == 0, value in ("true", "false"))
 
     def test_manual_readiness_status_uses_exact_head_and_fails_closed(self):
         workflow = self.workflow_job("release-notes", ".github/workflows/release-notes.yml")
