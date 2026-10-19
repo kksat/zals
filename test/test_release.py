@@ -268,7 +268,17 @@ class ReleaseTests(unittest.TestCase):
         self.assertIn('gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER"', status)
         self.assertIn("python3 tooling/tools/release/notes.py --repo candidate verify", status)
         self.assertIn("pull-requests: read", status)
-        self.assertNotIn(": write", status)
+        self.assertIn("statuses: write", status)
+        self.assertNotIn("contents: write", status)
+        self.assertNotIn("pull-requests: write", status)
+        self.assertIn("id: notes", status)
+        self.assertIn("always() && steps.pending.outcome == 'success'", status)
+        self.assertIn("context='approved curated release notes'", status)
+        ci = self.workflow_job("release-runner", ".github/workflows/test.yml")
+        self.assertIn('node-version: "22"', ci)
+        self.assertIn("cache-dependency-path: tools/release/package-lock.json", ci)
+        self.assertIn("npm ci --prefix tools/release", ci)
+        self.assertIn("npm --prefix tools/release test", ci)
         validate = self.workflow_job("validate")
         self.assertIn("ref: ${{ github.sha }}", validate)
         self.assertIn("path: release-source", validate)
@@ -315,6 +325,43 @@ class ReleaseTests(unittest.TestCase):
                 failed = subprocess.run(["bash", "-c", script], cwd=self.directory,
                                         env={**env, "HELPER_EXIT": "42"}, capture_output=True, text=True)
                 self.assertEqual(failed.returncode, 42)
+
+    def test_manual_readiness_status_uses_exact_head_and_fails_closed(self):
+        workflow = self.workflow_job("release-notes", ".github/workflows/release-notes.yml")
+        match = re.search(r"      - name: Publish the exact candidate head readiness status\n"
+                          r".*?        run: \|\n((?:          .*\n)+)", workflow, re.DOTALL)
+        self.assertIsNotNone(match)
+        script = textwrap.dedent(match[1])
+        bin_dir = self.directory / "bin"
+        bin_dir.mkdir()
+        captured = self.directory / "status.json"
+        gh = bin_dir / "gh"
+        gh.write_text(f"#!{shutil.which('python3')}\nimport json, os, sys\nfrom pathlib import Path\n"
+                      "Path(os.environ['CAPTURE']).write_text(json.dumps(sys.argv[1:]))\n"
+                      "sys.exit(int(os.environ.get('STATUS_EXIT', '0')))\n")
+        gh.chmod(0o755)
+        head = "a" * 40
+        env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}",
+               "CAPTURE": str(captured), "CANDIDATE_SHA": head,
+               "GITHUB_REPOSITORY": "kksat/zals", "GITHUB_SERVER_URL": "https://example.test",
+               "GITHUB_RUN_ID": "123"}
+        for outcome in ("success", "failure", "skipped", "cancelled", ""):
+            with self.subTest(outcome=outcome):
+                result = subprocess.run(["bash", "-c", script], cwd=self.directory,
+                                        env={**env, "NOTES_OUTCOME": outcome}, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                args = json.loads(captured.read_text())
+                self.assertEqual(args[:4], ["api", "--method", "POST", f"repos/kksat/zals/statuses/{head}"])
+                self.assertIn("state=success" if outcome == "success" else "state=failure", args)
+                self.assertIn("context=approved curated release notes", args)
+        failed = subprocess.run(["bash", "-c", script], cwd=self.directory,
+                                env={**env, "NOTES_OUTCOME": "success", "STATUS_EXIT": "42"},
+                                capture_output=True, text=True)
+        self.assertEqual(failed.returncode, 42)
+        invalid = subprocess.run(["bash", "-c", script], cwd=self.directory,
+                                 env={**env, "CANDIDATE_SHA": "main", "NOTES_OUTCOME": "success"},
+                                 capture_output=True, text=True)
+        self.assertNotEqual(invalid.returncode, 0)
 
     def test_verification_uses_workflow_tools_against_tagged_sources_and_assets(self):
         for job in ("validate", "release", "publication_assets"):
