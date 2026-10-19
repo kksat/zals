@@ -15,6 +15,7 @@ import subprocess
 import sys
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+import zipfile
 
 
 PUBLIC = "CHANGELOG.md"
@@ -341,6 +342,21 @@ def retry(repo, tag, github):
     # are reused unchanged, rather than inventing retrospective approval.
 
 
+def packages(repo, tag, directory):
+    """Check embedded notes; verify.py separately validates the exact asset set."""
+    require(TAG.fullmatch(tag), "Expected release tag vX.Y.Z")
+    check(repo, tag, tag[1:])
+    expected = repo.read(tag, PUBLIC)
+    extensions = sorted(Path(directory).glob("*.vsix"))
+    require(extensions, "No VSIX packages to verify")
+    for extension in extensions:
+        with zipfile.ZipFile(extension) as archive:
+            require(archive.namelist().count("extension/CHANGELOG.md") == 1,
+                    f"Missing or duplicate extension changelog: {extension.name}")
+            require(archive.read("extension/CHANGELOG.md") == expected,
+                    f"Packaged changelog differs from approved notes: {extension.name}")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", default=".", help="Git repository (default: current directory)")
@@ -358,6 +374,9 @@ def main():
     command = commands.add_parser("retry", help="Validate an immutable existing-release retry")
     command.add_argument("--tag", required=True)
     command.add_argument("--github-repository", required=True)
+    command = commands.add_parser("packages", help="Verify approved notes embedded in VSIX packages")
+    command.add_argument("--tag", required=True)
+    command.add_argument("--directory", required=True)
     args = parser.parse_args()
     repo = Repository(args.repo)
     try:
@@ -373,7 +392,10 @@ def main():
             print(release_body(repo.read(args.ref, PUBLIC).decode(), version), end="")
         elif args.command == "retry":
             retry(repo, args.tag, GitHub(args.github_repository))
-    except (NotesError, OSError, UnicodeError, json.JSONDecodeError, KeyError, TypeError) as error:
+        elif args.command == "packages":
+            packages(repo, args.tag, args.directory)
+    except (NotesError, OSError, UnicodeError, json.JSONDecodeError, KeyError, TypeError,
+            zipfile.BadZipFile) as error:
         print(f"Release notes: {error}", file=sys.stderr)
         return 1
     return 0

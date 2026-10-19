@@ -5,7 +5,7 @@
     ".": {
       "package-name": "zals",
       "include-component-in-tag": false,
-      "changelog-path": "CHANGELOG.md",
+      "changelog-path": "TECHNICAL_CHANGELOG.md",
       "extra-files": [
         {
           "type": "generic",

@@ -8,6 +8,8 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
+import zipfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -310,6 +312,28 @@ class ReleaseNotesTest(unittest.TestCase):
         with self.assertRaisesRegex(NOTES.NotesError, "already-published"):
             NOTES.retry(self.repo, "v0.1.0", self.github)
 
+    def test_packaged_extension_notes_match_tagged_public_history(self):
+        self.git("tag", "v0.2.0")
+        directory = self.root / "dist"
+        directory.mkdir()
+        for platform in ("linux-x64", "linux-arm64", "darwin-x64", "darwin-arm64", "win32-x64"):
+            with zipfile.ZipFile(directory / f"zals-0.2.0-{platform}.vsix", "w") as archive:
+                archive.writestr("extension/CHANGELOG.md", (self.root / NOTES.PUBLIC).read_bytes())
+        NOTES.packages(self.repo, "v0.2.0", directory)
+        broken = directory / "zals-0.2.0-linux-x64.vsix"
+        with zipfile.ZipFile(broken, "w") as archive:
+            archive.writestr("extension/CHANGELOG.md", "Unapproved notes")
+        with self.assertRaisesRegex(NOTES.NotesError, "differs"):
+            NOTES.packages(self.repo, "v0.2.0", directory)
+        with zipfile.ZipFile(broken, "w") as archive:
+            archive.writestr("extension/README.md", "No changelog")
+        with self.assertRaisesRegex(NOTES.NotesError, "Missing"):
+            NOTES.packages(self.repo, "v0.2.0", directory)
+
+    def test_packages_cannot_invent_retrospective_notes_for_legacy_release(self):
+        with self.assertRaises(NOTES.NotesError):
+            NOTES.packages(self.repo, "v0.1.0", self.root)
+
     def test_examples_do_not_create_false_release_headings(self):
         document = ("# Changelog\n\n## 0.2.0\n\nExample:\n```markdown\n## 7.8.9\n```\n\n"
                     "## 0.1.0\n\nOld notes.\n")
@@ -335,6 +359,39 @@ class ReleaseNotesTest(unittest.TestCase):
                                 env={"PATH": os.environ["PATH"]}, capture_output=True, text=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("GH_TOKEN", result.stderr)
+
+
+class ChangelogOwnershipTest(unittest.TestCase):
+    def test_release_please_owns_only_the_technical_log(self):
+        config = json.loads((ROOT / "release-please-config.json").read_text())
+        self.assertEqual(config["release-type"], "simple")
+        self.assertEqual(config["packages"]["."]["changelog-path"], NOTES.TECHNICAL)
+        self.assertTrue((ROOT / NOTES.TECHNICAL).is_file())
+        self.assertEqual((ROOT / NOTES.PUBLIC).read_bytes(), (ROOT / NOTES.EDITOR).read_bytes())
+
+
+class GitHubReadOnlyTest(unittest.TestCase):
+    def test_paginated_evidence_is_not_silently_truncated(self):
+        with patch.dict(os.environ, {"GH_TOKEN": "test-token"}):
+            github = NOTES.GitHub("example/zals")
+        with patch.object(github, "get", side_effect=[[{"number": index} for index in range(100)],
+                                                      [{"number": 100}]]) as get:
+            self.assertEqual(len(github.pages("/pulls/7/reviews")), 101)
+            self.assertEqual(get.call_args_list[1].args[0], "/pulls/7/reviews?per_page=100&page=2")
+        with patch.object(github, "get", return_value=[{}] * 100):
+            with self.assertRaisesRegex(NOTES.NotesError, "pagination"):
+                github.pages("/pulls/7/reviews")
+
+    def test_api_is_read_only_and_network_failure_is_not_approval(self):
+        with patch.dict(os.environ, {"GH_TOKEN": "test-token"}):
+            github = NOTES.GitHub("example/zals")
+        with patch.object(NOTES, "urlopen", side_effect=NOTES.URLError("offline")) as request:
+            with self.assertRaisesRegex(NOTES.NotesError, "lookup failed"):
+                github.get("/pulls/7")
+            self.assertEqual(request.call_args.args[0].get_method(), "GET")
+        with patch.dict(os.environ, {"GH_TOKEN": "", "GITHUB_TOKEN": ""}):
+            with self.assertRaisesRegex(NOTES.NotesError, "GH_TOKEN"):
+                NOTES.GitHub("example/zals")
 
 
 if __name__ == "__main__":
