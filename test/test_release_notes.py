@@ -327,6 +327,9 @@ class ReleaseNotesTest(unittest.TestCase):
             self.verify()
         self.github.target_release["body"] = self.body
         self.assertEqual(self.verify(), self.body)
+        self.github.target_release["draft"] = True
+        with self.assertRaisesRegex(NOTES.NotesError, "draft/unpublished"):
+            self.verify()
 
     def test_cli_publication_state_is_explicit_without_polluting_the_body(self):
         output = self.root / "github-output"
@@ -334,7 +337,8 @@ class ReleaseNotesTest(unittest.TestCase):
                      "--github-repository", self.github.repository, "--github-output", str(output)]
         for exists in (False, True):
             if exists:
-                self.github.target_release = {"tag_name": "v0.2.0", "body": self.body}
+                self.github.target_release = {"tag_name": "v0.2.0", "body": self.body,
+                                              "draft": False, "published_at": "2026-10-02T00:00:00Z"}
             with patch.object(NOTES, "GitHub", return_value=self.github), patch("sys.argv", arguments), \
                     patch("sys.stdout", new_callable=io.StringIO) as stdout:
                 self.assertEqual(NOTES.main(), 0)
