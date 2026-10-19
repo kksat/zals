@@ -1,5 +1,5 @@
-// Keep release-please's version, PR, label, and tag mechanics upstream. Only the
-// initial GitHub release body comes from the separately approved curated notes.
+// Keep release-please's version, PR, label, and release mechanics upstream.
+// Bind each tag to the approved product before publishing the curated body.
 import { execFile } from 'node:child_process';
 import { appendFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -27,6 +27,52 @@ function requireNotes(notes) {
   return notes;
 }
 
+export async function readTagCommit(github, tag) {
+  const { owner, repo } = github.repository;
+  const api = github.octokit.git;
+  let object;
+  try {
+    object = (await api.getRef({ owner, repo, ref: `tags/${tag}` })).data.object;
+  } catch (error) {
+    if (error.status === 404) return null;
+    throw error;
+  }
+  const seen = new Set();
+  while (object?.type === 'tag') {
+    if (!/^[a-f0-9]{40}$/.test(object.sha ?? '') || seen.has(object.sha) || seen.size >= 100) {
+      throw new Error(`Invalid or cyclic annotated tag ${tag}`);
+    }
+    seen.add(object.sha);
+    // A broken annotated tag (even a 404) is not an absent ref.
+    object = (await api.getTag({ owner, repo, tag_sha: object.sha })).data.object;
+  }
+  if (object?.type !== 'commit' || !/^[a-f0-9]{40}$/.test(object.sha ?? '')) {
+    throw new Error(`Tag ${tag} does not resolve to a commit`);
+  }
+  return object.sha;
+}
+
+export async function assertReleaseTag(github, release, { claim = false, required = false } = {}) {
+  candidateIdentity(release);
+  const tag = release.tag.toString();
+  let target = await readTagCommit(github, tag);
+  if (target === null && claim) {
+    const { owner, repo } = github.repository;
+    try {
+      // An atomic create, never update/force: a competing creator cannot move it.
+      await github.octokit.git.createRef({ owner, repo, ref: `refs/tags/${tag}`, sha: release.sha });
+    } catch (error) {
+      if (error.status !== 422) throw error;
+      // Unlike upstream forceTag, 422 is not proof of an acceptable target.
+    }
+    target = await readTagCommit(github, tag);
+    required = true;
+  }
+  if ((target === null && required) || (target !== null && target !== release.sha)) {
+    throw new Error(`Release tag ${tag} must resolve to approved candidate ${release.sha}; found ${target ?? 'no tag'}`);
+  }
+}
+
 // Preflight *all* candidates before createReleases can mutate tags/releases or
 // labels. Also guard the actual createRelease boundary (before forceTag runs),
 // including a candidate discovered after preflight. Never alter a candidate.
@@ -43,12 +89,19 @@ export function installReleaseNotesGate(github, manifest, validate) {
   }
   manifest.buildReleases = async function (...args) {
     const candidates = await buildReleases.apply(this, args);
-    for (const candidate of candidates) await notesFor(candidate);
+    for (const candidate of candidates) {
+      await notesFor(candidate);
+      await assertReleaseTag(github, candidate);
+    }
     return candidates;
   };
   github.createRelease = async function (release, options) {
     const notes = await notesFor(release);
-    return createRelease.call(this, { ...release, notes }, options);
+    await assertReleaseTag(github, release, { claim: true });
+    await assertReleaseTag(github, release, { required: true });
+    // 17.3.0's forceTag catches every createRef 422 and continues. Our atomic
+    // claim already established the tag; do not re-enter that unsafe fallback.
+    return createRelease.call(this, { ...release, notes }, { ...options, forceTag: false });
   };
   return () => {
     github.createRelease = createRelease;
