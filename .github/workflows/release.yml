@@ -77,6 +77,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
   group: release-${{ inputs.tag }}
@@ -88,24 +89,42 @@ env:
 
 jobs:
   validate:
-    name: validate release versions
+    name: validate release versions and approved notes
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.TAG }}
-          persist-credentials: false
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      # Use repaired verification tools without changing the tagged sources/assets.
-      - uses: actions/checkout@v4
+      - name: Check out trusted workflow tooling
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
           path: release-tools
           sparse-checkout: tools/release
+          fetch-depth: 0
           persist-credentials: false
-      - run: python release-tools/tools/release/verify.py versions --tag "$TAG"
+      - name: Check out tagged sources as data for validation
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+          path: release-source
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python release-tools/tools/release/verify.py versions --tag "$TAG" --directory release-source
+      - name: Verify approved notes or validate an existing-release retry
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PUBLISH_EXISTING: ${{ inputs.publish_existing }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$PUBLISH_EXISTING" = "true" ]; then
+            python3 release-tools/tools/release/notes.py --repo release-source retry \
+              --tag "$TAG" --github-repository "$GITHUB_REPOSITORY"
+          else
+            python3 release-tools/tools/release/notes.py --repo release-source verify \
+              --ref "$TAG" --version "${TAG#v}" --github-repository "$GITHUB_REPOSITORY" > /dev/null
+          fi
 
   build:
     name: build ${{ matrix.target }}
@@ -288,10 +307,12 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      pull-requests: read
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.TAG }}
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
@@ -309,9 +330,23 @@ jobs:
           persist-credentials: false
       - name: Verify the complete asset set and bundled binaries
         run: python release-tools/tools/release/verify.py assets --tag "$TAG" --directory dist
+      - name: Verify packaged editor changelogs match immutable approved notes
+        run: >-
+          python3 release-tools/tools/release/notes.py --repo "$GITHUB_WORKSPACE" packages
+          --tag "$TAG" --directory dist
       - name: Generate checksums
         working-directory: dist
         run: sha256sum -- *.tar.gz *.zip *.whl *.vsix > SHA256SUMS
+      - name: Select the validated approved body outside the asset directory
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 release-tools/tools/release/notes.py --repo "$GITHUB_WORKSPACE" verify \
+            --ref "$TAG" --version "${TAG#v}" --github-repository "$GITHUB_REPOSITORY" \
+            > "$RUNNER_TEMP/release-notes.md"
+          test -s "$RUNNER_TEMP/release-notes.md"
       - name: Check for identical published GitHub assets
         id: github_assets
         env:
@@ -324,9 +359,10 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG }}
+          body_path: ${{ runner.temp }}/release-notes.md
+          append_body: false
           files: dist/*
           fail_on_unmatched_files: true
-          generate_release_notes: true
 
   publication_assets:
     name: verify assets for external publication
@@ -342,6 +378,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.TAG }}
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
@@ -361,6 +398,10 @@ jobs:
         run: |
           python release-tools/tools/release/verify.py assets --tag "$TAG" --directory dist
           (cd dist && sha256sum --check SHA256SUMS)
+          if git cat-file -e "$TAG:docs/releases/${TAG}.json" 2>/dev/null; then
+            python3 release-tools/tools/release/notes.py --repo "$GITHUB_WORKSPACE" packages \
+              --tag "$TAG" --directory dist
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: verified-publication-assets
