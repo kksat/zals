@@ -216,17 +216,20 @@ platform metadata, and identical bundled binaries before creating or updating
 the GitHub release. Packaging must succeed for every platform before any assets
 are published. The initial baseline is `0.1.0`.
 
-The workflow also accepts the existing component-prefixed `zals-v0.2.0` tag;
-package versions and asset filenames still use `0.2.0`. Once the workflow fix
-is merged, retry that failed release without moving its tag:
+GitHub asset publication is idempotent: if all 15 assets and `SHA256SUMS` are
+already published with identical bytes, the upload step is skipped and the job
+succeeds, including for immutable releases. The check uses GitHub's SHA-256
+digests, downloading assets for comparison when a digest is unavailable. API or
+download errors are not treated as success. Draft releases still need final
+publication; mutable releases can upload missing or changed assets.
 
-```sh
-gh workflow run release.yml --ref main -f tag=zals-v0.2.0 \
-  -f publish_vscode=true -f vscode_auth=pat -f publish_openvsx=true
-```
-
-Do not set `publish_existing=true` for this recovery: the failed validation
-published no assets. Future release-please tags use `vX.Y.Z` explicitly.
+The workflow also accepts component-prefixed tags such as `zals-v0.2.0`;
+package versions and asset filenames still use `0.2.0`. However, that particular
+release was published as immutable with no assets and cannot be repaired by a
+retry. An immutable release with missing, changed, or unexpected assets fails
+with the affected filenames; use a new release instead. New releases must receive
+all assets while still drafts, before publication locks them. Future
+release-please tags use `vX.Y.Z` explicitly.
 
 To publish the existing verified GitHub release to PyPI and `kksat/tap` without
 rebuilding or replacing its assets:

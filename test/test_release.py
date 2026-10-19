@@ -379,6 +379,175 @@ class ReleaseTests(unittest.TestCase):
             release.verify_assets(self.directory, self.tag)
 
 
+class GithubPublicationTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.directory = Path(self.temp.name)
+        self.local = self.directory / "local"
+        self.remote = self.directory / "remote"
+        self.bin = self.directory / "bin"
+        for directory in (self.local, self.remote, self.bin):
+            directory.mkdir()
+        for name in release.asset_names("0.2.0") | {"SHA256SUMS"}:
+            content = f"published content for {name}".encode()
+            (self.local / name).write_bytes(content)
+            (self.remote / name).write_bytes(content)
+        self.output = self.directory / "output"
+        self.immutable = True
+        self.draft = False
+        self.status = 200
+        self.no_digest = False
+        self.download_error = False
+        # Exercise the actual CLI at its gh process seam, never a live release.
+        gh = self.bin / "gh"
+        gh.write_text(f"#!{sys.executable}\n" + textwrap.dedent('''\
+            import json, os, shutil, sys
+            from pathlib import Path
+            root = Path(os.environ["PUBLISH_FIXTURE"])
+            fixture = json.loads((root / "fixture.json").read_text())
+            args = sys.argv[1:]
+            with (root / "calls").open("a") as calls:
+                calls.write(json.dumps(args) + "\\n")
+            if args == ["api", "repos/test/repo/releases/tags/v0.2.0"]:
+                if fixture["status"] != 200:
+                    print(json.dumps({"status": str(fixture["status"]), "message": "API rejected request"}))
+                    print("API rejected request", file=sys.stderr)
+                    sys.exit(1)
+                print(json.dumps(fixture["release"]))
+            elif args[:3] == ["release", "download", "v0.2.0"]:
+                if fixture["download_error"]:
+                    sys.exit("Download denied")
+                destination = Path(args[args.index("--dir") + 1])
+                name = args[args.index("--pattern") + 1]
+                shutil.copy2(root / "remote" / name, destination / name)
+            else:
+                sys.exit("Unexpected gh command: " + repr(args))
+            '''))
+        gh.chmod(0o755)
+
+    def run_check(self):
+        metadata = {
+            "id": 123, "immutable": self.immutable, "draft": self.draft,
+            "assets": [{"name": path.name, "size": path.stat().st_size,
+                        "digest": None if self.no_digest else
+                        "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()}
+                       for path in self.remote.iterdir()],
+        }
+        (self.directory / "fixture.json").write_text(json.dumps({
+            "release": metadata, "status": self.status, "download_error": self.download_error,
+        }))
+        self.output.unlink(missing_ok=True)
+        return subprocess.run(
+            [sys.executable, str(ROOT / "tools/release/check_github.py"),
+             "--tag", "v0.2.0", "--repository", "test/repo", "--directory", str(self.local)],
+            env={"PATH": f"{self.bin}:{os.environ['PATH']}", "HOME": str(self.directory),
+                 "PUBLISH_FIXTURE": str(self.directory), "GITHUB_OUTPUT": str(self.output)},
+            capture_output=True, text=True, timeout=10,
+        )
+
+    def assert_decision(self, already_published):
+        result = self.run_check()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.output.read_text(),
+                         f"already_published={str(already_published).lower()}\n")
+
+    def test_identical_published_release_is_a_noop_on_every_retry(self):
+        for immutable in (True, False):
+            with self.subTest(immutable=immutable):
+                self.immutable = immutable
+                self.assert_decision(True)
+                self.assert_decision(True)
+        calls = [json.loads(line) for line in (self.directory / "calls").read_text().splitlines()]
+        self.assertEqual(len(calls), 4)
+        self.assertTrue(all(call[0] == "api" for call in calls))
+
+    def test_new_release_needs_publication(self):
+        self.status = 404
+        self.assert_decision(False)
+
+    def test_draft_release_still_needs_to_be_published(self):
+        self.draft = True
+        self.immutable = False
+        self.assert_decision(False)
+
+    def test_mutable_release_can_upload_missing_or_changed_assets(self):
+        self.immutable = False
+        asset = next(self.remote.glob("*.tar.gz"))
+        asset.write_bytes(b"different content")
+        self.assert_decision(False)
+        asset.unlink()
+        self.assert_decision(False)
+
+    def test_immutable_release_rejects_missing_changed_or_extra_assets(self):
+        asset = next(self.remote.glob("*.tar.gz"))
+        original = asset.read_bytes()
+        for change in ("missing", "changed", "extra"):
+            with self.subTest(change=change):
+                asset.write_bytes(original)
+                extra = self.remote / "unexpected.zip"
+                extra.unlink(missing_ok=True)
+                if change == "missing":
+                    asset.unlink()
+                elif change == "changed":
+                    asset.write_bytes(b"X" * len(original))
+                else:
+                    extra.write_bytes(b"extra")
+                result = self.run_check()
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("immutable", result.stderr.lower())
+                self.assertIn(extra.name if change == "extra" else asset.name, result.stderr)
+                self.assertFalse(self.output.exists())
+
+    def test_empty_immutable_release_cannot_claim_success(self):
+        for asset in self.remote.iterdir():
+            asset.unlink()
+        result = self.run_check()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("immutable", result.stderr.lower())
+        self.assertIn("SHA256SUMS", result.stderr)
+        self.assertFalse(self.output.exists())
+
+    def test_checksums_are_compared_not_just_package_files(self):
+        (self.remote / "SHA256SUMS").write_bytes(b"different checksums")
+        result = self.run_check()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("SHA256SUMS", result.stderr)
+        self.assertFalse(self.output.exists())
+
+    def test_missing_digests_fall_back_to_comparing_downloaded_bytes(self):
+        self.no_digest = True
+        self.assert_decision(True)
+        asset = next(self.remote.glob("*.vsix"))
+        asset.write_bytes(b"X" * asset.stat().st_size)
+        result = self.run_check()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(asset.name, result.stderr)
+        self.assertFalse(self.output.exists())
+
+    def test_api_and_download_failures_never_claim_success(self):
+        for status in (401, 403, 429, 500):
+            with self.subTest(status=status):
+                self.status = status
+                result = self.run_check()
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("API rejected request", result.stderr)
+                self.assertFalse(self.output.exists())
+        self.status = 200
+        self.no_digest = True
+        self.download_error = True
+        result = self.run_check()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Download denied", result.stderr)
+        self.assertFalse(self.output.exists())
+
+    def test_workflow_skips_upload_only_after_successful_content_comparison(self):
+        workflow = (ROOT / ".github/workflows/release.yml").read_text()
+        self.assertIn('python release-tools/tools/release/check_github.py --tag "$TAG"', workflow)
+        self.assertIn("id: github_assets", workflow)
+        self.assertIn("if: steps.github_assets.outputs.already_published != 'true'", workflow)
+
+
 class RegistryServer(ThreadingHTTPServer):
     """Local registry boundary for exercising the real locked publishing CLIs."""
 

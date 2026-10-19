@@ -51,11 +51,18 @@ Use **Google release-please** to drive releases from
   (`linux-x64`, `linux-arm64`, `darwin-x64`, `darwin-arm64`, `win32-x64`) each
   bundle the matching binary and the compiled language client. Packaging uses
   the locked `@vscode/vsce` dependency and Node 22 for TypeScript unit tests.
-- Build and asset verification jobs check out the requested tag; publishing
-  tools use the workflow revision. A validation job checks that all
+- Build and asset verification jobs check out the requested tag; verification
+  and publishing tools use the workflow revision. A validation job checks that all
   source versions match it. Publication waits for every binary, wheel, and
   VSIX, verifies the 15-asset contract and matching bundled binary bytes,
-  and attaches all assets plus `SHA256SUMS` to GitHub.
+  and attaches all assets plus `SHA256SUMS` to GitHub. Before uploading,
+  a read-only comparison checks every asset name and byte digest, including
+  `SHA256SUMS`. An identical already-published release is a successful no-op,
+  even if immutable; unavailable server digests fall back to downloading and
+  hashing the asset. API/download failures never count as an identical release.
+  Draft releases still need publication, and mutable releases can receive
+  missing or changed assets. An immutable release with a different asset set
+  cannot be repaired and fails with the affected filenames.
 - Manual packaging defaults to **GitHub only**. Dispatch/call inputs
   `publish_pypi`, `publish_homebrew`, `publish_vscode`, and `publish_openvsx`
   select external publishing; credentials alone never enable it. The

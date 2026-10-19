@@ -312,7 +312,15 @@ jobs:
       - name: Generate checksums
         working-directory: dist
         run: sha256sum -- *.tar.gz *.zip *.whl *.vsix > SHA256SUMS
+      - name: Check for identical published GitHub assets
+        id: github_assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python release-tools/tools/release/check_github.py --tag "$TAG" \
+            --repository "$GITHUB_REPOSITORY" --directory dist
       - name: Publish assets to GitHub only
+        if: steps.github_assets.outputs.already_published != 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG }}
