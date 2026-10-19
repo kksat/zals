@@ -35,6 +35,22 @@ jobs:
       - name: Run unit tests
         run: make test
 
+  release-runner:
+    name: release runner
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: tools/release/package-lock.json
+      - run: npm ci --prefix tools/release
+      - run: npm --prefix tools/release test
+
   vscode:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -55,7 +71,7 @@ jobs:
         run: |
           npm --prefix editors/vscode run typecheck
           npm --prefix editors/vscode test
-          python -m unittest discover -s test -p 'test_release.py'
+          python -m unittest discover -s test -p 'test_release*.py'
 
   e2e:
     runs-on: ubuntu-latest
