@@ -46,7 +46,7 @@ build:
 test:
 	zig build test
 	python3 -m unittest discover -s test -p 'test_benchmark_operations.py'
-	python3 -m unittest discover -s test -p 'test_release.py'
+	python3 -m unittest discover -s test -p 'test_release*.py'
 
 e2e:
 	zig build $(or $(SUITE),e2e)
