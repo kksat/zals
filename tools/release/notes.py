@@ -15,6 +15,7 @@ import subprocess
 import sys
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+import xml.etree.ElementTree as ET
 import zipfile
 
 
@@ -365,10 +366,18 @@ def packages(repo, tag, directory):
     require(extensions, "No VSIX packages to verify")
     for extension in extensions:
         with zipfile.ZipFile(extension) as archive:
-            require(archive.namelist().count("extension/CHANGELOG.md") == 1,
-                    f"Missing or duplicate extension changelog: {extension.name}")
-            require(archive.read("extension/CHANGELOG.md") == expected,
+            # vsce canonicalizes the source CHANGELOG.md to a lowercase asset.
+            changelogs = [name for name in archive.namelist()
+                          if name.lower() == "extension/changelog.md"]
+            require(changelogs == ["extension/changelog.md"],
+                    f"Missing, duplicate, or noncanonical extension changelog: {extension.name}")
+            require(archive.read("extension/changelog.md") == expected,
                     f"Packaged changelog differs from approved notes: {extension.name}")
+            manifest = ET.fromstring(archive.read("extension.vsixmanifest"))
+            assets = [asset for asset in manifest.findall(".//{*}Asset")
+                      if asset.get("Type") == "Microsoft.VisualStudio.Services.Content.Changelog"]
+            require(len(assets) == 1 and assets[0].get("Path") == "extension/changelog.md",
+                    f"Changelog is not registered in the VSIX manifest: {extension.name}")
 
 
 def main():
@@ -409,7 +418,7 @@ def main():
         elif args.command == "packages":
             packages(repo, args.tag, args.directory)
     except (NotesError, OSError, UnicodeError, json.JSONDecodeError, KeyError, TypeError,
-            zipfile.BadZipFile) as error:
+            zipfile.BadZipFile, ET.ParseError) as error:
         print(f"Release notes: {error}", file=sys.stderr)
         return 1
     return 0

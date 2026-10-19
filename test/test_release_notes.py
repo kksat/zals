@@ -5,6 +5,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -348,17 +349,50 @@ class ReleaseNotesTest(unittest.TestCase):
         directory.mkdir()
         for platform in ("linux-x64", "linux-arm64", "darwin-x64", "darwin-arm64", "win32-x64"):
             with zipfile.ZipFile(directory / f"zals-0.2.0-{platform}.vsix", "w") as archive:
-                archive.writestr("extension/CHANGELOG.md", (self.root / NOTES.PUBLIC).read_bytes())
+                archive.writestr("extension/changelog.md", (self.root / NOTES.PUBLIC).read_bytes())
+                archive.writestr("extension.vsixmanifest", '<PackageManifest><Assets><Asset '
+                                 'Type="Microsoft.VisualStudio.Services.Content.Changelog" '
+                                 'Path="extension/changelog.md"/></Assets></PackageManifest>')
         NOTES.packages(self.repo, "v0.2.0", directory)
         broken = directory / "zals-0.2.0-linux-x64.vsix"
         with zipfile.ZipFile(broken, "w") as archive:
-            archive.writestr("extension/CHANGELOG.md", "Unapproved notes")
+            archive.writestr("extension/changelog.md", "Unapproved notes")
         with self.assertRaisesRegex(NOTES.NotesError, "differs"):
             NOTES.packages(self.repo, "v0.2.0", directory)
         with zipfile.ZipFile(broken, "w") as archive:
             archive.writestr("extension/README.md", "No changelog")
         with self.assertRaisesRegex(NOTES.NotesError, "Missing"):
             NOTES.packages(self.repo, "v0.2.0", directory)
+        with zipfile.ZipFile(broken, "w") as archive:
+            archive.writestr("extension/changelog.md", (self.root / NOTES.PUBLIC).read_bytes())
+            archive.writestr("extension.vsixmanifest", "<PackageManifest><Assets/></PackageManifest>")
+        with self.assertRaisesRegex(NOTES.NotesError, "not registered"):
+            NOTES.packages(self.repo, "v0.2.0", directory)
+        with zipfile.ZipFile(broken, "w") as archive:
+            archive.writestr("extension/changelog.md", (self.root / NOTES.PUBLIC).read_bytes())
+            archive.writestr("extension/CHANGELOG.md", (self.root / NOTES.PUBLIC).read_bytes())
+        with self.assertRaisesRegex(NOTES.NotesError, "duplicate"):
+            NOTES.packages(self.repo, "v0.2.0", directory)
+
+    @unittest.skipUnless(shutil.which("node") and (ROOT / "editors/vscode/node_modules/@vscode/vsce/vsce").is_file(),
+                         "Run npm ci --prefix editors/vscode for the real VSIX packaging regression")
+    def test_real_vsce_registers_lowercase_changelog_with_exact_public_bytes(self):
+        self.git("tag", "v0.2.0")
+        work = self.root / "real-extension"
+        shutil.copytree(ROOT / "editors/vscode", work,
+                        ignore=shutil.ignore_patterns("node_modules", "dist", "bin", "*.vsix"))
+        (work / "node_modules").symlink_to(ROOT / "editors/vscode/node_modules", target_is_directory=True)
+        (work / "CHANGELOG.md").write_bytes((self.root / NOTES.PUBLIC).read_bytes())
+        (work / "bin").mkdir()
+        (work / "bin/zals").write_bytes(b"test fixture binary; never executed")
+        output = self.root / "assets"
+        output.mkdir()
+        result = subprocess.run(["node", str(work / "node_modules/@vscode/vsce/vsce"), "package",
+                                 "--target", "linux-x64", "--no-dependencies", "--out",
+                                 str(output / "zals-0.2.0-linux-x64.vsix")],
+                                cwd=work, capture_output=True, text=True, timeout=120)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        NOTES.packages(self.repo, "v0.2.0", output)
 
     def test_packages_cannot_invent_retrospective_notes_for_legacy_release(self):
         with self.assertRaises(NOTES.NotesError):
