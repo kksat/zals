@@ -300,15 +300,17 @@ class ReleaseTests(unittest.TestCase):
                           "Path(os.environ['CAPTURE']).write_text(json.dumps(sys.argv[1:]))\n"
                           "print('Approved body')\n"
                           "sys.exit(int(os.environ.get('HELPER_EXIT', '0')))\n")
-        for existing, command, flag in (("true", "retry", "--tag"), ("false", "verify", "--ref")):
-            with self.subTest(publish_existing=existing):
-                env = {**os.environ, "TAG": self.tag, "PUBLISH_EXISTING": existing,
+        for existing, command, flag, tag in (("true", "retry", "--tag", self.tag),
+                                              ("true", "retry", "--tag", f"zals-{self.tag}"),
+                                              ("false", "verify", "--ref", self.tag)):
+            with self.subTest(publish_existing=existing, tag=tag):
+                env = {**os.environ, "TAG": tag, "PUBLISH_EXISTING": existing,
                        "GITHUB_REPOSITORY": "kksat/zals", "CAPTURE": str(captured)}
                 result = subprocess.run(["bash", "-c", script], cwd=self.directory,
                                         env=env, capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 args = json.loads(captured.read_text())
-                self.assertEqual(args[:5], ["--repo", "release-source", command, flag, self.tag])
+                self.assertEqual(args[:5], ["--repo", "release-source", command, flag, tag])
                 self.assertIn("--github-repository", args)
                 failed = subprocess.run(["bash", "-c", script], cwd=self.directory,
                                         env={**env, "HELPER_EXIT": "42"}, capture_output=True, text=True)

@@ -231,10 +231,11 @@ for (const [name, override, expectedTag] of [
 
 test('checked-in config passes unchanged through actual Manifest loading and tag construction', async () => {
   const config = JSON.parse(await readFile(new URL('../../release-please-config.json', import.meta.url), 'utf8'));
+  assert.equal(config.packages['.']['include-component-in-tag'], false,
+    'the root release config must explicitly preserve documented vX.Y.Z tags');
   const { version, release } = await configuredRelease(config);
   assert.equal(version, '0.2.0');
-  assert.equal(release.tag.toString(),
-    config.packages['.']['include-component-in-tag'] === false ? 'v0.2.0' : 'zals-v0.2.0');
+  assert.equal(release.tag.toString(), 'v0.2.0');
 });
 
 test('PR-head helper reads version from the candidate, not the workflow checkout', async () => {
