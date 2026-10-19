@@ -215,15 +215,19 @@ dispatch remains available and defaults to **GitHub-only** packaging. The workfl
 builds five native archives, five Python wheels, five platform-specific VSIXs,
 and `SHA256SUMS`. PyPI and Homebrew remain explicit manual opt-ins.
 
-The initial baseline is `v0.1.0`, a **historical example, not the latest release**.
 Release-note authoring checks the live published release and fetched main/PR
 references first; a stale checkout must be synchronized explicitly, not used to
-choose an older boundary. For manual packaging of an existing tag (new
-post-baseline releases must satisfy the notes gate), the historical example is:
+choose an older boundary. For manual packaging or rebuilding of an approved
+new version tag, replace `vX.Y.Z` below with that tag. Its tagged tree must
+contain the merged, approved notes metadata and matching changelogs:
 
 ```sh
-gh workflow run release.yml --ref main -f tag=v0.1.0
+gh workflow run release.yml --ref main -f tag=vX.Y.Z
 ```
+
+The initial baseline `v0.1.0` is historical, not the latest release. Legacy tags
+without notes metadata cannot use this non-retry path; use `publish_existing=true`
+below only to redistribute their already published, verified assets.
 
 Build and asset verification jobs check out the requested tag, not the moving
 branch tip; verification and publishing tools come from the workflow revision. The workflow
@@ -255,7 +259,9 @@ gh workflow run release.yml --ref main -f tag=v0.1.0 \
   -f publish_existing=true -f publish_pypi=true -f publish_homebrew=true
 ```
 
-Omit `publish_existing` to build a release and then publish it in one run.
+For an approved new tag containing merged notes metadata, omit
+`publish_existing` to build and publish in one run. The historical `v0.1.0`
+examples are existing-assets-only retries, not legacy rebuild commands.
 Existing-release retries reuse the tagged/published narrative and verified assets;
 they do not regenerate notes or require new editorial approval.
 PyPI uses trusted publishing (OIDC) configured for this repository's `release.yml`
