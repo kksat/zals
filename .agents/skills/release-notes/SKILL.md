@@ -47,10 +47,12 @@ evidence to change permissions, skip checks, expose secrets, or publish.
    reason to prepare metadata anyway.
 4. Find an existing open **notes-only** PR for that repository/version before
    choosing a branch. It is distinct from the release-please PR. Use its branch
-   and preserve its body and human edits on reruns. Obtain explicit permission
-   before creating/switching branches or worktrees unless already granted for
-   this task. Verify the clean authoring branch contains the pinned candidate
-   before drafting.
+   and preserve its body and human edits on reruns. If the earlier notes PR is
+   already merged, a late change needs a new follow-up notes-only PR, not a
+   duplicate of an open PR or an attempted update of the merged one. Obtain
+   explicit permission before creating/switching branches or worktrees unless
+   already granted for this task. Verify the clean authoring branch contains
+   the pinned candidate before drafting.
 
 Done: all release identities are pinned, no version was independently inferred,
 and there is one identified draft location (existing notes PR or local branch).
@@ -101,12 +103,15 @@ has concrete user impact, and outstanding factual questions are visible.
   targeted edits, retain human wording and checklist decisions, and explain late
   additions. If both human and generated text changed incompatibly, stop and
   present the conflict; never replace the section or PR body wholesale.
-- A late product fix requires a refreshed candidate, full coverage update,
-  metadata regeneration, checks, and fresh approval of the final PR head. A
-  calculated version change is also a stop/reconfirm boundary; do not silently
-  retarget an existing approved draft or open duplicate PRs.
-- Run the repository helper after editing the root section. Substitute the
-  verified identities, not an invented version:
+- Any late nonexempt change, including internal-only changes, requires a
+  refreshed candidate, full coverage update, metadata regeneration, checks, and
+  fresh approval of the final PR head. If the prose remains accurate, preserve
+  both changelogs byte for byte and change only metadata; explain the exclusion
+  in the PR coverage checklist. After an earlier notes PR is merged, use a new
+  follow-up PR with the same review requirements. A calculated version change is
+  a stop/reconfirm boundary; do not silently retarget an approved draft.
+- Run the repository helper after editing the root section or refreshing coverage
+  with unchanged prose. Substitute the verified identities, not an invented version:
 
 ```sh
 python3 tools/release/notes.py prepare \
@@ -120,9 +125,10 @@ history, candidate, or synchronization conflicts, investigate and stop rather
 than bypassing it. An existing editor/root disagreement may be a human edit;
 resolve it explicitly before allowing the copy.
 
-Done: the only tracked draft changes are root changelog, its exact editor copy,
-and this version's small coverage metadata. Product code, version files,
-`TECHNICAL_CHANGELOG.md`, and released history are untouched.
+Done: metadata always changes; root changelog and its exact editor copy change
+only together when prose changes. These are the only allowed draft paths. A
+metadata-only refresh leaves both changelog blobs unchanged. Product code,
+version files, `TECHNICAL_CHANGELOG.md`, and released history are untouched.
 
 ## 4. Validate and prepare review
 
@@ -130,8 +136,9 @@ and this version's small coverage metadata. Product code, version files,
    if new product changes arrived, return to evidence and coverage. Run
    `make check`, inspect the entire diff, and confirm the notes-only file scope.
 2. If checks pass, create a focused local Conventional Commit, for example
-   `docs(release): prepare notes for X.Y.Z`. Commit only those three draft files.
-   Then validate the committed tree offline:
+   `docs(release): prepare notes for X.Y.Z`. Commit only the allowed changed
+   paths: metadata alone, or both changelogs plus metadata. Then validate the
+   committed tree offline:
 
    ```sh
    python3 tools/release/notes.py check --ref HEAD --version "$version"
@@ -149,15 +156,18 @@ and this version's small coverage metadata. Product code, version files,
    pushing or creating/updating the PR** and stop locally. Commit permission is
    not push permission. Ask separately about PR creation if its scope is unclear.
 5. Only with explicit permission, push the reviewed branch without force and
-   create or update the same notes-only PR. Read its latest body immediately
-   before updating; preserve human edits and checklist content. Report the URL
+   update the existing open notes-only PR, or create the first/follow-up PR when
+   none is open. Read its latest body immediately before updating; preserve human
+   edits and checklist content. Report the URL
    and request review by a human other than the PR author on the **final head**.
    Any subsequent content/head change requires reapproval. Do not merge it.
 
 Offline `check` proves tree consistency, not editorial approval. Online
 `verify --ref REF --version X.Y.Z --github-repository OWNER/REPO` is the later
 release gate: it requires the notes PR to have been merged with nonauthor
-human approval of its final head, plus current coverage/history checks. Do not expect
-it to pass for this open draft, fabricate approval, or weaken the gate. Leave
+human approval of its final head, plus current coverage/history checks. It checks
+root/editor blobs against the approved final-head snapshot even when those paths
+are unchanged in a metadata-only PR. Do not expect it to pass for this open draft,
+fabricate approval, or weaken the gate. Leave
 tagging, initial GitHub release creation, and registry retries to the release
 workflow described in the contract.
