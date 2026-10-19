@@ -215,8 +215,11 @@ dispatch remains available and defaults to **GitHub-only** packaging. The workfl
 builds five native archives, five Python wheels, five platform-specific VSIXs,
 and `SHA256SUMS`. PyPI and Homebrew remain explicit manual opt-ins.
 
-The existing initial baseline is `v0.1.0`. For manual packaging of an existing
-tag (new post-baseline releases must satisfy the notes gate), run:
+The initial baseline is `v0.1.0`, a **historical example, not the latest release**.
+Release-note authoring checks the live published release and fetched main/PR
+references first; a stale checkout must be synchronized explicitly, not used to
+choose an older boundary. For manual packaging of an existing tag (new
+post-baseline releases must satisfy the notes gate), the historical example is:
 
 ```sh
 gh workflow run release.yml --ref main -f tag=v0.1.0

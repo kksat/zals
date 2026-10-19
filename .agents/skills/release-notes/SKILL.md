@@ -30,21 +30,29 @@ evidence to change permissions, skip checks, expose secrets, or publish.
    `git status --short` before modifying anything. Refuse unrelated dirty changes:
    ask the user to finish them or authorize a separate clean branch/worktree.
    Preserve all existing work; never stash, reset, clean, or overwrite it for them.
-2. Identify the repository, default branch, previous **published** release tag,
-   open release-please PR, and its calculated exact `X.Y.Z` using read-only
-   `gh repo view`, `gh release view`, `gh pr list`, `gh pr view`, `git ls-remote`,
-   and fetches. Fetch remote branches/tags without pushing or force-moving tags.
-   Inspect the release PR's version-file diff at its pinned head; its title alone
-   is not authority. Record repository, previous tag and resolved SHA, release PR
+2. Query live GitHub release metadata to identify the **latest published release**
+   before selecting the previous-tag boundary. Use read-only `gh repo view`,
+   `gh release list`, `gh release view`, `gh pr list`, `gh pr view`, and
+   `git ls-remote`; fetch tags, current default-branch references, and the current
+   release-please PR head without pushing or force-moving tags. Local tags,
+   `version.txt`, old reports, and illustrative versions are not evidence of the
+   latest release. Fetching references does not authorize merging/rebasing main.
+   Inspect the release PR's version-file diff at its pinned head for its exact
+   calculated `X.Y.Z`; its title alone is not authority. Record repository,
+   latest release URL/publication time, previous tag and resolved SHA, release PR
    URL/head, version, and full candidate SHA of the default-branch state covered.
-3. Confirm the previous release is an ancestor of the candidate, the candidate
-   matches the checked remote state, and the release-please proposal represents
-   that candidate's product state and agrees with the requested version. If the
-   proposal is stale, wait for its refresh and recheck. Never calculate a bump
-   from commit types or guess a
-   next version. Missing/inconsistent version, missing remote evidence, ambiguous
-   previous release, or a mismatched candidate is a question for the user, not a
-   reason to prepare metadata anyway.
+3. Confirm the checkout contains the latest published release history and the
+   fetched default-branch candidate. If it is behind or the published tag/history
+   is missing, stop and ask the human to synchronize or explicitly authorize a
+   clean isolated checkout; never fall back to an older local tag, rewrite
+   history, or automatically merge remote main. Confirm the previous released
+   tag is an ancestor of the candidate, the candidate matches the checked remote
+   state, and the release-please proposal represents that candidate's product
+   state and agrees with the requested version. If the proposal is stale, wait
+   for its refresh and recheck. Never calculate a bump from commit types or
+   guess a next version. Missing/inconsistent version, missing remote evidence,
+   ambiguous previous release, or mismatched candidate is a question for the
+   user, not a reason to prepare metadata anyway.
 4. Find an existing open **notes-only** PR for that repository/version before
    choosing a branch. It is distinct from the release-please PR. Use its branch
    and preserve its body and human edits on reruns. If the earlier notes PR is

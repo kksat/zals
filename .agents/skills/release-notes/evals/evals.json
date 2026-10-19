@@ -58,6 +58,19 @@
         "The agent explains that verification compares root/editor blobs with GitHub contents at the approved final PR head, including unchanged paths, and rejects the negative prose-drift variant.",
         "make check and explicit-version offline validation are reported truthfully, and no push, PR write, tag, release, or publishing action occurs."
       ]
+    },
+    {
+      "id": 5,
+      "prompt": "Evaluate an explicit /skill:release-notes invocation in a disposable stale-checkout fixture, not the live repository. The checkout version.txt and only initial local release tag say 0.1.0. Mock live read-only GitHub release metadata showing the latest published stable release is v0.2.0, and a current default-branch/release-please proposal after that release. Fetching the mocked references is allowed, but the working branch does not contain the v0.2.0 history or current main. An old report claims v0.1.0 was latest. I have not authorized merging/rebasing main, rewriting history, or changing worktrees. Determine whether it is safe to select a release boundary and draft. Use fixture-only data and no real network writes.",
+      "expected_output": "The agent queries live mocked release metadata, fetches tags/current main/release PR references, identifies v0.2.0 as the current published boundary instead of trusting local 0.1.0 or the old report, and stops on missing checkout history. It asks for explicit synchronization or isolated-checkout permission without generating version-bound notes/metadata or merging/rebasing remote main.",
+      "files": [],
+      "expectations": [
+        "Latest published release metadata and fetched current main/release PR references are consulted before choosing the boundary.",
+        "Local version.txt, the old report, and the lone initial tag are not accepted as proof that v0.1.0 is latest.",
+        "The missing v0.2.0/current-main ancestry in the working branch is a blocking condition, not a reason to fall back to v0.1.0.",
+        "No version-bound notes or coverage metadata is generated from the stale checkout.",
+        "The agent asks for explicit synchronization or isolated-checkout permission and performs no merge, rebase, history rewrite, push, PR write, or publication."
+      ]
     }
   ]
 }

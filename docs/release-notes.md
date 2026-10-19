@@ -43,9 +43,16 @@ The authoring skill reads the exact calculated version from the pinned
 release-please proposal; it neither computes a bump nor edits version files.
 If no unambiguous proposal exists, stop and ask rather than assuming a version.
 
+Query **live GitHub release metadata** first and fetch tags, current default
+branch, and the release-please PR head before choosing the range boundary. Use
+the latest published release, not the newest tag already present locally or the
+version in an old checkout/report. The initial `0.1.0` baseline mentioned here is
+historical, never an assertion that it is the latest release.
+
 Pin these facts from checked/fetched remote references before drafting:
 
-- Repository and default branch; previous **published** `vA.B.C` tag and its SHA.
+- Repository and default branch; latest published release URL/publication time,
+  previous `vA.B.C` tag, and its resolved SHA.
 - Open release-please PR URL/head and its calculated `X.Y.Z`.
 - Full candidate commit SHA: the default-branch product state being covered.
 - Existing open notes-only PR/branch for that version, if any.
@@ -54,6 +61,13 @@ The previous released tag must be an ancestor of the candidate. Recheck the
 remote heads and version before delivering a draft; stale local branches and
 PR titles alone are not sufficient evidence. The evidence range is the previous
 released tag through that candidate, not "commits since the last skill run".
+If the working checkout is behind the fetched default branch or lacks the latest
+published tag/history, **stop**: ask the human to synchronize or authorize a
+clean isolated checkout. Fetching references is not permission to merge/rebase
+remote main, rewrite history, or fall back to a stale local release boundary.
+Missing live evidence blocks selecting the boundary; no version-bound draft or
+metadata is generated on that basis.
+
 Read the range's diffs, regression tests, docs, and applicable benchmark results.
 Commit messages are an index into that evidence, never the published narrative.
 Include reverts and superseded changes in coverage without presenting behavior
@@ -254,7 +268,9 @@ python3 tools/release/notes.py retry --tag vX.Y.Z --github-repository OWNER/REPO
 Retries reuse the already released/tagged notes and verified assets without a
 new editorial approval or creative regeneration. The initial `0.1.0` baseline
 is preserved as published history; adopting this workflow neither rewrites that
-entry nor creates notes for an assumed next version.
+entry nor creates notes for an assumed next version. Any literal versions in
+examples or evaluation fixtures are illustrative/historical, not live
+release discovery results.
 
 ## Publication gates and repository setup
 
@@ -302,8 +318,9 @@ already published narrative rather than using changed prose from the branch tip.
 [Portable scenarios](../.agents/skills/release-notes/evals/evals.json) cover a new
 local draft, a rerun with human edits plus a late fix, missing-version /
 unsupported-performance claims, and an approved metadata-only follow-up after a
-late internal change. They specify expected behavior, not recorded
-successful model runs. Run them only when the human explicitly requests skill
+late internal change, plus stale local history despite a newer live release.
+Their version numbers are mocked fixture values, not claims about the current
+release. They specify expected behavior, not recorded successful model runs. Run them only when the human explicitly requests skill
 evaluation, in disposable fixtures with mocked read-only GitHub evidence and no
 push/release credentials. Static skill/docs checks and deterministic helper
 tests do not substitute for measuring editorial/model behavior.
