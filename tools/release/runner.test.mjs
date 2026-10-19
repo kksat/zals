@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { Errors, Manifest, setLogger, VERSION } from 'release-please';
 import { Simple } from 'release-please/build/src/strategies/simple.js';
+import { buildStrategy } from 'release-please/build/src/factory.js';
 import { parseConventionalCommits } from 'release-please/build/src/commit.js';
 import { TagName } from 'release-please/build/src/util/tag-name.js';
 import { Version } from 'release-please/build/src/version.js';
@@ -190,6 +192,50 @@ for (const [message, previous, expected] of [
     assert.equal(created.notes, approved);
   });
 }
+
+async function configuredRelease(config) {
+  const github = {
+    repository: { owner: 'kksat', repo: 'zals', defaultBranch: 'main' },
+    getFileJson: async path => path === 'release-please-config.json' ? config : { '.': '0.1.0' },
+  };
+  const manifest = await Manifest.fromManifest(github, 'main');
+  const strategy = await buildStrategy({ ...manifest.repositoryConfig['.'], github,
+    targetBranch: 'main', path: '.' });
+  const commits = parseConventionalCommits([{ sha, message: 'feat: navigate roles', files: ['src/main.zig'] }]);
+  const pr = await strategy.buildReleasePullRequest(commits,
+    { tag: TagName.parse('v0.1.0'), sha: 'b'.repeat(40) });
+  const merged = { number: 42, sha, title: pr.title.toString(), body: pr.body.toString(),
+    headBranchName: pr.headRefName, labels: ['autorelease: pending'], files: [] };
+  github.pullRequestIterator = async function* () { yield merged; };
+  return { manifest, version: pr.version.toString(), release: (await manifest.buildReleases())[0] };
+}
+
+for (const [name, override, expectedTag] of [
+  ['original package-name configuration', undefined, 'zals-v0.2.0'],
+  ['explicit root include-component-in-tag false', false, 'v0.2.0'],
+]) {
+  test(`actual Manifest config/tag regression: ${name}`, async () => {
+    const config = JSON.parse(await readFile(new URL('../../release-please-config.json', import.meta.url), 'utf8'));
+    assert.equal(config.packages['.']['package-name'], 'zals');
+    // Reproduce the original config's omitted setting independently of the
+    // integration config fix, then exercise the minimal explicit correction.
+    delete config.packages['.']['include-component-in-tag'];
+    if (override !== undefined) config.packages['.']['include-component-in-tag'] = override;
+    const { version, release } = await configuredRelease(config);
+    assert.equal(version, '0.2.0', 'tag spelling must not change version calculation');
+    assert.equal(release.tag.toString(), expectedTag);
+    assert.equal(release.sha, sha);
+    assert.equal(release.pullRequest.number, 42);
+  });
+}
+
+test('checked-in config passes unchanged through actual Manifest loading and tag construction', async () => {
+  const config = JSON.parse(await readFile(new URL('../../release-please-config.json', import.meta.url), 'utf8'));
+  const { version, release } = await configuredRelease(config);
+  assert.equal(version, '0.2.0');
+  assert.equal(release.tag.toString(),
+    config.packages['.']['include-component-in-tag'] === false ? 'v0.2.0' : 'zals-v0.2.0');
+});
 
 test('PR-head helper reads version from the candidate, not the workflow checkout', async () => {
   const calls = [];
