@@ -97,12 +97,13 @@ Use **Google release-please** to drive releases from
   `kksat/tap`). `HOMEBREW_TAP_TOKEN` is required; `HOMEBREW_TAP_REPO` can override
   the repository. An already-current formula is a no-op.
 
-The current baseline is **0.1.0**: `version.txt`,
-`.release-please-manifest.json`, `src/main.zig`, `build.zig.zon`, and
-`python/pyproject.toml`, `editors/vscode/package.json`, and the extension
-lockfile all read `0.1.0`. The initial `v0.1.0` tag is pushed once by hand,
-then the release workflow is dispatched with that tag; subsequent releases
-flow through release-please.
+The **initial** baseline was `0.1.0`, established across `version.txt`,
+`.release-please-manifest.json`, `src/main.zig`, `build.zig.zon`,
+`python/pyproject.toml`, and the VS Code manifest/lockfile. Those files continue
+to advance in lockstep; the initial baseline is not a current-version lookup.
+The initial `v0.1.0` tag was pushed by hand and the release workflow dispatched
+with that tag; subsequent releases flow through release-please. Use live release
+metadata and current references when selecting a new notes boundary.
 
 ## Consequences
 
