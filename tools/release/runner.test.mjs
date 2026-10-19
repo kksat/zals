@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
-import { Errors, Manifest, setLogger, VERSION } from 'release-please';
+import { Errors, GitHub, Manifest, setLogger, VERSION } from 'release-please';
 import { Simple } from 'release-please/build/src/strategies/simple.js';
 import { buildStrategy } from 'release-please/build/src/factory.js';
 import { parseConventionalCommits } from 'release-please/build/src/commit.js';
@@ -20,7 +20,18 @@ function candidate(overrides = {}) {
 
 function fixture(candidates = [candidate()]) {
   const mutations = [];
+  const tags = new Map();
   const github = {
+    octokit: { git: {
+      async getRef({ ref }) {
+        if (!tags.has(ref)) throw Object.assign(new Error('Not found'), { status: 404 });
+        return { data: { object: { type: 'commit', sha: tags.get(ref) } } };
+      },
+      async createRef({ ref, sha }) {
+        tags.set(ref.replace(/^refs\//, ''), sha);
+        mutations.push(['tag', sha]);
+      },
+    } },
     repository: { owner: 'kksat', repo: 'zals', defaultBranch: 'main' },
     async createRelease(release, options) {
       // Simulate the first upstream mutation, including forceTag's tag creation.
@@ -60,7 +71,7 @@ test('preflights every candidate before any upstream mutation', async () => {
   assert.deepEqual(mutations, []);
 });
 
-test('initial create receives exact approved notes and unchanged upstream options/candidate', async () => {
+test('initial create receives exact notes/options and candidate; gate owns atomic tag claim', async () => {
   const release = candidate({ draft: false, prerelease: false });
   const { github, manifest, mutations } = fixture([release]);
   const originalCreate = github.createRelease;
@@ -78,7 +89,8 @@ test('initial create receives exact approved notes and unchanged upstream option
   const created = mutations.find(([kind]) => kind === 'release');
   assert.equal(created[1].notes, approved);
   assert.deepEqual({ ...created[1], notes: release.notes }, release);
-  assert.deepEqual(created[2], { draft: false, prerelease: false, forceTag: true });
+  assert.deepEqual(created[2], { draft: false, prerelease: false, forceTag: false });
+  assert.equal(mutations.filter(([kind]) => kind === 'tag').length, 1);
   assert.equal(release.notes, 'technical commit list');
   assert.equal(result[0].notes, approved);
   assert.equal(validations, 1);
@@ -127,10 +139,168 @@ test('helper failure cannot fall back to technical notes', async () => {
 
 test('existing-release duplicate handling remains upstream and does not rewrite its body', async () => {
   const { github, manifest, mutations } = fixture();
+  github.octokit.git.getRef = async () => ({ data: { object: { type: 'commit', sha } } });
   github.createRelease = async () => { throw new Errors.DuplicateReleaseError(new Error('exists'), 'tagName'); };
   installReleaseNotesGate(github, manifest, async () => approved);
   await assert.rejects(manifest.createReleases(), Errors.DuplicateReleaseError);
   assert.deepEqual(mutations.map(([kind]) => kind), ['removeLabels', 'addLabels']);
+});
+
+// Real pinned GitHub.createRelease + Manifest; only REST is fake. GitHub ignores
+// target_commitish for existing tags, so recording the actual tag is essential.
+async function upstreamTagFixture({ target = null, annotated = false, race, forceTag = false,
+  refError, tagError, claimError, raceAnnotated = false } = {}) {
+  const calls = [];
+  let object = target && { type: annotated ? 'tag' : 'commit', sha: annotated ? 'c'.repeat(40) : target };
+  const tagObjects = new Map([
+    ['c'.repeat(40), { type: 'tag', sha: 'd'.repeat(40) }],
+    ['d'.repeat(40), { type: 'commit', sha: race ?? target }],
+  ]);
+  const octokit = {
+    git: {
+      async getRef(args) {
+        calls.push(['getRef', args]);
+        if (refError) throw Object.assign(new Error('Ref read failed'), { status: refError });
+        if (!object) throw Object.assign(new Error('Not found'), { status: 404 });
+        return { data: { object } };
+      },
+      async getTag({ tag_sha }) {
+        calls.push(['getTag', tag_sha]);
+        if (tagError) throw Object.assign(new Error('Tag read failed'), { status: tagError });
+        return { data: { object: tagObjects.get(tag_sha) } };
+      },
+      async createRef(args) {
+        calls.push(['createRef', args]);
+        if (claimError) throw Object.assign(new Error('Claim failed'), { status: claimError });
+        if (race) {
+          object = { type: raceAnnotated ? 'tag' : 'commit', sha: raceAnnotated ? 'c'.repeat(40) : race };
+          throw Object.assign(new Error('Reference already exists'), { status: 422 });
+        }
+        assert.equal(object, null, 'must not blindly repeat upstream forceTag ref creation');
+        object = { type: 'commit', sha: args.sha };
+        return { data: { object } };
+      },
+    },
+    repos: { async createRelease(args) {
+      let actual = object;
+      while (actual?.type === 'tag') actual = tagObjects.get(actual.sha);
+      calls.push(['release', { ...args, actualTagTarget: actual?.sha }]);
+      return { data: { id: 1, tag_name: args.tag_name, target_commitish: args.target_commitish,
+        body: args.body, html_url: 'https://example.test/release', upload_url: 'https://example.test/upload' } };
+    } },
+    issues: {
+      async createComment() { calls.push(['comment']); return { data: {} }; },
+      async removeLabel() { calls.push(['removeLabel']); return { data: {} }; },
+      async addLabels() { calls.push(['addLabels']); return { data: {} }; },
+    },
+  };
+  const github = await GitHub.create({ owner: 'kksat', repo: 'zals', defaultBranch: 'main',
+    octokitAPIs: { octokit, request: async () => assert.fail('unexpected network request'),
+      graphql: async () => assert.fail('unexpected graphql') } });
+  const manifest = new Manifest(github, 'main', { '.': { releaseType: 'simple' } },
+    { '.': Version.parse('0.1.0') }, { sequentialCalls: true });
+  manifest.buildReleases = async () => [candidate({ forceTag })];
+  installReleaseNotesGate(github, manifest, async () => approved);
+  return { github, manifest, calls, setTarget: value => { object = { type: 'commit', sha: value }; } };
+}
+
+for (const forceTag of [false, true]) {
+  for (const annotated of [false, true]) {
+    test(`real upstream rejects mismatched existing tag; forceTag=${forceTag}, annotated=${annotated}`, async () => {
+      const { manifest, calls } = await upstreamTagFixture({ target: 'b'.repeat(40), forceTag, annotated });
+      await assert.rejects(manifest.createReleases(), /must resolve to approved candidate/);
+      assert.ok(!calls.some(([kind]) => ['createRef', 'release', 'comment', 'removeLabel', 'addLabels'].includes(kind)));
+      if (annotated) assert.equal(calls.filter(([kind]) => kind === 'getTag').length, 2);
+    });
+    test(`real upstream accepts matching peeled tag without changing it; forceTag=${forceTag}, annotated=${annotated}`, async () => {
+      const { manifest, calls } = await upstreamTagFixture({ target: sha, forceTag, annotated });
+      const releases = await manifest.createReleases();
+      assert.equal(releases[0].tagName, 'v0.2.0');
+      assert.ok(!calls.some(([kind]) => kind === 'createRef'));
+      assert.equal(calls.find(([kind]) => kind === 'release')[1].actualTagTarget, sha);
+      assert.equal(calls.find(([kind]) => kind === 'release')[1].body, approved);
+      assert.deepEqual(calls.filter(([kind]) => ['comment', 'removeLabel', 'addLabels'].includes(kind))
+        .map(([kind]) => kind), ['comment', 'removeLabel', 'addLabels']);
+    });
+  }
+  for (const race of [undefined, sha, 'b'.repeat(40)]) {
+    test(`real upstream atomically claims absent ref and checks 422 race; forceTag=${forceTag}, race=${race}`, async () => {
+      const { manifest, calls } = await upstreamTagFixture({ forceTag, race });
+      if (race && race !== sha) {
+        await assert.rejects(manifest.createReleases(), /must resolve to approved candidate/);
+        assert.ok(!calls.some(([kind]) => ['release', 'comment', 'removeLabel', 'addLabels'].includes(kind)));
+      } else {
+        await manifest.createReleases();
+        assert.equal(calls.find(([kind]) => kind === 'release')[1].actualTagTarget, sha);
+      }
+      const claims = calls.filter(([kind]) => kind === 'createRef');
+      assert.equal(claims.length, 1);
+      assert.deepEqual(claims[0][1], { owner: 'kksat', repo: 'zals', ref: 'refs/tags/v0.2.0', sha });
+    });
+  }
+}
+
+for (const race of [sha, 'b'.repeat(40)]) {
+  test(`422 race re-peels an annotated competing tag: ${race}`, async () => {
+    const { manifest, calls } = await upstreamTagFixture({ race, raceAnnotated: true });
+    if (race === sha) await manifest.createReleases();
+    else await assert.rejects(manifest.createReleases(), /must resolve to approved candidate/);
+    assert.ok(calls.some(([kind]) => kind === 'getTag'));
+    assert.equal(calls.some(([kind]) => kind === 'release'), race === sha);
+  });
+}
+
+test('final delegate guard rejects a ref changed after the atomic claim was verified', async () => {
+  const { github, manifest, calls, setTarget } = await upstreamTagFixture();
+  const getRef = github.octokit.git.getRef;
+  let reads = 0;
+  github.octokit.git.getRef = async args => {
+    if (++reads === 4) setTarget('b'.repeat(40));
+    return getRef(args);
+  };
+  await assert.rejects(manifest.createReleases(), /must resolve to approved candidate/);
+  assert.ok(calls.some(([kind]) => kind === 'createRef'));
+  assert.ok(!calls.some(([kind]) => kind === 'release'));
+});
+
+for (const refError of [401, 403, 422, 500]) {
+  test(`tag GET ${refError} is not treated as absence`, async () => {
+    const { manifest, calls } = await upstreamTagFixture({ refError });
+    await assert.rejects(manifest.createReleases(), /Ref read failed/);
+    assert.ok(!calls.some(([kind]) => ['createRef', 'release'].includes(kind)));
+  });
+}
+
+for (const options of [{ target: sha, annotated: true, tagError: 404 },
+  { claimError: 422 }, { claimError: 403 }, { claimError: 500 }]) {
+  test(`broken annotation or unsuccessful atomic claim fails closed: ${JSON.stringify(options)}`, async () => {
+    const { manifest, calls } = await upstreamTagFixture(options);
+    await assert.rejects(manifest.createReleases());
+    assert.ok(!calls.some(([kind]) => ['release', 'comment', 'removeLabel', 'addLabels'].includes(kind)));
+  });
+}
+
+test('tag is checked again at actual delegate even after approved preflight', async () => {
+  const { github, manifest, calls, setTarget } = await upstreamTagFixture({ target: sha });
+  const [release] = await manifest.buildReleases();
+  setTarget('b'.repeat(40));
+  await assert.rejects(github.createRelease(release, {}), /must resolve to approved candidate/);
+  assert.ok(!calls.some(([kind]) => kind === 'release'));
+});
+
+test('all existing tags preflight before claiming the first absent candidate tag', async () => {
+  const { github, manifest, calls } = await upstreamTagFixture();
+  const build = manifest.buildReleases;
+  // Build two candidates through the gate, with the second tag already wrong.
+  const second = candidate({ tag: TagName.parse('v0.3.0') });
+  manifest.buildReleases = async () => [...await build(), second];
+  const underlying = github.octokit.git.getRef;
+  github.octokit.git.getRef = async args => args.ref === 'tags/v0.3.0'
+    ? { data: { object: { type: 'commit', sha: 'b'.repeat(40) } } } : underlying(args);
+  // Reinstall around the extended build so all tags are still preflighted.
+  installReleaseNotesGate(github, manifest, async () => approved);
+  await assert.rejects(manifest.createReleases(), /must resolve to approved candidate/);
+  assert.ok(!calls.some(([kind]) => ['createRef', 'release'].includes(kind)));
 });
 
 for (const releases of [[], [undefined], [{ path: '.', tagName: 'v0.2.0' }]]) {
