@@ -28,8 +28,10 @@ def require(condition: bool, message: str) -> None:
 
 
 def tag_version(tag: str) -> str:
-    require(re.fullmatch(r"v\d+\.\d+\.\d+", tag) is not None, f"Invalid release tag: {tag}")
-    return tag[1:]
+    # Accept the component-prefixed tag already created by release-please.
+    match = re.fullmatch(r"(?:zals-)?v(\d+\.\d+\.\d+)", tag)
+    require(match is not None, f"Invalid release tag: {tag}")
+    return match[1]
 
 
 def verify_versions(root: Path, tag: str) -> None:

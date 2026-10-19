@@ -210,11 +210,23 @@ gh workflow run release.yml --ref main -f tag=v0.1.0
 ```
 
 Build and asset verification jobs check out the requested tag, not the moving
-branch tip; publishing tools come from the workflow revision. The workflow
+branch tip; verification and publishing tools come from the workflow revision. The workflow
 rejects mismatched source versions and verifies the complete asset set,
 platform metadata, and identical bundled binaries before creating or updating
 the GitHub release. Packaging must succeed for every platform before any assets
 are published. The initial baseline is `0.1.0`.
+
+The workflow also accepts the existing component-prefixed `zals-v0.2.0` tag;
+package versions and asset filenames still use `0.2.0`. Once the workflow fix
+is merged, retry that failed release without moving its tag:
+
+```sh
+gh workflow run release.yml --ref main -f tag=zals-v0.2.0 \
+  -f publish_vscode=true -f vscode_auth=pat -f publish_openvsx=true
+```
+
+Do not set `publish_existing=true` for this recovery: the failed validation
+published no assets. Future release-please tags use `vX.Y.Z` explicitly.
 
 To publish the existing verified GitHub release to PyPI and `kksat/tap` without
 rebuilding or replacing its assets:
