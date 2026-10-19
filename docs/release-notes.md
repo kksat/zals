@@ -280,33 +280,38 @@ been visible. Packaging reuses that same section and never appends automatically
 generated notes. Root/editor equality makes the narrative part of the tagged
 source and VSIX; exact Marketplace/Open VSX presentation depends on the registry.
 
-The `release-notes` workflow's job display name is **`approved curated release
-notes`**. Require its actual status context on release-please PRs through GitHub
-branch protection/rulesets. A maintainer must enable it for the default branch
-in repository settings, with required checks and the intended review policy.
-This is **external setup**, not something committing workflows or invoking the
-skill automatically enables. Verify a test release PR is blocked while notes
-are missing/stale; do not assume a green workflow means branch protection is
-configured.
+Require the commit-status context **`approved curated release notes`** on
+release-please PRs through GitHub branch protection/rulesets. The automatic
+release runner validates each release PR candidate and posts pending, then
+success/failure directly on that **exact PR head SHA**, using this context.
+This avoids relying on ordinary PR workflow events that GitHub can suppress for
+PRs created or refreshed using `GITHUB_TOKEN`.
 
-GitHub can suppress ordinary PR workflow events for PRs created or refreshed
-using `GITHUB_TOKEN`. To request a read-only check of the current release PR
-head manually, a maintainer can run (this is an operator action, not an action
-the authoring skill performs):
+A maintainer must enable that context for the default branch in repository
+settings, with required checks and the intended review policy. This is
+**external setup**, not something committing workflows or invoking the skill
+automatically enables. Verify a test release PR is blocked while notes are
+missing/stale; do not assume a green workflow means protection is configured.
+
+To revalidate the current release PR head manually, a maintainer can run
+(this is an operator action, not an action the authoring skill performs):
 
 ```sh
 gh workflow run release-notes.yml --ref main -f pull_request=NUMBER
 ```
 
-Rerun after relevant changes. A manual workflow run validates the selected PR
-head, but its check suite may be associated with the workflow ref rather than
-the PR head. Confirm the required context actually reports on the final PR head;
-a successful dispatch alone does not prove branch protection is satisfied.
-Do not bypass required checks to compensate for suppressed events. A missing or
-old status is not approval. The pre-tag gate runs again in the release path even
-when branch settings are absent, bypassed, or stale. Manual new-release paths
-also validate notes before creating/updating a release; existing-release retries
-take the retry path instead.
+The manual workflow also posts the same required commit-status context directly
+on the selected **PR head SHA** after validation. Its workflow check suite may
+be attached to `main`, but the explicit head-status step makes the readiness
+result available to PR branch protection. Inspect that status on the final PR
+head, rather than treating the workflow run's own check suite as the required
+context. Rerun if relevant changes or a new head make the earlier result stale;
+a missing or old status is not approval. Do not bypass required checks.
+
+The pre-tag gate independently runs again in the release path even when branch
+settings are absent, bypassed, or stale. Manual new-release paths also validate
+notes before creating/updating a release; existing-release retries take the
+retry path instead.
 
 Published history is immutable here: do not rewrite a released root section,
 GitHub narrative, tag, or packaged changelog to make a correction. Describe
