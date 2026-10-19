@@ -146,12 +146,19 @@ _Avoid_: parameter, argument, setting, fact
 
 **Variable definition**:
 A site that binds a name to a value for later reference. In scope: top-level
-keys in role `defaults/main.yml` and `vars/main.yml`; `vars:` maps at play,
-block, and task level; `set_fact:` keys; `register:` values; `vars_files:`;
-`include_vars` (without a `name` prefix); `loop_control.loop_var`; `vars_prompt:`
+keys of a Variable file; `vars:` maps at play, block, and task level;
+`set_fact:` keys; `register:` values; `loop_control.loop_var`; `vars_prompt:`
 names; role `meta/main.yml` `argument_specs` options; and role invocation params
 in a playbook's `roles:` entry.
 _Avoid_: definition site, declaration, binding, assignment
+
+**Variable file**:
+A YAML file whose top-level keys Ansible binds as variables: a role's defaults
+or vars file, a file under `group_vars/`, `host_vars/`, or `vars/`, or the
+target of a `vars_files` or `include_vars` load without a `name` prefix.
+Package, collection, tool, and inventory YAML is not a Variable file, even
+though it is a map.
+_Avoid_: vars file target, map-rooted file, data file
 
 **Variable field**:
 A named key within a Variable's structured value, also described by a nested
