@@ -37,6 +37,10 @@ class NotesError(ValueError):
     """A missing or inconsistent release contract; fail closed before publication."""
 
 
+class GitHubNotFound(NotesError):
+    """Only HTTP 404 establishes that a release does not already exist."""
+
+
 def require(condition, message):
     if not condition:
         raise NotesError(message)
@@ -266,7 +270,9 @@ class GitHub:
             with urlopen(request, timeout=30) as response:
                 return json.load(response)
         except HTTPError as error:
-            raise NotesError(f"GitHub approval lookup failed: HTTP {error.code} ({path})") from error
+            kind = GitHubNotFound if error.code == 404 else NotesError
+            error.close()
+            raise kind(f"GitHub approval lookup failed: HTTP {error.code} ({path})") from error
         except URLError as error:
             raise NotesError(f"GitHub approval lookup failed: {error.reason}") from error
 
@@ -279,6 +285,20 @@ class GitHub:
             if len(items) < 100:
                 return result
         raise NotesError("GitHub response exceeds safe pagination limit")
+
+
+def publication_state(github, version, body):
+    """Existing prose is immutable, even during asset rebuild/recovery runs."""
+    version_tuple(version)
+    tag = f"v{version}"
+    try:
+        release = github.get(f"/releases/tags/{tag}")
+    except GitHubNotFound:
+        return False
+    require(release.get("tag_name") == tag, "Target release identity is inconsistent")
+    require((release.get("body") or "").strip() == body.strip(),
+            "Existing release prose differs from approved notes; corrections belong in the next release")
+    return True
 
 
 def verify_approval(repo, ref, version, github):
@@ -339,6 +359,7 @@ def verify_approval(repo, ref, version, github):
     previous = github.get(f"/releases/tags/{metadata['previous_tag']}")
     require(previous.get("tag_name") == metadata["previous_tag"] and not previous.get("draft")
             and previous.get("published_at"), "Previous tag is not a published GitHub release")
+    publication_state(github, metadata["version"], body)
     return body
 
 
@@ -394,6 +415,7 @@ def main():
         command.add_argument("--version")
         if name == "verify":
             command.add_argument("--github-repository", required=True)
+            command.add_argument("--github-output", help="Append release_exists for asset-only/create-only CI routing")
     command = commands.add_parser("retry", help="Validate an immutable existing-release retry")
     command.add_argument("--tag", required=True)
     command.add_argument("--github-repository", required=True)
@@ -409,7 +431,14 @@ def main():
             check(repo, args.ref, args.version)
             print("Release notes match the candidate", file=sys.stderr)
         elif args.command == "verify":
-            print(verify_approval(repo, args.ref, args.version, GitHub(args.github_repository)), end="")
+            github = GitHub(args.github_repository)
+            body = verify_approval(repo, args.ref, args.version, github)
+            if args.github_output:
+                version = args.version or repo.read(args.ref, "version.txt").decode().strip()
+                exists = publication_state(github, version, body)
+                with open(args.github_output, "a", encoding="utf-8") as output:
+                    output.write(f"release_exists={str(exists).lower()}\n")
+            print(body, end="")
         elif args.command == "body":
             version = args.version or repo.read(args.ref, "version.txt").decode().strip()
             print(release_body(repo.read(args.ref, PUBLIC).decode(), version), end="")

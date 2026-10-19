@@ -2,6 +2,7 @@
 
 import copy
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -34,6 +35,7 @@ class FakeGitHub:
                          "commit_id": fixture.notes_commit}]
         self.release = {"tag_name": "v0.1.0", "draft": False,
                         "published_at": "2026-10-01T00:00:00Z", "body": "Legacy notes"}
+        self.target_release = None
         self.calls = []
 
     def pages(self, path):
@@ -54,7 +56,12 @@ class FakeGitHub:
             filename = path[len("/contents/"):].split("?", 1)[0]
             return {"sha": self.fixture.blob(filename, self.pr["head"]["sha"])}
         if path.startswith("/releases/tags/"):
-            return self.release
+            tag = path[len("/releases/tags/"):]
+            if tag == self.release["tag_name"]:
+                return self.release
+            if self.target_release and tag == self.target_release["tag_name"]:
+                return self.target_release
+            raise NOTES.GitHubNotFound(f"No fixture release {tag}")
         raise AssertionError(path)
 
 
@@ -313,6 +320,27 @@ class ReleaseNotesTest(unittest.TestCase):
         self.github.pr["merge_commit_sha"] = merge_commit
         self.assertEqual(self.verify(), self.body)
 
+    def test_new_and_rebuilt_releases_cannot_rewrite_differing_existing_prose(self):
+        self.github.target_release = {"tag_name": "v0.2.0", "draft": False,
+                                      "published_at": "2026-10-02T00:00:00Z", "body": "Published different prose"}
+        with self.assertRaisesRegex(NOTES.NotesError, "corrections belong"):
+            self.verify()
+        self.github.target_release["body"] = self.body
+        self.assertEqual(self.verify(), self.body)
+
+    def test_cli_publication_state_is_explicit_without_polluting_the_body(self):
+        output = self.root / "github-output"
+        arguments = ["notes.py", "--repo", str(self.root), "verify", "--version", "0.2.0",
+                     "--github-repository", self.github.repository, "--github-output", str(output)]
+        for exists in (False, True):
+            if exists:
+                self.github.target_release = {"tag_name": "v0.2.0", "body": self.body}
+            with patch.object(NOTES, "GitHub", return_value=self.github), patch("sys.argv", arguments), \
+                    patch("sys.stdout", new_callable=io.StringIO) as stdout:
+                self.assertEqual(NOTES.main(), 0)
+                self.assertEqual(stdout.getvalue(), self.body)
+        self.assertEqual(output.read_text(), "release_exists=false\nrelease_exists=true\n")
+
     def test_previous_tag_must_actually_be_a_published_release(self):
         self.github.release["draft"] = True
         with self.assertRaisesRegex(NOTES.NotesError, "published"):
@@ -445,6 +473,18 @@ class GitHubReadOnlyTest(unittest.TestCase):
         with patch.object(github, "get", return_value=[{}] * 100):
             with self.assertRaisesRegex(NOTES.NotesError, "pagination"):
                 github.pages("/pulls/7/reviews")
+
+    def test_only_http_404_means_release_absent(self):
+        with patch.dict(os.environ, {"GH_TOKEN": "test-token"}):
+            github = NOTES.GitHub("example/zals")
+        for code in (404, 403, 500):
+            error = NOTES.HTTPError("https://api.github.com/test", code, "test", {}, None)
+            with self.subTest(code=code), patch.object(NOTES, "urlopen", side_effect=error):
+                if code == 404:
+                    self.assertFalse(NOTES.publication_state(github, "0.2.0", "approved"))
+                else:
+                    with self.assertRaisesRegex(NOTES.NotesError, str(code)):
+                        NOTES.publication_state(github, "0.2.0", "approved")
 
     def test_api_is_read_only_and_network_failure_is_not_approval(self):
         with patch.dict(os.environ, {"GH_TOKEN": "test-token"}):
