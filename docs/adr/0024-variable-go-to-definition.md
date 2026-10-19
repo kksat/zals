@@ -5,7 +5,8 @@
 - **Supersedes:** —
 - **Superseded by:** in part by ADR-0031 (parse cache), ADR-0032 (search boundary),
   [ADR-0036](0036-variable-navigation-from-bindings.md) (binding-key trigger),
-  [ADR-0041](0041-field-name-navigation.md) (separate field-name navigation)
+  [ADR-0041](0041-field-name-navigation.md) (separate field-name navigation),
+  [ADR-0045](0045-variable-files.md) (which files are `vars_files`/`include_vars` targets)
 
 ## Context
 

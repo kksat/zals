@@ -49,6 +49,7 @@ Each ADR captures one decision, its context, and its consequences. Statuses are
 | [0042](0042-passed-role-field-navigation.md) | Passed role-field navigation | Accepted |
 | [0043](0043-custom-readiness-without-refresh.md) | Custom readiness without configuration refresh | Accepted |
 | [0044](0044-user-facing-release-notes.md) | User-facing release notes | Accepted |
+| [0045](0045-variable-files.md) | Variable files | Accepted |
 
 ## Template
 

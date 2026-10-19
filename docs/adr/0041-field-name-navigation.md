@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-02
 - **Supersedes:** the attribute exclusion in [ADR-0024](0024-variable-go-to-definition.md) and [ADR-0025](0025-variable-references.md)
+- **Superseded by:** in part by [ADR-0045](0045-variable-files.md) (the metadata exclusion is now the Variable file rule shared with root variables)
 
 Fields are navigation names distinct from root variables. Ordinary field
 navigation matches the leaf name throughout the owning Workspace, irrespective
@@ -16,7 +17,8 @@ variable-value bindings, including dictionaries inside lists. List elements do
 not add a path component. Nested argument-spec `options:` declare schema fields;
 properties such as `type`, `description`, and `default` are not themselves field
 definitions. Package and execution-environment metadata maps are not variable
-values. A field retains its root-and-key path even though ordinary matching uses
+values; [ADR-0045](0045-variable-files.md) generalizes this to every file that
+is not a Variable file. A field retains its root-and-key path even though ordinary matching uses
 only its leaf name. Reserved data keys inside a bound value do not establish
 another binding scope; module argument values are not variable bindings.
 
