@@ -22,6 +22,9 @@ python/dist/
 python/wheelhouse/
 python/src/*.egg-info/
 
+# Release runner dependencies
+tools/release/node_modules/
+
 # VS Code extension build artifacts
 editors/vscode/node_modules/
 editors/vscode/dist/
