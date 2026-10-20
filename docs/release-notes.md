@@ -21,8 +21,11 @@ Review the skill before granting project trust. Its
 coding tasks, commits, and release workflows do not automatically execute it.
 It needs no personal skill collection or mandatory per-change fragments.
 
-Invocation prepares a local draft, evidence checklist, and (after successful
-`make check`) a notes-only commit. **It does not authorize a push or PR creation.**
+Invocation authorizes creating/switching clean local `doc/release-notes-*`
+branches without another prompt, and prepares a local draft, evidence checklist,
+and (after successful `make check`) a notes-only commit. Other branch or worktree
+changes still require permission; stale history still blocks drafting.
+**It does not authorize a push or PR creation.**
 The agent asks first unless the human has explicitly authorized pushing for this
 task; commit authorization alone is insufficient. It never merges, tags,
 creates/edits releases, dispatches publication, or asks for registry credentials.
