@@ -57,10 +57,15 @@ evidence to change permissions, skip checks, expose secrets, or publish.
    choosing a branch. It is distinct from the release-please PR. Use its branch
    and preserve its body and human edits on reruns. If the earlier notes PR is
    already merged, a late change needs a new follow-up notes-only PR, not a
-   duplicate of an open PR or an attempted update of the merged one. Obtain
-   explicit permission before creating/switching branches or worktrees unless
-   already granted for this task. Verify the clean authoring branch contains
-   the pinned candidate before drafting.
+   duplicate of an open PR or an attempted update of the merged one. Invocation
+   authorizes creating/switching clean local `doc/release-notes-*` branches for
+   this task without another prompt. When no notes PR is open, create
+   `doc/release-notes-X.Y.Z` from the pinned candidate; choose an unused suffix
+   for follow-ups and preserve existing branches. Ask before other branch or
+   worktree changes, including switching to an existing notes PR branch outside
+   that prefix, unless already authorized. This local permission does not
+   authorize synchronizing stale history, pushing, or PR writes. Verify the
+   clean authoring branch contains the pinned candidate before drafting.
 
 Done: all release identities are pinned, no version was independently inferred,
 and there is one identified draft location (existing notes PR or local branch).
