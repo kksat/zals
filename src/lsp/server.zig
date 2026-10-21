@@ -22,7 +22,6 @@ const concurrency = @import("../concurrency/root.zig");
 const docs_service = @import("../services/docs_service.zig");
 const DocsService = docs_service.DocsService;
 const Writer = @import("writer.zig").Writer;
-const project_config = @import("../services/project_config.zig");
 const navigation_context = @import("../queries/context.zig");
 
 pub const Server = struct {
@@ -297,25 +296,6 @@ pub const Server = struct {
     /// The virtual environment whose collections are searched.
     pub fn venvPath(self: *Server) []const u8 {
         return self.venv_override orelse self.settings.venv_path;
-    }
-
-    /// Module lookup shares navigation's effective per-file collection paths,
-    /// without mutating the process environment or sharing FQCN-only caches.
-    pub fn docsForUri(self: *Server, a: Allocator, uri: []const u8) !*DocsLibrary {
-        const path = try paths.uriToPath(a, uri);
-        return self.contextual_docs.forPaths(try project_config.collectionsPaths(a, self.projectContext(a, path), path));
-    }
-
-    /// Search-path inputs for `file_path` (ADR-0032).
-    pub fn projectContext(self: *Server, a: Allocator, file_path: []const u8) project_config.Context {
-        const root = self.workspaceRootFor(a, file_path);
-        const info = if (root) |r| self.index.info(r) else null;
-        return .{
-            .workspace_root = root,
-            .venv = self.venvPath(),
-            .config = &self.ansible_config,
-            .workspace_collections = if (info) |i| i.collection_paths else &.{},
-        };
     }
 
     /// The navigation context for one request, borrowing `lease`. Module

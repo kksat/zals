@@ -32,9 +32,9 @@ pub fn handleRequest(self: *Server, a: Allocator, id: Value, method: []const u8,
     var context = try self.navigationContext(a, &lease);
 
     if (std.mem.eql(u8, method, "textDocument/completion"))
-        return self.sendResult(a, id, try completionResult(self, &context, params));
+        return self.sendResult(a, id, try completionResult(&context, params));
     if (std.mem.eql(u8, method, "completionItem/resolve"))
-        return self.sendResult(a, id, try resolveResult(self, a, params));
+        return self.sendResult(a, id, try resolveResult(self, &context, params));
     if (std.mem.eql(u8, method, "textDocument/hover"))
         return self.sendResult(a, id, try navigation.result(&context, .hover, params));
     if (std.mem.eql(u8, method, "textDocument/definition"))
@@ -44,7 +44,7 @@ pub fn handleRequest(self: *Server, a: Allocator, id: Value, method: []const u8,
     if (std.mem.eql(u8, method, "textDocument/references"))
         return self.sendResult(a, id, try navigation.result(&context, .references, params));
     if (std.mem.eql(u8, method, "textDocument/semanticTokens/full"))
-        return self.sendResult(a, id, try semanticResult(self, a, params));
+        return self.sendResult(a, id, try semanticResult(&context, params));
     if (std.mem.eql(u8, method, "textDocument/documentSymbol"))
         return self.sendResult(a, id, try providers.document_symbols.documentSymbol(self, a, params));
     if (std.mem.eql(u8, method, "workspace/symbol"))
@@ -91,17 +91,17 @@ pub fn handleNotification(self: *Server, a: Allocator, method: []const u8, param
     // Unknown notifications are ignored, per the LSP spec.
 }
 
-fn documentByUri(self: *Server, params: Value) ?*Document {
+fn documentByUri(context: *const Context, params: Value) ?*Document {
     const td = json_util.field(params, "textDocument") orelse return null;
     const uri = json_util.string(td, "uri") orelse return null;
-    return self.documents.get(uri);
+    return context.document(uri);
 }
 
 fn emptyCompletion(a: Allocator) !Value {
     return encode.completionList(a, .{ .items = &.{} });
 }
 
-fn completionResult(self: *Server, context: *Context, params: Value) !Value {
+fn completionResult(context: *Context, params: Value) !Value {
     const a = context.allocator;
     const loc = navigation.cursorAt(context.session.documents, params) orelse return emptyCompletion(a);
     if (try providers.collections.completion(context, loc.doc, loc.offset)) |items| {
@@ -109,7 +109,7 @@ fn completionResult(self: *Server, context: *Context, params: Value) !Value {
     }
     var opened = cursor.Doc.open(a, loc.doc.bytes()) catch return emptyCompletion(a);
     defer opened.deinit();
-    const lib = try self.docsForUri(a, loc.doc.uri);
+    const lib = try context.docsFor(loc.doc.uri);
     const lookup = cursor.fromLibrary(lib);
     const cur = try opened.at(loc.doc.uri, loc.offset, lookup);
     var result = try encode.completionList(a, try providers.completion.list(a, cur, lookup));
@@ -123,10 +123,11 @@ fn completionResult(self: *Server, context: *Context, params: Value) !Value {
     return result;
 }
 
-fn resolveResult(self: *Server, a: Allocator, params: Value) !Value {
+fn resolveResult(self: *Server, context: *Context, params: Value) !Value {
+    const a = context.allocator;
     const label = json_util.string(params, "label") orelse return params;
     const data = json_util.field(params, "data") orelse Value.null;
-    const lib = if (json_util.string(data, "uri")) |uri| try self.docsForUri(a, uri) else &self.docs;
+    const lib = if (json_util.string(data, "uri")) |uri| try context.docsFor(uri) else &self.docs;
     const extra = providers.completion.resolve(a, label, cursor.fromLibrary(lib));
     var obj = switch (params) {
         .object => |o| o,
@@ -137,9 +138,10 @@ fn resolveResult(self: *Server, a: Allocator, params: Value) !Value {
     return .{ .object = obj };
 }
 
-fn semanticResult(self: *Server, a: Allocator, params: Value) !Value {
-    const doc = documentByUri(self, params) orelse return encode.semanticTokens(a, &.{});
-    const lib = try self.docsForUri(a, doc.uri);
+fn semanticResult(context: *Context, params: Value) !Value {
+    const a = context.allocator;
+    const doc = documentByUri(context, params) orelse return encode.semanticTokens(a, &.{});
+    const lib = try context.docsFor(doc.uri);
     const tokens = try providers.semantic_tokens.collect(a, doc, cursor.fromLibrary(lib));
     return encode.semanticTokens(a, tokens);
 }
