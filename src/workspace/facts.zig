@@ -116,6 +116,13 @@ pub fn extractInWithParser(a: Allocator, parser_allocator: Allocator, root: ?[]c
     return extractDependencyWithParser(a, parser_allocator, root, path, text);
 }
 
+/// Facts for an open document whatever its extension, with load-only
+/// bindings kept separate: the cursor's own file is navigable even when
+/// Workspace discovery would skip it.
+pub fn extractDocumentIn(a: Allocator, root: ?[]const u8, path: []const u8, text: []const u8) !Facts {
+    return extractDependencyWithParser(a, a, root, path, text);
+}
+
 /// Explicit vars-file loads are Ansible data regardless of their extension.
 /// Keep this separate from Workspace discovery so Python DOCUMENTATION and
 /// unrelated JSON files still cannot introduce navigation facts. The result

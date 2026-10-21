@@ -35,18 +35,20 @@ pub const Query = struct {
         return Subject.at(self.context, position);
     }
 
+    /// The subject's occurrence, from its document's facts: the same
+    /// extraction the Workspace overlay uses, so no second parse.
     fn occurrence(self: *Query, subject: *Subject, group: Group) !?variables.Cursor {
-        const a = self.context.allocator;
-        var index = variables.Index.init(a, self.context.source());
         if (group == .field) {
             if (!subject.field_checked) {
-                subject.field = try self.bound(subject, try index.fieldOccurrenceAt(a, subject.doc.uri, subject.offset));
+                const found = if (try self.context.documentFacts(subject.doc.uri)) |facts| view.fieldOccurrenceAt(facts, subject.offset) else null;
+                subject.field = try self.bound(subject, found);
                 subject.field_checked = true;
             }
             return subject.field;
         }
         if (!subject.root_checked) {
-            subject.root = try self.bound(subject, try index.occurrenceAt(a, subject.doc.uri, subject.offset));
+            const found = if (try self.context.documentFacts(subject.doc.uri)) |facts| view.occurrenceAt(facts, subject.offset) else null;
+            subject.root = try self.bound(subject, found);
             subject.root_checked = true;
         }
         return subject.root;

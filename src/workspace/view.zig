@@ -46,6 +46,35 @@ pub const Reachability = struct {
     }
 };
 
+/// The root variable occurrence at `offset` in one file's facts: a binding,
+/// else a read, else a load-only binding the caller must admit (ADR-0045).
+pub fn occurrenceAt(facts: Facts, offset: usize) ?variables.Cursor {
+    for (facts.var_defs) |d| if (d.start <= offset and offset <= d.end) {
+        return .{ .name = d.name, .kind = .definition, .start = d.start, .end = d.end };
+    };
+    for (facts.var_refs) |r| if (r.start <= offset and offset <= r.end) {
+        return .{ .name = r.name, .kind = .reference, .start = r.start, .end = r.end };
+    };
+    for (facts.load_var_defs) |d| if (d.start <= offset and offset <= d.end) {
+        return .{ .name = d.name, .kind = .definition, .start = d.start, .end = d.end, .requires_load = true };
+    };
+    return null;
+}
+
+/// The field occurrence at `offset`, in the separate leaf-name group.
+pub fn fieldOccurrenceAt(facts: Facts, offset: usize) ?variables.Cursor {
+    for (facts.field_defs) |d| if (d.start <= offset and offset <= d.end) {
+        return .{ .name = d.name, .kind = .definition, .start = d.start, .end = d.end };
+    };
+    for (facts.field_refs) |r| if (r.start <= offset and offset <= r.end) {
+        return .{ .name = r.name, .kind = .reference, .start = r.start, .end = r.end };
+    };
+    for (facts.load_field_defs) |d| if (d.start <= offset and offset <= d.end) {
+        return .{ .name = d.name, .kind = .definition, .start = d.start, .end = d.end, .requires_load = true };
+    };
+    return null;
+}
+
 pub fn find(files: []const File, path: []const u8) ?*const File {
     for (files) |*f| if (std.mem.eql(u8, f.path, path)) return f;
     return null;
@@ -432,4 +461,27 @@ test "a task file outside a role reaches the playbooks that include it" {
     const defs = try definitions(a, &files, "user", reach);
     try testing.expectEqual(@as(usize, 1), defs.len);
     try testing.expect(defs[0].reachable);
+}
+
+test "occurrence at an offset: bindings, reads, then load-only bindings" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const play = "- hosts: all\n  vars:\n    app: {port: 1}\n  tasks:\n    - debug: msg=\"{{ app.port }}\"\n";
+    const facts = try facts_mod.extract(a, "/w/site.yml", play);
+    const read = occurrenceAt(facts, std.mem.indexOf(u8, play, "{{ app").? + 3).?;
+    try testing.expectEqualStrings("app", read.name);
+    try testing.expectEqual(variables.OccurrenceKind.reference, read.kind);
+    const binding = occurrenceAt(facts, std.mem.indexOf(u8, play, "app:").?).?;
+    try testing.expectEqual(variables.OccurrenceKind.definition, binding.kind);
+    const field = fieldOccurrenceAt(facts, std.mem.indexOf(u8, play, "port }}").?).?;
+    try testing.expectEqualStrings("port", field.name);
+    try testing.expectEqual(variables.OccurrenceKind.reference, field.kind);
+    try testing.expect(occurrenceAt(facts, std.mem.indexOf(u8, play, "hosts").?) == null);
+
+    // A map-rooted file outside Variable-file locations binds only when loaded.
+    const general = try facts_mod.extract(a, "/w/settings.yml", "channel: stable\n");
+    const loaded = occurrenceAt(general, 0).?;
+    try testing.expectEqualStrings("channel", loaded.name);
+    try testing.expect(loaded.requires_load);
 }
