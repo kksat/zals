@@ -105,11 +105,11 @@ pub const Context = struct {
     line_indices: std.StringHashMap(LineIndex),
     /// Per root: open documents that belong to it, by path.
     open: std.StringHashMap(*std.StringHashMap(*Document)),
-    /// Facts of open documents, by path.
-    open_facts: std.StringHashMap(OpenFacts),
+    /// Facts extracted in this request, by path.
+    facts_memo: std.StringHashMap(Extracted),
     workspaces: std.StringHashMap(*Workspace),
 
-    const OpenFacts = struct { root: []const u8, facts: facts_mod.Facts };
+    const Extracted = struct { root: ?[]const u8, facts: facts_mod.Facts };
 
     pub fn init(a: Allocator, lease: *const WorkspaceIndex.QueryLease, session: Session) Context {
         std.debug.assert(lease.index != null);
@@ -123,7 +123,7 @@ pub const Context = struct {
             .texts = std.StringHashMap(?[]const u8).init(a),
             .line_indices = std.StringHashMap(LineIndex).init(a),
             .open = std.StringHashMap(*std.StringHashMap(*Document)).init(a),
-            .open_facts = std.StringHashMap(OpenFacts).init(a),
+            .facts_memo = std.StringHashMap(Extracted).init(a),
             .workspaces = std.StringHashMap(*Workspace).init(a),
         };
     }
@@ -246,12 +246,31 @@ pub const Context = struct {
 
     /// An open document's facts, extracted once per request.
     fn openFile(self: *Context, root: []const u8, path: []const u8, doc: *Document) !File {
-        if (self.open_facts.get(path)) |cached| {
-            if (std.mem.eql(u8, cached.root, root)) return .{ .path = path, .uri = doc.uri, .facts = cached.facts };
+        return (try self.extracted(root, path, doc.uri)) orelse unreachable;
+    }
+
+    /// The facts of the file at `path` under `root`, from `text(uri)` and
+    /// extracted at most once per request. Null when the file has no text.
+    fn extracted(self: *Context, root: ?[]const u8, path: []const u8, uri: []const u8) !?File {
+        if (self.facts_memo.get(path)) |cached| {
+            if (sameRoot(cached.root, root)) return .{ .path = path, .uri = uri, .facts = cached.facts };
         }
-        const extracted = try facts_mod.extractIn(self.allocator, root, path, doc.bytes());
-        try self.open_facts.put(path, .{ .root = root, .facts = extracted });
-        return .{ .path = path, .uri = doc.uri, .facts = extracted };
+        const body = (try self.text(uri)) orelse return null;
+        const found = try facts_mod.extractIn(self.allocator, root, path, body);
+        try self.facts_memo.put(path, .{ .root = root, .facts = found });
+        return .{ .path = path, .uri = uri, .facts = found };
+    }
+
+    /// Facts of the open document at `uri`, as the index would record them:
+    /// load-only bindings stay separate. Shared with the Workspace overlay.
+    pub fn documentFacts(self: *Context, uri: []const u8) !?facts_mod.Facts {
+        const doc = self.document(uri) orelse return null;
+        const path = try self.pathOf(uri);
+        const root = self.workspaceRoot(path);
+        if (discover.isAnsibleFile(std.fs.path.basename(path))) {
+            return ((try self.extracted(root, path, uri)) orelse return null).facts;
+        }
+        return try facts_mod.extractDocumentIn(self.allocator, root, path, doc.bytes());
     }
 
     /// Paths whose definitions can apply in the file at `path` (Reachable
@@ -451,6 +470,11 @@ fn roleRefResolvesTo(base: roles.Resolver, file_path: []const u8, ref: facts_mod
         if (std.mem.eql(u8, dir, target)) return true;
     }
     return false;
+}
+
+fn sameRoot(x: ?[]const u8, y: ?[]const u8) bool {
+    if (x == null or y == null) return x == null and y == null;
+    return std.mem.eql(u8, x.?, y.?);
 }
 
 fn isBelow(path: []const u8, dir: []const u8) bool {
