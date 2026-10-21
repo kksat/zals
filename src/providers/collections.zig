@@ -3,10 +3,9 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const Value = std.json.Value;
 const types = @import("../lsp/types.zig");
 const Server = @import("../lsp/server.zig").Server;
-const util = @import("util.zig");
+const Document = @import("../workspace/document.zig").Document;
 const yaml = @import("../yaml/root.zig");
 const paths = @import("../paths.zig");
 const project_config = @import("../services/project_config.zig");
@@ -16,11 +15,12 @@ const collection_query = @import("../queries/collection_navigation.zig");
 
 /// Completion at a site that lists collections: every Workspace and
 /// Installed collection. Null when the cursor is not at such a site.
-pub fn completion(self: *Server, a: Allocator, params: Value) !?[]const types.CompletionItem {
-    var cur = util.parseAt(self, a, params) orelse return null;
-    defer cur.forest.deinit();
-    const path = try paths.uriToPath(a, cur.doc.uri);
-    if (!isListingSite(cur.path, path)) return null;
+pub fn completion(self: *Server, a: Allocator, doc: *const Document, offset: usize) !?[]const types.CompletionItem {
+    var forest = yaml.parse(a, doc.bytes()) catch return null;
+    defer forest.deinit();
+    const cursor_path: []*yaml.Node = (forest.pathAt(offset, true) catch null) orelse &.{};
+    const path = try paths.uriToPath(a, doc.uri);
+    if (!isListingSite(cursor_path, path)) return null;
 
     var seen = std.StringHashMap(void).init(a);
     var items = std.array_list.Managed(types.CompletionItem).init(a);

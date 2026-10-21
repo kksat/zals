@@ -2,53 +2,17 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const Value = std.json.Value;
-const json_util = @import("../lsp/json_util.zig");
 const types = @import("../lsp/types.zig");
 const Server = @import("../lsp/server.zig").Server;
-const Document = @import("../workspace/document.zig").Document;
 const yaml = @import("../yaml/root.zig");
 const roles = @import("../roles/root.zig");
 const paths = @import("../paths.zig");
 const project_config = @import("../services/project_config.zig");
 
-pub const Cursor = struct {
-    doc: *Document,
-    offset: usize,
-    forest: yaml.Forest,
-    path: []*yaml.Node,
-};
-
-pub fn cursorAt(self: *Server, params: Value) ?struct { doc: *Document, offset: usize } {
-    const td = json_util.field(params, "textDocument") orelse return null;
-    const uri = json_util.string(td, "uri") orelse return null;
-    const pos_v = json_util.field(params, "position") orelse return null;
-    const pos = json_util.position(pos_v) orelse return null;
-    const doc = self.documents.get(uri) orelse return null;
-    const offset = doc.offsetAt(pos) orelse return null;
-    return .{ .doc = doc, .offset = offset };
-}
-
-pub fn parseAt(self: *Server, a: Allocator, params: Value) ?Cursor {
-    const loc = cursorAt(self, params) orelse return null;
-    var forest = yaml.parse(a, loc.doc.bytes()) catch return null;
-    const found: []*yaml.Node = (forest.pathAt(loc.offset, true) catch null) orelse &.{};
-    return .{ .doc = loc.doc, .offset = loc.offset, .forest = forest, .path = found };
-}
-
 pub fn currentKey(path: []*yaml.Node) ?[]const u8 {
     if (path.len == 0) return null;
     const n = path[path.len - 1];
     return n.stringValue();
-}
-
-pub fn leafPair(path: []*yaml.Node) ?*yaml.Node {
-    var i = path.len;
-    while (i > 0) {
-        i -= 1;
-        if (path[i].isPair()) return path[i];
-    }
-    return null;
 }
 
 /// Build a `Location` pointing at the start of `path` (ADR-0009).

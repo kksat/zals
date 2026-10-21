@@ -99,8 +99,8 @@ fn emptyCompletion(a: Allocator) !Value {
 }
 
 fn completionResult(self: *Server, a: Allocator, params: Value) !Value {
-    const loc = providers.util.cursorAt(self, params) orelse return emptyCompletion(a);
-    if (try providers.collections.completion(self, a, params)) |items| {
+    const loc = navigation.cursorAt(&self.documents, params) orelse return emptyCompletion(a);
+    if (try providers.collections.completion(self, a, loc.doc, loc.offset)) |items| {
         return encode.completionList(a, .{ .items = items });
     }
     var opened = cursor.Doc.open(a, loc.doc.bytes()) catch return emptyCompletion(a);
