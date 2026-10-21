@@ -73,8 +73,9 @@ it in this list.
 
 | Layer | Responsibility |
 | --- | --- |
-| `src/lsp/` | JSON-RPC framing, message types, capability negotiation, dispatch |
-| `src/providers/` | One module per LSP feature (semantic tokens, hover, completion, definition, references, document symbols, code actions, validation) |
+| `src/lsp/` | JSON-RPC framing, message types, capability negotiation, dispatch, and the navigation protocol adapter (definition, implementation, references, hover) |
+| `src/providers/` | One module per remaining LSP feature (semantic tokens, completion, document symbols, Workspace symbols, code actions, validation) |
+| `src/queries/` | Typed semantic navigation over the request-scoped navigation context (`context.zig`): Workspace files with open documents winning, text, locations, role resolution |
 | `src/variables/` | Jinja scanning, definition-site detection, role/playbook scope, the variable index |
 | `src/roles/` | Role reference detection, name-to-directory resolution, navigation targets |
 | `src/services/` | Docs library, schema cache/service/validator, validation manager, config |
