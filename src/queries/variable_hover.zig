@@ -6,8 +6,8 @@ const Allocator = std.mem.Allocator;
 const yaml = @import("../yaml/root.zig");
 const variables = @import("../variables/root.zig");
 const paths = @import("../paths.zig");
-const wv = @import("workspace_view.zig");
-const descriptions = @import("../queries/binding_descriptions.zig");
+const wv = @import("../providers/workspace_view.zig");
+const descriptions = @import("binding_descriptions.zig");
 const Facts = @import("../workspace/facts.zig").Facts;
 
 const max_listed = 20;
