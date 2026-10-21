@@ -5,7 +5,8 @@ const variables = @import("cases/variables.zig");
 const role_parameters = @import("cases/role_parameters.zig");
 const fields = @import("cases/fields.zig");
 const field_parameters = @import("cases/field_parameters.zig");
+const variable_files = @import("cases/variable_files.zig");
 
 /// Statically enumerated navigation contracts. No expected target is
 /// discovered from the Workspace or from a previous zals response.
-pub const all = roles.all ++ collections.all ++ files.all ++ variables.all ++ role_parameters.all ++ fields.all ++ field_parameters.all;
+pub const all = roles.all ++ collections.all ++ files.all ++ variables.all ++ role_parameters.all ++ fields.all ++ field_parameters.all ++ variable_files.all;

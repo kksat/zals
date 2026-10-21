@@ -1,2 +1,5 @@
 ---
 plugin_routing: disabled
+release_window:
+  opens: monday
+  image: example/app:candidate

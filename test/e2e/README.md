@@ -7,7 +7,7 @@ source files with
 their unchanged on-disk contents. It does not install collections, copy the
 fixture, run Ansible, send edits, or test file watching.
 
-Cases live in `cases/{roles,collections,files,variables,role_parameters,fields,field_parameters}.zig`. Each named case
+Cases live in `cases/{roles,collections,files,variables,role_parameters,fields,field_parameters,variable_files}.zig`. Each named case
 spells out its full expected locations. `cursor(path, "...<selected>...")`
 selects a unique source snippet; `span(...)` marks a unique expected range;
 `fileStart(path)` expects the zero-width range at the start of a file. Markers
@@ -28,8 +28,11 @@ explicit origin; a role or entry-point context does not narrow root references.
 Field cases exercise both declaration modes and ordered definition/implementation
 plus hover from every read, concrete key, and nested schema key in a small group.
 Schema-only, metadata, unbound, and same-named-root cases are deliberate controls.
-Variable-file cases check that package, execution-environment, Compose, and
-Molecule maps bind nothing, while a loaded file outside `vars/` still does.
+Variable-file cases (`cases/variable_files.zig`, ADR-0045) check that package,
+requirements, collection runtime, execution-environment, Compose, Molecule,
+mkdocs, changelog, inventory, and Role template maps bind no root variables or
+fields and are not navigation subjects. Loaded `vars_files`/`include_vars`
+targets outside `vars/` and unloaded `group_vars/`/`host_vars/` files still bind.
 Escaped YAML keys retain quote-free source ranges. Reserved data keys such as
 `vars` do not introduce duplicate bindings; task-vars, vars-file, set-fact,
 and passed-role values exercise all actions, with module-argument negatives.
@@ -54,6 +57,7 @@ files on disk.
 | `field-lexical-boundaries-e2e` | `test/field_lexical_boundaries_e2e.zig` | Raw literals, field-assignment targets, genuine RHS/capture reads, whitespace markers |
 | `field-parameter-edits-e2e` | `test/field_parameter_edits_e2e.zig` | Changed full-path contracts/values, complete Workspace references, and callee vars-load overlays |
 | `role-parameter-edits-e2e` | `test/role_parameter_edits_e2e.zig` | Unsaved argument-spec ranges and hover |
+| `variable-file-edits-e2e` | `test/variable_file_edits_e2e.zig` | Unsaved vars loads added or removed, and callee loads from the index or a buffer, decide which files bind (ADR-0045) |
 | `collection-symbols-e2e` | `test/collection_symbols_e2e.zig` | Collection layouts, member symbols, open buffers, and watcher boundaries |
 | `navigation-uris-e2e` | `test/navigation_uris_e2e.zig` | Absolute and escaped targets from relative/absolute search paths |
 | `selected-venv-e2e` | `test/selected_venv_e2e.zig` | Selected installations, per-file module docs, discovery, and cache isolation |

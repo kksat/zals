@@ -148,6 +148,12 @@ pub fn build(b: *std.Build) void {
             .inputs = &.{ "test/fixtures/e2e-workspace", "test/dependencies" },
         },
         .{
+            .name = "variable-file-edits-e2e",
+            .source = "test/variable_file_edits_e2e.zig",
+            .description = "Run Variable-file classification tests over unsaved vars loads",
+            .inputs = &.{ "test/fixtures/e2e-workspace", "test/dependencies" },
+        },
+        .{
             .name = "role-parameter-edits-e2e",
             .source = "test/role_parameter_edits_e2e.zig",
             .description = "Run unsaved role argument-spec navigation tests",
