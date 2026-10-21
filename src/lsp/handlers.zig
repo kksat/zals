@@ -7,6 +7,7 @@ const json_util = @import("json_util.zig");
 const encode = @import("encode.zig");
 const capabilities = @import("capabilities.zig");
 const sync = @import("sync.zig");
+const navigation = @import("navigation.zig");
 const Server = @import("server.zig").Server;
 const Document = @import("../workspace/document.zig").Document;
 const providers = @import("../providers/root.zig");
@@ -32,13 +33,13 @@ pub fn handleRequest(self: *Server, a: Allocator, id: Value, method: []const u8,
     if (std.mem.eql(u8, method, "completionItem/resolve"))
         return self.sendResult(a, id, try resolveResult(self, a, params));
     if (std.mem.eql(u8, method, "textDocument/hover"))
-        return self.sendResult(a, id, try hoverResult(self, a, params));
+        return self.sendResult(a, id, try navigation.result(self, a, .hover, params));
     if (std.mem.eql(u8, method, "textDocument/definition"))
-        return self.sendResult(a, id, try definitionResult(self, a, params));
+        return self.sendResult(a, id, try navigation.result(self, a, .definition, params));
     if (std.mem.eql(u8, method, "textDocument/implementation"))
-        return self.sendResult(a, id, try implementationResult(self, a, params));
+        return self.sendResult(a, id, try navigation.result(self, a, .implementation, params));
     if (std.mem.eql(u8, method, "textDocument/references"))
-        return self.sendResult(a, id, try referencesResult(self, a, params));
+        return self.sendResult(a, id, try navigation.result(self, a, .references, params));
     if (std.mem.eql(u8, method, "textDocument/semanticTokens/full"))
         return self.sendResult(a, id, try semanticResult(self, a, params));
     if (std.mem.eql(u8, method, "textDocument/documentSymbol"))
@@ -87,16 +88,6 @@ pub fn handleNotification(self: *Server, a: Allocator, method: []const u8, param
     // Unknown notifications are ignored, per the LSP spec.
 }
 
-fn documentOffset(self: *Server, params: Value) ?struct { doc: *Document, offset: usize } {
-    const td = json_util.field(params, "textDocument") orelse return null;
-    const uri = json_util.string(td, "uri") orelse return null;
-    const pos_v = json_util.field(params, "position") orelse return null;
-    const pos = json_util.position(pos_v) orelse return null;
-    const doc = self.documents.get(uri) orelse return null;
-    const offset = doc.offsetAt(pos) orelse return null;
-    return .{ .doc = doc, .offset = offset };
-}
-
 fn documentByUri(self: *Server, params: Value) ?*Document {
     const td = json_util.field(params, "textDocument") orelse return null;
     const uri = json_util.string(td, "uri") orelse return null;
@@ -108,7 +99,7 @@ fn emptyCompletion(a: Allocator) !Value {
 }
 
 fn completionResult(self: *Server, a: Allocator, params: Value) !Value {
-    const loc = documentOffset(self, params) orelse return emptyCompletion(a);
+    const loc = providers.util.cursorAt(self, params) orelse return emptyCompletion(a);
     if (try providers.collections.completion(self, a, params)) |items| {
         return encode.completionList(a, .{ .items = items });
     }
@@ -140,34 +131,6 @@ fn resolveResult(self: *Server, a: Allocator, params: Value) !Value {
     if (extra.detail) |d| try obj.put("detail", json_util.str(d));
     if (extra.documentation) |doc| try obj.put("documentation", try encode.markup(a, doc));
     return .{ .object = obj };
-}
-
-fn hoverResult(self: *Server, a: Allocator, params: Value) !Value {
-    const loc = documentOffset(self, params) orelse return Value.null;
-    var navigation = @import("../queries/navigation.zig").Query.init(self, a);
-    defer navigation.deinit();
-    var subject = navigation.subjectAt(.{ .uri = loc.doc.uri, .offset = loc.offset }) orelse return Value.null;
-    defer subject.deinit();
-    return encode.hover(a, try navigation.hover(&subject));
-}
-
-fn definitionResult(self: *Server, a: Allocator, params: Value) !Value {
-    return switch (try providers.definition.definition(self, a, params)) {
-        .none => Value.null,
-        .location => |loc| try encode.location(a, loc),
-        .locations => |locs| try encode.locations(a, locs),
-    };
-}
-
-fn implementationResult(self: *Server, a: Allocator, params: Value) !Value {
-    const locs = (try providers.implementation.implementation(self, a, params)) orelse return Value.null;
-    if (locs.len == 1) return encode.location(a, locs[0]);
-    return encode.locations(a, locs);
-}
-
-fn referencesResult(self: *Server, a: Allocator, params: Value) !Value {
-    const locs = (try providers.references.references(self, a, params)) orelse return Value.null;
-    return encode.locations(a, locs);
 }
 
 fn semanticResult(self: *Server, a: Allocator, params: Value) !Value {
