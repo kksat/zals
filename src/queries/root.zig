@@ -10,6 +10,8 @@ pub const binding_descriptions = @import("binding_descriptions.zig");
 pub const role_navigation = @import("role_navigation.zig");
 pub const collection_navigation = @import("collection_navigation.zig");
 pub const file_navigation = @import("file_navigation.zig");
+pub const variable_hover = @import("variable_hover.zig");
+pub const cursor_hover = @import("cursor_hover.zig");
 
 test {
     @import("std").testing.refAllDecls(@This());
