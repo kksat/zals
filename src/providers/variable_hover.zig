@@ -3,10 +3,6 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const Value = std.json.Value;
-const types = @import("../lsp/types.zig");
-const Server = @import("../lsp/server.zig").Server;
-const util = @import("util.zig");
 const yaml = @import("../yaml/root.zig");
 const variables = @import("../variables/root.zig");
 const paths = @import("../paths.zig");
@@ -16,24 +12,6 @@ const Facts = @import("../workspace/facts.zig").Facts;
 
 const max_listed = 20;
 const max_value_lines = 12;
-
-const navigation = @import("../queries/variable_navigation.zig");
-
-pub fn hover(self: *Server, a: Allocator, params: Value) !?types.Hover {
-    const loc = util.cursorAt(self, params) orelse return null;
-    var query = navigation.Query.init(self, a);
-    defer query.deinit();
-    var subject = query.subjectAt(.{ .uri = loc.doc.uri, .offset = loc.offset }) orelse return null;
-    defer subject.deinit();
-    return query.rootHover(&subject);
-}
-
-/// Compatibility entry point for a named root hover.
-pub fn hoverName(self: *Server, a: Allocator, uri: []const u8, name: []const u8, range: types.Range) !?types.Hover {
-    var query = navigation.Query.init(self, a);
-    defer query.deinit();
-    return try query.namedRootHover(uri, name, range);
-}
 
 pub const Entry = struct {
     uri: []const u8,

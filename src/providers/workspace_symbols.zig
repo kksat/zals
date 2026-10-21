@@ -11,7 +11,7 @@ const encode = @import("../lsp/encode.zig");
 const Server = @import("../lsp/server.zig").Server;
 const resolve = @import("../roles/resolve.zig");
 const symbols = @import("../workspace/symbols.zig");
-const collections = @import("collections.zig");
+const collections = @import("../queries/collection_navigation.zig");
 const wv = @import("workspace_view.zig");
 
 const max_results = 1000;

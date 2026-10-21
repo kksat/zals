@@ -177,13 +177,6 @@ pub const Query = struct {
         return self.renderBindings(subject.doc.uri, name, range, group, try subject.workspace(self.cache.files.server, self.cache.allocator));
     }
 
-    /// Legacy named-root callers need not have the referencing document open.
-    /// They still cross the same typed search/description implementation.
-    pub fn namedRootHover(self: *Query, uri: []const u8, name: []const u8, range: types.Range) !types.Hover {
-        var view = try workspace.View.forUri(self.cache.files.server, self.cache.allocator, uri);
-        return self.renderBindings(uri, name, range, .root, if (view) |*found| found else null);
-    }
-
     fn renderBindings(self: *Query, uri: []const u8, name: []const u8, range: types.Range, group: Group, view: ?*workspace.View) !types.Hover {
         const a = self.cache.allocator;
         var entries: []const presentation.Entry = &.{};

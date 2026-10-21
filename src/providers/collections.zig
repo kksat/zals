@@ -1,5 +1,5 @@
-//! Collection navigation (ADR-0032): go-to-definition, hover, completion, and
-//! find-references for Collection references.
+//! Collection completion (ADR-0032): every Workspace and Installed
+//! collection at a site that lists collections.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -13,42 +13,6 @@ const project_config = @import("../services/project_config.zig");
 const wv = @import("workspace_view.zig");
 
 const collection_query = @import("../queries/collection_navigation.zig");
-const Subject = @import("../queries/navigation_subject.zig").Subject;
-pub const At = collection_query.At;
-pub const Known = collection_query.Known;
-pub const Definition = collection_query.Definition;
-pub const resolve = collection_query.resolve;
-pub const workspaceCollections = collection_query.workspaceCollections;
-pub const galaxyName = collection_query.galaxyName;
-pub const card = collection_query.card;
-
-pub fn refAt(self: *Server, a: Allocator, params: Value) !?At {
-    const loc = util.cursorAt(self, params) orelse return null;
-    var subject = Subject.at(self, .{ .uri = loc.doc.uri, .offset = loc.offset }) orelse return null;
-    defer subject.deinit();
-    return collection_query.refAt(a, &subject);
-}
-
-pub fn definition(self: *Server, a: Allocator, params: Value) !Definition {
-    const loc = util.cursorAt(self, params) orelse return .skip;
-    var subject = Subject.at(self, .{ .uri = loc.doc.uri, .offset = loc.offset }) orelse return .skip;
-    defer subject.deinit();
-    return collection_query.definition(self, a, &subject);
-}
-
-pub fn hover(self: *Server, a: Allocator, params: Value) !?types.Hover {
-    const loc = util.cursorAt(self, params) orelse return null;
-    var subject = Subject.at(self, .{ .uri = loc.doc.uri, .offset = loc.offset }) orelse return null;
-    defer subject.deinit();
-    return collection_query.hover(self, a, &subject);
-}
-
-pub fn references(self: *Server, a: Allocator, params: Value) !?[]const types.Location {
-    const loc = util.cursorAt(self, params) orelse return null;
-    var subject = Subject.at(self, .{ .uri = loc.doc.uri, .offset = loc.offset }) orelse return null;
-    defer subject.deinit();
-    return collection_query.references(self, a, &subject);
-}
 
 /// Completion at a site that lists collections: every Workspace and
 /// Installed collection. Null when the cursor is not at such a site.
@@ -82,7 +46,7 @@ pub fn completion(self: *Server, a: Allocator, params: Value) !?[]const types.Co
     }
     if (ctx.workspace_root) |root| {
         var v = try wv.View.init(self, a, root);
-        for (try workspaceCollections(a, &v)) |c| {
+        for (try collection_query.workspaceCollections(a, &v)) |c| {
             if (seen.contains(c.name)) continue;
             try seen.put(c.name, {});
             try items.append(.{ .label = c.name, .kind = .module, .detail = c.dir });
@@ -140,5 +104,5 @@ test "listing sites" {
 test "galaxy name" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
-    try testing.expectEqualStrings("acme.web", galaxyName(arena.allocator(), "namespace: acme\nname: web\nversion: 1.0.0\n").?);
+    try testing.expectEqualStrings("acme.web", collection_query.galaxyName(arena.allocator(), "namespace: acme\nname: web\nversion: 1.0.0\n").?);
 }
