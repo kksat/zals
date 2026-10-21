@@ -2,9 +2,9 @@
 //! defaults/vars, files below group_vars/, host_vars/, or vars/, and targets
 //! of a vars load. Package, collection, execution-environment, tool, docs,
 //! changelog, inventory, and template maps in the Workspace spell keys like
-//! these variables and fields, but bind nothing. Every "no binding" answer
-//! below is a regression guard: reverting to "every map-rooted file is a vars
-//! file" adds those keys to the answer.
+//! these variables and fields, but bind nothing. Every case before the
+//! Controls section fails if classification reverts to "every map-rooted file
+//! is a vars file"; the controls pass either way.
 const m = @import("../model.zig");
 
 const play = "playbooks/metadata-names.yml";
@@ -43,13 +43,6 @@ pub const all = [_]m.Case{
         .method = .implementation,
         .from = version_read,
         .expected = &.{m.span(play, "    <version>: 2")},
-    },
-    .{
-        .name = "variable file/metadata-spelled play var: references without declarations",
-        .method = .references,
-        .from = version_read,
-        .include_declaration = false,
-        .expected = &.{m.span(play, "msg: \"{{ <version> }}")},
     },
     .{
         .name = "variable file/metadata-spelled play var: references with declarations exclude metadata maps",
@@ -100,13 +93,6 @@ pub const all = [_]m.Case{
         .expected = &.{m.span(settings, "<plugin_routing>: disabled")},
     },
     .{
-        .name = "variable file/vars_files target outside a vars directory: references without declarations",
-        .method = .references,
-        .from = m.cursor(settings, "<plugin_routing>: disabled"),
-        .include_declaration = false,
-        .expected = &.{m.span(play, "{{ <plugin_routing> }}")},
-    },
-    .{
         .name = "variable file/vars_files target outside a vars directory: references exclude runtime metadata",
         .method = .references,
         .from = m.cursor(settings, "<plugin_routing>: disabled"),
@@ -153,49 +139,7 @@ pub const all = [_]m.Case{
         },
     },
 
-    // group_vars/ and host_vars/ bind without any explicit load.
-    .{
-        .name = "variable file/group_vars: definition without a load",
-        .method = .definition,
-        .from = region_read,
-        .expected = &.{m.span(group_vars, "<deploy_region>: eu-west")},
-    },
-    .{
-        .name = "variable file/group_vars: references with declarations from its key",
-        .method = .references,
-        .from = m.cursor(group_vars, "<deploy_region>: eu-west"),
-        .include_declaration = true,
-        .expected = &.{
-            m.span(play, "{{ <deploy_region> }}"),
-            m.span(group_vars, "<deploy_region>: eu-west"),
-        },
-    },
-    .{
-        .name = "variable file/group_vars: hover shows the value",
-        .method = .hover,
-        .from = region_read,
-        .expected = &.{m.span(play, "{{ <deploy_region> }}")},
-        .markdown_contains = &.{ "**Variable** `deploy_region`", "eu-west" },
-        .markdown_excludes = &.{"No definition found"},
-    },
-    .{
-        .name = "variable file/host_vars: definition without a load",
-        .method = .definition,
-        .from = host_label_read,
-        .expected = &.{m.span(host_vars, "<deploy_host_label>: primary")},
-    },
-    .{
-        .name = "variable file/host_vars: references with declarations",
-        .method = .references,
-        .from = host_label_read,
-        .include_declaration = true,
-        .expected = &.{
-            m.span(play, "{{ <deploy_host_label> }}"),
-            m.span(host_vars, "<deploy_host_label>: primary"),
-        },
-    },
-
-    // Names that only non-Variable files spell as top-level keys are unbound.
+    // Names that only non-Variable files spell as keys are unbound.
     .{
         .name = "variable file/unloaded Molecule platforms: no definition",
         .method = .definition,
@@ -210,17 +154,17 @@ pub const all = [_]m.Case{
         .expected = &.{m.span(play, "{{ <platforms> }}")},
     },
     .{
-        .name = "variable file/inventory group name: no definition",
+        .name = "variable file/inventory group as a field: no definition",
         .method = .definition,
-        .from = m.cursor(play, "{{ <webservers> }}"),
+        .from = m.cursor(play, "{{ groups.<webservers> }}"),
         .expected = &.{},
     },
     .{
-        .name = "variable file/inventory group name: references with declarations",
+        .name = "variable file/inventory group as a field: references with declarations",
         .method = .references,
-        .from = m.cursor(play, "{{ <webservers> }}"),
+        .from = m.cursor(play, "{{ groups.<webservers> }}"),
         .include_declaration = true,
-        .expected = &.{m.span(play, "{{ <webservers> }}")},
+        .expected = &.{m.span(play, "{{ groups.<webservers> }}")},
     },
     .{
         .name = "variable file/mkdocs site_name: no definition",
@@ -251,22 +195,6 @@ pub const all = [_]m.Case{
     },
 
     // Fields exist only below admitted root bindings.
-    .{
-        .name = "variable file/loaded settings field: definition",
-        .method = .definition,
-        .from = opens_read,
-        .expected = &.{m.span(settings, "  <opens>: monday")},
-    },
-    .{
-        .name = "variable file/loaded settings field: references with declarations",
-        .method = .references,
-        .from = opens_read,
-        .include_declaration = true,
-        .expected = &.{
-            m.span(play, "{{ release_window.<opens> }}"),
-            m.span(settings, "  <opens>: monday"),
-        },
-    },
     .{
         .name = "variable file/loaded settings field: definition excludes Compose image",
         .method = .definition,
@@ -349,9 +277,9 @@ pub const all = [_]m.Case{
         .expected = &.{},
     },
     .{
-        .name = "variable file/non-match: execution-environment nested key is not a field",
+        .name = "variable file/non-match: changelog nested key is not a field",
         .method = .references,
-        .from = m.cursor(ee, "  <galaxy>:"),
+        .from = m.cursor(changelog, "      <release_summary>: Initial release."),
         .include_declaration = true,
         .expected = &.{},
     },
@@ -408,5 +336,80 @@ pub const all = [_]m.Case{
         .from = m.cursor(template, "<version>: \"3.8\""),
         .include_declaration = true,
         .expected = &.{},
+    },
+
+    // Controls. These answers were already right before ADR-0045: reads-only
+    // results do not depend on bindings, and group_vars/, host_vars/, and
+    // uncontested loaded keys were bindings. They fail if the Variable-file
+    // allowlist or load resolution becomes too strict.
+    .{
+        .name = "variable file/metadata-spelled play var: references without declarations",
+        .method = .references,
+        .from = version_read,
+        .include_declaration = false,
+        .expected = &.{m.span(play, "msg: \"{{ <version> }}")},
+    },
+    .{
+        .name = "variable file/vars_files target outside a vars directory: references without declarations",
+        .method = .references,
+        .from = m.cursor(settings, "<plugin_routing>: disabled"),
+        .include_declaration = false,
+        .expected = &.{m.span(play, "{{ <plugin_routing> }}")},
+    },
+    .{
+        .name = "variable file/group_vars: definition without a load",
+        .method = .definition,
+        .from = region_read,
+        .expected = &.{m.span(group_vars, "<deploy_region>: eu-west")},
+    },
+    .{
+        .name = "variable file/group_vars: references with declarations from its key",
+        .method = .references,
+        .from = m.cursor(group_vars, "<deploy_region>: eu-west"),
+        .include_declaration = true,
+        .expected = &.{
+            m.span(play, "{{ <deploy_region> }}"),
+            m.span(group_vars, "<deploy_region>: eu-west"),
+        },
+    },
+    .{
+        .name = "variable file/group_vars: hover shows the value",
+        .method = .hover,
+        .from = region_read,
+        .expected = &.{m.span(play, "{{ <deploy_region> }}")},
+        .markdown_contains = &.{ "**Variable** `deploy_region`", "eu-west" },
+        .markdown_excludes = &.{"No definition found"},
+    },
+    .{
+        .name = "variable file/host_vars: definition without a load",
+        .method = .definition,
+        .from = host_label_read,
+        .expected = &.{m.span(host_vars, "<deploy_host_label>: primary")},
+    },
+    .{
+        .name = "variable file/host_vars: references with declarations",
+        .method = .references,
+        .from = host_label_read,
+        .include_declaration = true,
+        .expected = &.{
+            m.span(play, "{{ <deploy_host_label> }}"),
+            m.span(host_vars, "<deploy_host_label>: primary"),
+        },
+    },
+    .{
+        .name = "variable file/loaded settings field: definition",
+        .method = .definition,
+        .from = opens_read,
+        .expected = &.{m.span(settings, "  <opens>: monday")},
+    },
+    .{
+        .name = "variable file/loaded settings field: references with declarations",
+        .method = .references,
+        .from = opens_read,
+        .include_declaration = true,
+        .expected = &.{
+            m.span(play, "{{ release_window.<opens> }}"),
+            m.span(settings, "  <opens>: monday"),
+        },
     },
 };
