@@ -4,6 +4,7 @@
 pub const resolve = @import("resolve.zig");
 pub const reference = @import("reference.zig");
 pub const targets = @import("targets.zig");
+pub const parameters = @import("parameters.zig");
 
 pub const Resolver = resolve.Resolver;
 pub const Reference = reference.Reference;
