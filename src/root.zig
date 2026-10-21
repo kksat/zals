@@ -46,6 +46,7 @@ test {
     _ = @import("workspace/view.zig");
     _ = @import("workspace/settings.zig");
     _ = @import("providers/validation.zig");
+    _ = @import("queries/root.zig");
     _ = @import("cursor.zig");
     _ = @import("lsp/encode.zig");
     _ = @import("yaml/parser.zig");
