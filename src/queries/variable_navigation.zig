@@ -10,7 +10,6 @@ const descriptions = @import("binding_descriptions.zig");
 const parameters = @import("passed_parameters.zig");
 const context_mod = @import("context.zig");
 const Context = context_mod.Context;
-const Workspace = context_mod.Workspace;
 pub const Subject = @import("navigation_subject.zig").Subject;
 pub const Position = @import("navigation_subject.zig").Position;
 pub const Target = enum { definition, implementation };
@@ -88,22 +87,20 @@ pub const Query = struct {
         const context = self.context;
         const a = context.allocator;
         var out = std.array_list.Managed(types.Location).init(a);
-        if (try context.workspaceOf(subject.doc.uri)) |ws| {
-            const reachable = try context.reachableFiles(ws, try context.pathOf(subject.doc.uri));
-            const defs = if (group == .root) try view.definitions(a, ws.files, name, reachable) else try view.fieldDefinitions(a, ws.files, name, reachable);
-            for (defs) |candidate| {
-                if (target == .implementation and candidate.site == .argument_specs) continue;
-                try out.append(try context.location(candidate.uri, candidate.start, candidate.end));
-            }
-        } else {
-            var index = variables.Index.init(a, context.source());
-            const defs = if (group == .root) try index.definitions(a, subject.doc.uri, name) else try index.fieldDefinitions(a, subject.doc.uri, name);
-            for (defs) |candidate| {
-                if (target == .implementation and candidate.site == .argument_specs) continue;
-                try out.append(try context.location(candidate.uri, candidate.start, candidate.end));
-            }
+        for (try self.definitions(subject.doc.uri, name, group)) |candidate| {
+            if (target == .implementation and candidate.site == .argument_specs) continue;
+            try out.append(try context.location(candidate.uri, candidate.start, candidate.end));
         }
         return try out.toOwnedSlice();
+    }
+
+    /// Reachable definitions ranked first, then the rest of the file set.
+    fn definitions(self: *Query, uri: []const u8, name: []const u8, group: Group) ![]view.Occurrence {
+        const context = self.context;
+        const a = context.allocator;
+        const set = try context.searchFiles(uri);
+        const reachable = try context.reachableFiles(set, try context.pathOf(uri));
+        return if (group == .root) try view.definitions(a, set.files, name, reachable) else try view.fieldDefinitions(a, set.files, name, reachable);
     }
 
     /// Passed-key contracts never narrow references: ordinary root name and
@@ -122,32 +119,23 @@ pub const Query = struct {
     fn namedReferences(self: *Query, subject: *Subject, name: []const u8, group: Group, include_declaration: bool) ![]const types.Location {
         const context = self.context;
         const a = context.allocator;
+        const set = try context.searchFiles(subject.doc.uri);
         var out = std.array_list.Managed(types.Location).init(a);
-        if (try context.workspaceOf(subject.doc.uri)) |ws| {
-            if (group == .root) {
-                for (try view.occurrences(a, ws.files, name)) |candidate| {
-                    if (candidate.kind == .definition and !include_declaration) continue;
-                    try out.append(try context.location(candidate.uri, candidate.start, candidate.end));
-                }
-            } else {
-                // Preserve field traversal ordering: declarations, then reads,
-                // per file. The sorted fieldOccurrences helper is NOT equivalent.
-                for (ws.files) |file| {
-                    if (include_declaration) for (file.facts.field_defs) |def| {
-                        if (std.mem.eql(u8, def.name, name)) try out.append(try context.location(file.uri, def.start, def.end));
-                    };
-                    for (file.facts.field_refs) |ref| {
-                        if (std.mem.eql(u8, ref.name, name)) try out.append(try context.location(file.uri, ref.start, ref.end));
-                    }
-                }
-            }
-        } else {
-            var index = variables.Index.init(a, context.source());
-            const occurrences = if (group == .root) try index.occurrences(a, subject.doc.uri, name) else try index.fieldOccurrences(a, subject.doc.uri, name);
-            std.mem.sort(variables.Occurrence, occurrences, {}, lessOccurrence);
-            for (occurrences) |candidate| {
+        if (group == .root) {
+            for (try view.occurrences(a, set.files, name)) |candidate| {
                 if (candidate.kind == .definition and !include_declaration) continue;
                 try out.append(try context.location(candidate.uri, candidate.start, candidate.end));
+            }
+        } else {
+            // Preserve field traversal ordering: declarations, then reads,
+            // per file. The sorted fieldOccurrences helper is NOT equivalent.
+            for (set.files) |file| {
+                if (include_declaration) for (file.facts.field_defs) |def| {
+                    if (std.mem.eql(u8, def.name, name)) try out.append(try context.location(file.uri, def.start, def.end));
+                };
+                for (file.facts.field_refs) |ref| {
+                    if (std.mem.eql(u8, ref.name, name)) try out.append(try context.location(file.uri, ref.start, ref.end));
+                }
             }
         }
         return try out.toOwnedSlice();
@@ -172,33 +160,16 @@ pub const Query = struct {
     }
 
     fn hoverName(self: *Query, subject: *Subject, name: []const u8, range: types.Range, group: Group) !types.Hover {
-        const context = self.context;
-        const a = context.allocator;
-        const uri = subject.doc.uri;
-        var entries: []const presentation.Entry = &.{};
-        var root: ?[]const u8 = null;
-        if (try context.workspaceOf(uri)) |ws| {
-            root = ws.root;
-            const reachable = try context.reachableFiles(ws, try context.pathOf(uri));
-            const defs = if (group == .root) try view.definitions(a, ws.files, name, reachable) else try view.fieldDefinitions(a, ws.files, name, reachable);
-            // Presentation selects the displayed subset before descriptions.
-            entries = try presentation.workspaceEntries(a, &self.cache, defs, ws.files);
-        } else {
-            var index = variables.Index.init(a, context.source());
-            const defs = if (group == .root) try index.definitions(a, uri, name) else try index.fieldDefinitions(a, uri, name);
-            entries = try presentation.fallbackEntries(a, &self.cache, defs);
-        }
+        const a = self.context.allocator;
+        const set = try self.context.searchFiles(subject.doc.uri);
+        const defs = try self.definitions(subject.doc.uri, name, group);
+        // Presentation selects the displayed subset before descriptions.
+        const entries = try presentation.bindingEntries(a, &self.cache, defs, set.files);
+        // Only a Workspace shortens displayed paths.
+        const root = if (set.scope == .workspace) set.root else null;
         const text = if (entries.len == 0)
             if (group == .root) try std.fmt.allocPrint(a, "**Variable** `{s}`\n\nNo definition found in the Workspace.", .{name}) else try std.fmt.allocPrint(a, "**Variable field** `{s}`\n\nNo definition found in the searched files.", .{name})
         else if (group == .root) try presentation.render(a, name, entries, root) else try presentation.renderField(a, name, entries, root);
         return .{ .contents = .{ .kind = .markdown, .value = text }, .range = range };
     }
 };
-
-/// Deterministic fallback ordering: by URI, then byte offset.
-fn lessOccurrence(_: void, x: variables.Occurrence, y: variables.Occurrence) bool {
-    const order = std.mem.order(u8, x.uri, y.uri);
-    if (order == .lt) return true;
-    if (order == .gt) return false;
-    return x.start < y.start;
-}

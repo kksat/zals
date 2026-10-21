@@ -39,7 +39,7 @@ pub fn completion(context: *Context, doc: *const Document, offset: usize) !?[]co
         }
     }
     if (context.workspaceRoot(path)) |root| {
-        for (try context.workspaceCollections(try context.workspace(root))) |c| {
+        for (try context.workspaceCollections(try context.files(.{ .workspace = root }))) |c| {
             if (seen.contains(c.name)) continue;
             try seen.put(c.name, {});
             try items.append(.{ .label = c.name, .kind = .module, .detail = c.dir });
