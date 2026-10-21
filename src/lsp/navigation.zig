@@ -4,14 +4,13 @@
 //! fallbacks live in the query; only JSON and result shapes live here.
 
 const std = @import("std");
-const Allocator = std.mem.Allocator;
 const Value = std.json.Value;
 const json_util = @import("json_util.zig");
 const encode = @import("encode.zig");
-const Server = @import("server.zig").Server;
 const Document = @import("../workspace/document.zig").Document;
 const DocumentStore = @import("../workspace/store.zig").DocumentStore;
 const navigation = @import("../queries/navigation.zig");
+const Context = @import("../queries/context.zig").Context;
 
 /// An open document and the byte offset of a request's LSP position in it.
 pub const Cursor = struct { doc: *Document, offset: usize };
@@ -32,11 +31,11 @@ pub fn cursorAt(documents: *DocumentStore, params: Value) ?Cursor {
 pub const Method = enum { definition, implementation, references, hover };
 
 /// The JSON result of a navigation request. Null when the position is not in
-/// an open document or the cursor is on nothing navigable. Must run while
-/// the handler holds the request's index lease.
-pub fn result(server: *Server, a: Allocator, method: Method, params: Value) !Value {
-    const at = cursorAt(&server.documents, params) orelse return Value.null;
-    var query = navigation.Query.init(server, a);
+/// an open document or the cursor is on nothing navigable.
+pub fn result(context: *Context, method: Method, params: Value) !Value {
+    const a = context.allocator;
+    const at = cursorAt(context.session.documents, params) orelse return Value.null;
+    var query = navigation.Query.init(context);
     defer query.deinit();
     var subject = query.subjectAt(.{ .uri = at.doc.uri, .offset = at.offset }) orelse return Value.null;
     defer subject.deinit();
@@ -52,8 +51,8 @@ pub fn result(server: *Server, a: Allocator, method: Method, params: Value) !Val
             return encode.locations(a, locs);
         },
         .references => {
-            const context = json_util.field(params, "context") orelse Value.null;
-            const include_declaration = json_util.boolean(context, "includeDeclaration") orelse false;
+            const reference_context = json_util.field(params, "context") orelse Value.null;
+            const include_declaration = json_util.boolean(reference_context, "includeDeclaration") orelse false;
             const locs = (try query.references(&subject, include_declaration)) orelse return Value.null;
             return encode.locations(a, locs);
         },

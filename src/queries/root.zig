@@ -1,6 +1,7 @@
 //! Typed semantic navigation over the Workspace (ADR-0032): the queries the
 //! navigation protocol adapter runs. No protocol params here.
 
+pub const context = @import("context.zig");
 pub const navigation = @import("navigation.zig");
 pub const navigation_subject = @import("navigation_subject.zig");
 pub const variable_navigation = @import("variable_navigation.zig");

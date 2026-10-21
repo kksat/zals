@@ -2,30 +2,24 @@
 //! collection at a site that lists collections.
 
 const std = @import("std");
-const Allocator = std.mem.Allocator;
 const types = @import("../lsp/types.zig");
-const Server = @import("../lsp/server.zig").Server;
 const Document = @import("../workspace/document.zig").Document;
 const yaml = @import("../yaml/root.zig");
-const paths = @import("../paths.zig");
-const project_config = @import("../services/project_config.zig");
-const wv = @import("workspace_view.zig");
-
-const collection_query = @import("../queries/collection_navigation.zig");
+const Context = @import("../queries/context.zig").Context;
 
 /// Completion at a site that lists collections: every Workspace and
 /// Installed collection. Null when the cursor is not at such a site.
-pub fn completion(self: *Server, a: Allocator, doc: *const Document, offset: usize) !?[]const types.CompletionItem {
+pub fn completion(context: *Context, doc: *const Document, offset: usize) !?[]const types.CompletionItem {
+    const a = context.allocator;
     var forest = yaml.parse(a, doc.bytes()) catch return null;
     defer forest.deinit();
     const cursor_path: []*yaml.Node = (forest.pathAt(offset, true) catch null) orelse &.{};
-    const path = try paths.uriToPath(a, doc.uri);
+    const path = try context.pathOf(doc.uri);
     if (!isListingSite(cursor_path, path)) return null;
 
     var seen = std.StringHashMap(void).init(a);
     var items = std.array_list.Managed(types.CompletionItem).init(a);
-    const ctx = self.projectContext(a, path);
-    for (try project_config.collectionsPaths(a, ctx, path)) |cp| {
+    for (try context.collectionsPaths(path)) |cp| {
         const base = try std.fs.path.join(a, &.{ cp, "ansible_collections" });
         var nsdir = std.fs.cwd().openDir(base, .{ .iterate = true }) catch continue;
         defer nsdir.close();
@@ -44,9 +38,8 @@ pub fn completion(self: *Server, a: Allocator, doc: *const Document, offset: usi
             }
         }
     }
-    if (ctx.workspace_root) |root| {
-        var v = try wv.View.init(self, a, root);
-        for (try collection_query.workspaceCollections(a, &v)) |c| {
+    if (context.workspaceRoot(path)) |root| {
+        for (try context.workspaceCollections(try context.workspace(root))) |c| {
             if (seen.contains(c.name)) continue;
             try seen.put(c.name, {});
             try items.append(.{ .label = c.name, .kind = .module, .detail = c.dir });
@@ -99,10 +92,4 @@ test "listing sites" {
     try testing.expect(try siteAt("dependencies:\n  comm: '1'\n", "comm", "/w/galaxy.yml"));
     try testing.expect(!try siteAt("dependencies:\n  - comm\n", "comm", "/w/roles/r/meta/main.yml"));
     try testing.expect(!try siteAt("- hosts: all\n  tasks:\n    - debug: msg=comm\n", "comm", "/w/site.yml"));
-}
-
-test "galaxy name" {
-    var arena = std.heap.ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-    try testing.expectEqualStrings("acme.web", collection_query.galaxyName(arena.allocator(), "namespace: acme\nname: web\nversion: 1.0.0\n").?);
 }

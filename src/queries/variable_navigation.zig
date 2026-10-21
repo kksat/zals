@@ -1,30 +1,30 @@
 //! Root and leaf-name field navigation through one request-local search seam.
-//! Owns Workspace/fallback selection, ranking, declarations, callee contracts,
-//! location mapping and revision-safe descriptions. No protocol params here.
+//! Owns Workspace/fallback selection, ranking, declarations, callee contracts
+//! and revision-safe descriptions. No protocol params here.
 const std = @import("std");
-const Allocator = std.mem.Allocator;
 const types = @import("../lsp/types.zig");
-const Server = @import("../lsp/server.zig").Server;
 const variables = @import("../variables/root.zig");
-const paths = @import("../paths.zig");
-const source = @import("../providers/variable_source.zig");
-const workspace = @import("../providers/workspace_view.zig");
+const view = @import("../workspace/view.zig");
 const presentation = @import("variable_hover.zig");
 const descriptions = @import("binding_descriptions.zig");
 const parameters = @import("passed_parameters.zig");
+const context_mod = @import("context.zig");
+const Context = context_mod.Context;
+const Workspace = context_mod.Workspace;
 pub const Subject = @import("navigation_subject.zig").Subject;
 pub const Position = @import("navigation_subject.zig").Position;
 pub const Target = enum { definition, implementation };
 const Group = enum { root, field };
 
-/// Borrows the handler's request lease; owns its source cache until deinit.
-/// Results are request-owned. Description values are normalized/copied before
-/// cache teardown; FileSource reads retain their caller-owned-byte contract.
+/// Borrows the request's navigation context; owns its description cache
+/// until deinit. Results are request-owned. Description values are
+/// normalized/copied before cache teardown.
 pub const Query = struct {
+    context: *Context,
     cache: descriptions.Cache,
 
-    pub fn init(server: *Server, a: Allocator) Query {
-        return .{ .cache = descriptions.Cache.init(server, a) };
+    pub fn init(context: *Context) Query {
+        return .{ .context = context, .cache = descriptions.Cache.init(context) };
     }
 
     pub fn deinit(self: *Query) void {
@@ -32,20 +32,21 @@ pub const Query = struct {
     }
 
     pub fn subjectAt(self: *Query, position: Position) ?Subject {
-        return Subject.at(self.cache.files.server, position);
+        return Subject.at(self.context, position);
     }
 
     fn occurrence(self: *Query, subject: *Subject, group: Group) !?variables.Cursor {
-        var index = variables.Index.init(self.cache.allocator, self.cache.source());
+        const a = self.context.allocator;
+        var index = variables.Index.init(a, self.context.source());
         if (group == .field) {
             if (!subject.field_checked) {
-                subject.field = try self.bound(subject, try index.fieldOccurrenceAt(self.cache.allocator, subject.doc.uri, subject.offset));
+                subject.field = try self.bound(subject, try index.fieldOccurrenceAt(a, subject.doc.uri, subject.offset));
                 subject.field_checked = true;
             }
             return subject.field;
         }
         if (!subject.root_checked) {
-            subject.root = try self.bound(subject, try index.occurrenceAt(self.cache.allocator, subject.doc.uri, subject.offset));
+            subject.root = try self.bound(subject, try index.occurrenceAt(a, subject.doc.uri, subject.offset));
             subject.root_checked = true;
         }
         return subject.root;
@@ -57,9 +58,8 @@ pub const Query = struct {
     fn bound(self: *Query, subject: *Subject, cursor: ?variables.Cursor) !?variables.Cursor {
         const found = cursor orelse return null;
         if (!found.requires_load) return found;
-        const a = self.cache.allocator;
-        const view = (try subject.workspace(self.cache.files.server, a)) orelse return null;
-        return if (view.isLoaded(try paths.uriToPath(a, subject.doc.uri))) found else null;
+        const ws = (try self.context.workspaceOf(subject.doc.uri)) orelse return null;
+        return if (ws.isLoaded(try self.context.pathOf(subject.doc.uri))) found else null;
     }
 
     /// Field before passed root parameter before ordinary root. Null skips;
@@ -78,29 +78,27 @@ pub const Query = struct {
     }
 
     pub fn parameterLocations(self: *Query, subject: *Subject, target: Target, field: bool) !?[]const types.Location {
-        const server = self.cache.files.server;
-        const a = self.cache.allocator;
-        const context = (try parameters.contextAt(server, a, subject, field)) orelse return null;
-        return if (target == .definition) parameters.definition(server, a, context) else try parameters.implementation(server, a, context);
+        const passed = (try parameters.contextAt(self.context, subject, field)) orelse return null;
+        return if (target == .definition) parameters.definition(self.context, passed) else try parameters.implementation(self.context, passed);
     }
 
     fn namedLocations(self: *Query, subject: *Subject, name: []const u8, group: Group, target: Target) ![]const types.Location {
-        const a = self.cache.allocator;
-        const server = self.cache.files.server;
+        const context = self.context;
+        const a = context.allocator;
         var out = std.array_list.Managed(types.Location).init(a);
-        if (try subject.workspace(server, a)) |view| {
-            const reachable = try view.reachableFiles(try paths.uriToPath(a, subject.doc.uri));
-            const defs = if (group == .root) try workspace.view.definitions(a, view.files, name, reachable) else try workspace.view.fieldDefinitions(a, view.files, name, reachable);
+        if (try context.workspaceOf(subject.doc.uri)) |ws| {
+            const reachable = try context.reachableFiles(ws, try context.pathOf(subject.doc.uri));
+            const defs = if (group == .root) try view.definitions(a, ws.files, name, reachable) else try view.fieldDefinitions(a, ws.files, name, reachable);
             for (defs) |candidate| {
                 if (target == .implementation and candidate.site == .argument_specs) continue;
-                try out.append(try view.location(candidate.uri, candidate.start, candidate.end));
+                try out.append(try context.location(candidate.uri, candidate.start, candidate.end));
             }
         } else {
-            var index = variables.Index.init(a, self.cache.source());
+            var index = variables.Index.init(a, context.source());
             const defs = if (group == .root) try index.definitions(a, subject.doc.uri, name) else try index.fieldDefinitions(a, subject.doc.uri, name);
             for (defs) |candidate| {
                 if (target == .implementation and candidate.site == .argument_specs) continue;
-                try out.append(try source.location(a, server, &index, candidate));
+                try out.append(try context.location(candidate.uri, candidate.start, candidate.end));
             }
         }
         return try out.toOwnedSlice();
@@ -120,34 +118,34 @@ pub const Query = struct {
     }
 
     fn namedReferences(self: *Query, subject: *Subject, name: []const u8, group: Group, include_declaration: bool) ![]const types.Location {
-        const a = self.cache.allocator;
-        const server = self.cache.files.server;
+        const context = self.context;
+        const a = context.allocator;
         var out = std.array_list.Managed(types.Location).init(a);
-        if (try subject.workspace(server, a)) |view| {
+        if (try context.workspaceOf(subject.doc.uri)) |ws| {
             if (group == .root) {
-                for (try workspace.view.occurrences(a, view.files, name)) |candidate| {
+                for (try view.occurrences(a, ws.files, name)) |candidate| {
                     if (candidate.kind == .definition and !include_declaration) continue;
-                    try out.append(try view.location(candidate.uri, candidate.start, candidate.end));
+                    try out.append(try context.location(candidate.uri, candidate.start, candidate.end));
                 }
             } else {
                 // Preserve field traversal ordering: declarations, then reads,
                 // per file. The sorted fieldOccurrences helper is NOT equivalent.
-                for (view.files) |file| {
+                for (ws.files) |file| {
                     if (include_declaration) for (file.facts.field_defs) |def| {
-                        if (std.mem.eql(u8, def.name, name)) try out.append(try view.location(file.uri, def.start, def.end));
+                        if (std.mem.eql(u8, def.name, name)) try out.append(try context.location(file.uri, def.start, def.end));
                     };
                     for (file.facts.field_refs) |ref| {
-                        if (std.mem.eql(u8, ref.name, name)) try out.append(try view.location(file.uri, ref.start, ref.end));
+                        if (std.mem.eql(u8, ref.name, name)) try out.append(try context.location(file.uri, ref.start, ref.end));
                     }
                 }
             }
         } else {
-            var index = variables.Index.init(a, self.cache.source());
+            var index = variables.Index.init(a, context.source());
             const occurrences = if (group == .root) try index.occurrences(a, subject.doc.uri, name) else try index.fieldOccurrences(a, subject.doc.uri, name);
-            std.mem.sort(variables.Occurrence, occurrences, {}, source.lessOccurrence);
+            std.mem.sort(variables.Occurrence, occurrences, {}, lessOccurrence);
             for (occurrences) |candidate| {
                 if (candidate.kind == .definition and !include_declaration) continue;
-                try out.append(try source.location(a, server, &index, candidate));
+                try out.append(try context.location(candidate.uri, candidate.start, candidate.end));
             }
         }
         return try out.toOwnedSlice();
@@ -165,30 +163,26 @@ pub const Query = struct {
     }
 
     pub fn parameterHover(self: *Query, subject: *Subject, field: bool) !?types.Hover {
-        const server = self.cache.files.server;
-        const a = self.cache.allocator;
-        const context = (try parameters.contextAt(server, a, subject, field)) orelse return null;
-        if (try parameters.hover(server, a, context)) |result| return result;
+        const passed = (try parameters.contextAt(self.context, subject, field)) orelse return null;
+        if (try parameters.hover(self.context, passed)) |result| return result;
         if (field) return null;
-        return try self.hoverName(subject, context.names[0], context.range, .root);
+        return try self.hoverName(subject, passed.names[0], passed.range, .root);
     }
 
-    pub fn hoverName(self: *Query, subject: *Subject, name: []const u8, range: types.Range, group: Group) !types.Hover {
-        return self.renderBindings(subject.doc.uri, name, range, group, try subject.workspace(self.cache.files.server, self.cache.allocator));
-    }
-
-    fn renderBindings(self: *Query, uri: []const u8, name: []const u8, range: types.Range, group: Group, view: ?*workspace.View) !types.Hover {
-        const a = self.cache.allocator;
+    fn hoverName(self: *Query, subject: *Subject, name: []const u8, range: types.Range, group: Group) !types.Hover {
+        const context = self.context;
+        const a = context.allocator;
+        const uri = subject.doc.uri;
         var entries: []const presentation.Entry = &.{};
         var root: ?[]const u8 = null;
-        if (view) |found| {
-            root = found.root;
-            const reachable = try found.reachableFiles(try paths.uriToPath(a, uri));
-            const defs = if (group == .root) try workspace.view.definitions(a, found.files, name, reachable) else try workspace.view.fieldDefinitions(a, found.files, name, reachable);
+        if (try context.workspaceOf(uri)) |ws| {
+            root = ws.root;
+            const reachable = try context.reachableFiles(ws, try context.pathOf(uri));
+            const defs = if (group == .root) try view.definitions(a, ws.files, name, reachable) else try view.fieldDefinitions(a, ws.files, name, reachable);
             // Presentation selects the displayed subset before descriptions.
-            entries = try presentation.workspaceEntries(a, &self.cache, defs, found.files);
+            entries = try presentation.workspaceEntries(a, &self.cache, defs, ws.files);
         } else {
-            var index = variables.Index.init(a, self.cache.source());
+            var index = variables.Index.init(a, context.source());
             const defs = if (group == .root) try index.definitions(a, uri, name) else try index.fieldDefinitions(a, uri, name);
             entries = try presentation.fallbackEntries(a, &self.cache, defs);
         }
@@ -198,3 +192,11 @@ pub const Query = struct {
         return .{ .contents = .{ .kind = .markdown, .value = text }, .range = range };
     }
 };
+
+/// Deterministic fallback ordering: by URI, then byte offset.
+fn lessOccurrence(_: void, x: variables.Occurrence, y: variables.Occurrence) bool {
+    const order = std.mem.order(u8, x.uri, y.uri);
+    if (order == .lt) return true;
+    if (order == .gt) return false;
+    return x.start < y.start;
+}

@@ -8,11 +8,12 @@ const Value = std.json.Value;
 const json_util = @import("../lsp/json_util.zig");
 const types = @import("../lsp/types.zig");
 const encode = @import("../lsp/encode.zig");
-const Server = @import("../lsp/server.zig").Server;
 const resolve = @import("../roles/resolve.zig");
 const symbols = @import("../workspace/symbols.zig");
-const collections = @import("../queries/collection_navigation.zig");
-const wv = @import("workspace_view.zig");
+const context_mod = @import("../queries/context.zig");
+const Context = context_mod.Context;
+const Workspace = context_mod.Workspace;
+const Known = context_mod.WorkspaceCollection;
 
 const max_results = 1000;
 
@@ -27,23 +28,25 @@ pub const Info = struct {
     container: []const u8 = "",
 };
 
-pub fn workspaceSymbol(self: *Server, a: Allocator, params: Value) !Value {
+pub fn workspaceSymbol(context: *Context, params: Value) !Value {
+    const a = context.allocator;
     const query = json_util.string(params, "query") orelse "";
     var arr = std.json.Array.init(a);
-    for (try self.workspacePaths(a)) |root| {
-        var v = try wv.View.init(self, a, root);
-        for (try collect(a, &v, query)) |info| {
+    for (context.roots()) |root| {
+        const v = try context.workspace(root);
+        for (try collect(context, v, query)) |info| {
             if (arr.items.len >= max_results) break;
-            try arr.append(try toValue(a, &v, info));
+            try arr.append(try toValue(context, info));
         }
     }
     return .{ .array = arr };
 }
 
 /// Workspace symbols matching a name or collection-qualified member query.
-pub fn collect(a: Allocator, v: *wv.View, query: []const u8) ![]const Info {
+pub fn collect(context: *Context, v: *Workspace, query: []const u8) ![]const Info {
+    const a = context.allocator;
     var out = std.array_list.Managed(Info).init(a);
-    const colls = try collections.workspaceCollections(a, v);
+    const colls = try context.workspaceCollections(v);
 
     for (colls) |c| {
         if (!symbols.matches(c.name, query)) continue;
@@ -172,12 +175,12 @@ fn memberMatches(a: Allocator, name: []const u8, container: []const u8, query: [
 }
 
 /// FQCN of the Workspace collection that contains `path`, if any.
-fn collectionOf(colls: []const collections.Known, path: []const u8) ?[]const u8 {
+fn collectionOf(colls: []const Known, path: []const u8) ?[]const u8 {
     return if (collectionAt(colls, path)) |c| c.name else null;
 }
 
-fn collectionAt(colls: []const collections.Known, path: []const u8) ?collections.Known {
-    var best: ?collections.Known = null;
+fn collectionAt(colls: []const Known, path: []const u8) ?Known {
+    var best: ?Known = null;
     for (colls) |c| {
         if (path.len <= c.dir.len or !std.mem.startsWith(u8, path, c.dir) or path[c.dir.len] != '/') continue;
         if (best == null or c.dir.len > best.?.dir.len) best = c;
@@ -190,11 +193,12 @@ fn relative(root: []const u8, path: []const u8) []const u8 {
     return path;
 }
 
-fn toValue(a: Allocator, v: *wv.View, info: Info) !Value {
+fn toValue(context: *Context, info: Info) !Value {
+    const a = context.allocator;
     const loc: types.Location = if (info.whole_file)
         .{ .uri = info.uri, .range = .{ .start = .{ .line = 0, .character = 0 }, .end = .{ .line = 0, .character = 0 } } }
     else
-        try v.location(info.uri, info.start, info.end);
+        try context.location(info.uri, info.start, info.end);
     var obj = json_util.obj(a);
     try obj.put("name", json_util.str(info.name));
     try obj.put("kind", json_util.num(@intFromEnum(info.kind)));

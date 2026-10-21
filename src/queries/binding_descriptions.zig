@@ -1,16 +1,13 @@
 //! Request-local interpretation of binding values. Ranked search and Markdown
-//! display policy stay with callers; source capture, revision checks and YAML
-//! key/value association live here.
+//! display policy stay with callers, and text capture with the navigation
+//! context; revision checks and YAML key/value association live here.
 
 const std = @import("std");
-const Allocator = std.mem.Allocator;
-const Server = @import("../lsp/server.zig").Server;
-const server_source = @import("../providers/variable_source.zig");
-const variables = @import("../variables/root.zig");
+const Context = @import("context.zig").Context;
 const facts_mod = @import("../workspace/facts.zig");
 const yaml = @import("../yaml/root.zig");
 
-/// A byte offset either discovered through this cache's FileSource, or tied to
+/// A byte offset either discovered through the context's FileSource, or tied to
 /// an indexed source revision. Unknown indexed revisions fail closed, not as
 /// offsets into whatever text happens to be on disk now.
 pub const Binding = struct {
@@ -42,14 +39,12 @@ pub const Description = struct {
     value: ?[]const u8 = null,
 };
 
-/// The real open-buffer/filesystem adapter with immutable request-local text
-/// capture and lazy parsing. Use source() for fallback discovery so its offsets
-/// and subsequent descriptions refer to the same bytes. Indexed bindings carry
-/// their own revision proof. This cache only borrows the handler's query lease;
-/// it never acquires a nested lease or retains storage past the request.
+/// Lazy interpretation over the navigation context's request-local text
+/// capture. Offsets discovered through `Context.source()` and descriptions
+/// refer to the same bytes by construction; indexed bindings carry their own
+/// revision proof. The cache never retains storage past the request.
 pub const Cache = struct {
-    allocator: Allocator,
-    files: server_source.ServerSource,
+    context: *Context,
     interpretations: std.StringHashMap(*Interpretation),
 
     const Interpretation = struct {
@@ -60,24 +55,20 @@ pub const Cache = struct {
         forest: ?yaml.Forest = null,
     };
 
-    pub fn init(server: *Server, a: Allocator) Cache {
-        return .{ .allocator = a, .files = .{ .server = server }, .interpretations = std.StringHashMap(*Interpretation).init(a) };
+    pub fn init(context: *Context) Cache {
+        return .{ .context = context, .interpretations = std.StringHashMap(*Interpretation).init(context.allocator) };
     }
 
     pub fn deinit(self: *Cache) void {
+        const a = self.context.allocator;
         var it = self.interpretations.iterator();
         while (it.next()) |item| {
             const file = item.value_ptr.*;
             if (file.forest) |*forest| forest.deinit();
-            if (file.exists) self.allocator.free(file.text);
-            self.allocator.destroy(file);
-            self.allocator.free(item.key_ptr.*);
+            a.destroy(file);
+            a.free(item.key_ptr.*);
         }
         self.interpretations.deinit();
-    }
-
-    pub fn source(self: *Cache) variables.FileSource {
-        return .{ .ptr = self, .vtable = &vtable };
     }
 
     /// Interpret only bindings selected for display. A mismatched source keeps
@@ -94,7 +85,7 @@ pub const Cache = struct {
             file.parsed = true;
             // Parser storage is explicitly released on cache teardown via
             // forest.deinit(), avoiding page_allocator mmap churn.
-            file.forest = yaml.parse(self.allocator, file.text) catch null;
+            file.forest = yaml.parse(self.context.allocator, file.text) catch null;
         }
         if (file.forest) |*forest| {
             for (forest.roots) |root| {
@@ -109,31 +100,16 @@ pub const Cache = struct {
 
     fn capture(self: *Cache, uri: []const u8) !*Interpretation {
         if (self.interpretations.get(uri)) |file| return file;
-        const body = try self.files.source().read(self.allocator, uri);
-        errdefer if (body) |text| self.allocator.free(text);
-        const file = try self.allocator.create(Interpretation);
-        errdefer self.allocator.destroy(file);
+        const a = self.context.allocator;
+        const body = try self.context.text(uri);
+        const file = try a.create(Interpretation);
+        errdefer a.destroy(file);
         file.* = .{ .text = body orelse "", .fingerprint = facts_mod.sourceFingerprint(body orelse ""), .exists = body != null };
-        const key = try self.allocator.dupe(u8, uri);
-        errdefer self.allocator.free(key);
+        const key = try a.dupe(u8, uri);
+        errdefer a.free(key);
         try self.interpretations.put(key, file);
         return file;
     }
-
-    fn read(ptr: *anyopaque, a: Allocator, uri: []const u8) anyerror!?[]const u8 {
-        const self: *Cache = @ptrCast(@alignCast(ptr));
-        const file = try self.capture(uri);
-        // FileSource callers may free returned bytes (notably role metadata
-        // probes), so preserve that ownership contract while reusing the read.
-        return if (file.exists) try a.dupe(u8, file.text) else null;
-    }
-
-    fn listDir(ptr: *anyopaque, a: Allocator, path: []const u8) anyerror![]const variables.DirEntry {
-        const self: *Cache = @ptrCast(@alignCast(ptr));
-        return self.files.source().listDir(a, path);
-    }
-
-    const vtable = variables.FileSource.VTable{ .read = read, .listDir = listDir };
 };
 
 fn pairWithKeyAt(node: *const yaml.Node, start: usize) ?*const yaml.Node {

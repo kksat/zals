@@ -11,7 +11,6 @@ const PositionEncoding = @import("../workspace/document.zig").PositionEncoding;
 const Settings = @import("../workspace/settings.zig").Settings;
 const roots = @import("../workspace/roots.zig");
 const paths = @import("../paths.zig");
-const project_config = @import("../services/project_config.zig");
 const workspace_index = @import("../workspace/index.zig");
 const WorkspaceIndex = workspace_index.WorkspaceIndex;
 const handlers = @import("handlers.zig");
@@ -23,6 +22,8 @@ const concurrency = @import("../concurrency/root.zig");
 const docs_service = @import("../services/docs_service.zig");
 const DocsService = docs_service.DocsService;
 const Writer = @import("writer.zig").Writer;
+const project_config = @import("../services/project_config.zig");
+const navigation_context = @import("../queries/context.zig");
 
 pub const Server = struct {
     allocator: Allocator,
@@ -279,12 +280,6 @@ pub const Server = struct {
         self.index.reindex(root, path);
     }
 
-    /// Entries from the request's leased revision, borrowed through release.
-    /// Index-owned preparation lets nested Workspace views share one revision.
-    pub fn indexEntries(self: *Server, a: Allocator, root: []const u8) ![]const *const workspace_index.Entry {
-        return self.index.entriesOf(a, root);
-    }
-
     /// Session Workspace roots as filesystem paths.
     pub fn workspacePaths(self: *Server, a: Allocator) ![]const []const u8 {
         var list = std.array_list.Managed([]const u8).init(a);
@@ -304,25 +299,8 @@ pub const Server = struct {
         return self.venv_override orelse self.settings.venv_path;
     }
 
-    /// Every `roles/` directory in the request's leased Workspace revision.
-    pub fn workspaceRolesDirs(self: *Server, root: ?[]const u8) []const []const u8 {
-        const r = root orelse return &.{};
-        const info = self.index.info(r) orelse return &.{};
-        return info.roles_dirs;
-    }
-
-    /// Directories in the request's leased Workspace revision that hold
-    /// `ansible_collections/`. Discovery arenas live as long as entry arenas.
-    pub fn workspaceCollectionPaths(self: *Server, root: ?[]const u8) []const []const u8 {
-        const r = root orelse return &.{};
-        const info = self.index.info(r) orelse return &.{};
-        return info.collection_paths;
-    }
-
     /// Module lookup shares navigation's effective per-file collection paths,
     /// without mutating the process environment or sharing FQCN-only caches.
-    /// The paths are already absolute (relative entries keep their server-cwd
-    /// meaning), and `ansible-doc` runs in the server's working directory.
     pub fn docsForUri(self: *Server, a: Allocator, uri: []const u8) !*DocsLibrary {
         const path = try paths.uriToPath(a, uri);
         return self.contextual_docs.forPaths(try project_config.collectionsPaths(a, self.projectContext(a, path), path));
@@ -331,12 +309,32 @@ pub const Server = struct {
     /// Search-path inputs for `file_path` (ADR-0032).
     pub fn projectContext(self: *Server, a: Allocator, file_path: []const u8) project_config.Context {
         const root = self.workspaceRootFor(a, file_path);
+        const info = if (root) |r| self.index.info(r) else null;
         return .{
             .workspace_root = root,
             .venv = self.venvPath(),
             .config = &self.ansible_config,
-            .workspace_collections = self.workspaceCollectionPaths(root),
+            .workspace_collections = if (info) |i| i.collection_paths else &.{},
         };
+    }
+
+    /// The navigation context for one request, borrowing `lease`. Module
+    /// lookup shares navigation's effective per-file collection paths,
+    /// without mutating the process environment or sharing FQCN-only caches.
+    /// The paths are already absolute (relative entries keep their server-cwd
+    /// meaning), and `ansible-doc` runs in the server's working directory.
+    pub fn navigationContext(self: *Server, a: Allocator, lease: *const WorkspaceIndex.QueryLease) !navigation_context.Context {
+        return navigation_context.Context.init(a, lease, .{
+            .documents = &self.documents,
+            .workspaces = .{
+                .roots = try self.workspacePaths(a),
+                .marker = self.settings.root_marker,
+                .venv = self.venvPath(),
+                .ansible_config = &self.ansible_config,
+            },
+            .docs = navigation_context.Docs.contextual(&self.contextual_docs),
+            .encoding = self.encoding,
+        });
     }
 
     /// One session warning when an opened folder has no Workspace.

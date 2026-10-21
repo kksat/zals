@@ -3,8 +3,8 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const types = @import("../lsp/types.zig");
-const Server = @import("../lsp/server.zig").Server;
-const util = @import("../providers/util.zig");
+const context_mod = @import("context.zig");
+const Context = context_mod.Context;
 const yaml = @import("../yaml/root.zig");
 const roles = @import("../roles/root.zig");
 const paths = @import("../paths.zig");
@@ -13,15 +13,15 @@ const RoleRef = @import("../workspace/facts.zig").RoleRef;
 
 /// Every Role reference in the Workspace that can resolve to the same role
 /// directory as the cursor. Null when the cursor is not on a role reference.
-pub fn references(self: *Server, a: Allocator, subject: *Subject) !?[]const types.Location {
+pub fn references(context: *Context, subject: *Subject) !?[]const types.Location {
+    const a = context.allocator;
     const forest = subject.parse(a) orelse return null;
     const ref = roles.reference.detect(subject.path, forest.text) orelse return null;
     const own = types.Location{ .uri = subject.doc.uri, .range = subject.doc.rangeFromOffsets(ref.start, ref.end) };
-    const path = try paths.uriToPath(a, subject.doc.uri);
+    const path = try context.pathOf(subject.doc.uri);
     const declared = try yaml.collections.getRoleDeclaredCollections(forest.allocator(), path, subject.path);
-    const v = (try subject.workspace(self, a)) orelse return try a.dupe(types.Location, &.{own});
-    const ws_collections = try v.workspaceCollections();
-    const targets = util.roleResolverWithCollections(self, a, path, declared, ws_collections).resolveAll(ref.name, path);
+    const v = (try context.workspaceOf(subject.doc.uri)) orelse return try a.dupe(types.Location, &.{own});
+    const targets = context.resolveRoles(ref.name, path, declared);
     // Unresolved references have no identity to share, even with another
     // unresolved occurrence of the same spelling.
     if (targets.len == 0) return try a.dupe(types.Location, &.{own});
@@ -32,11 +32,11 @@ pub fn references(self: *Server, a: Allocator, subject: *Subject) !?[]const type
         if (f.facts.role_refs.len == 0) continue;
         // Build search paths once per file, not per reference. Facts already
         // retain the collections visible at each site from the index/open doc.
-        const resolver = util.roleResolverWithCollections(self, a, f.path, &.{}, ws_collections);
+        const resolver = context.roleResolver(f.path, &.{});
         for (f.facts.role_refs) |r| {
             if (std.mem.eql(u8, f.uri, subject.doc.uri) and r.start == ref.start and r.end == ref.end) continue;
             if (!roleRefMatches(resolver, f.path, r, targets)) continue;
-            try locs.append(try v.location(f.uri, r.start, r.end));
+            try locs.append(try context.location(f.uri, r.start, r.end));
         }
     }
     std.mem.sort(types.Location, locs.items, {}, lessLocation);
@@ -60,18 +60,20 @@ fn overlaps(left: []const []const u8, right: []const []const u8) bool {
 /// Hover on a role reference: the role's `README.md`, else its unrendered
 /// argument specs, else its unrendered `meta/main.yml`, else its name and
 /// resolved path. Null when the cursor is not on a role reference.
-pub fn hover(self: *Server, a: Allocator, subject: *Subject) !?types.Hover {
+pub fn hover(context: *Context, subject: *Subject) !?types.Hover {
+    const a = context.allocator;
     const forest = subject.parse(a) orelse return null;
     const ref = roles.reference.detect(subject.path, forest.text) orelse return null;
     const name = try a.dupe(u8, ref.name);
-    const path = try paths.uriToPath(a, subject.doc.uri);
+    const path = try context.pathOf(subject.doc.uri);
     const collections = yaml.collections.getRoleDeclaredCollections(forest.allocator(), path, subject.path) catch &.{};
     const range = subject.doc.rangeFromOffsets(ref.start, ref.end);
 
-    const dir = resolveRoleForSubject(self, a, subject, name, path, collections) orelse {
+    const all = context.resolveRoles(name, path, collections);
+    if (all.len == 0) {
         return markdown(range, try std.fmt.allocPrint(a, "**Role** `{s}`\n\nNot found on the role search path.", .{name}));
-    };
-    return markdown(range, try roleCard(a, name, dir));
+    }
+    return markdown(range, try roleCard(a, name, all[0]));
 }
 
 /// Markdown for a resolved role directory.
@@ -111,67 +113,43 @@ fn lessLocation(_: void, x: types.Location, y: types.Location) bool {
 
 pub const RoleResult = union(enum) { skip, none, locations: []const types.Location };
 
-fn resolveRoleAllForSubject(
-    self: *Server,
-    a: Allocator,
-    subject: *Subject,
-    name: []const u8,
-    referencing_path: []const u8,
-    declared_collections: []const []const u8,
-) []const []const u8 {
-    if (subject.workspace(self, a) catch null) |v| {
-        const ws_collections = v.workspaceCollections() catch &.{};
-        return util.roleResolverWithCollections(self, a, referencing_path, declared_collections, ws_collections).resolveAll(name, referencing_path);
-    }
-    return util.resolveRoleAll(self, a, name, referencing_path, declared_collections);
-}
-
-fn resolveRoleForSubject(
-    self: *Server,
-    a: Allocator,
-    subject: *Subject,
-    name: []const u8,
-    referencing_path: []const u8,
-    declared_collections: []const []const u8,
-) ?[]const u8 {
-    const all = resolveRoleAllForSubject(self, a, subject, name, referencing_path, declared_collections);
-    return if (all.len > 0) all[0] else null;
-}
-
 /// Jump from a role reference to the role's argument specs, metadata, or main
 /// task file. `.none` stops the chain when the cursor is on a role-name
 /// position but the role cannot be resolved.
-pub fn definition(self: *Server, a: Allocator, subject: *Subject) !RoleResult {
+pub fn definition(context: *Context, subject: *Subject) !RoleResult {
+    const a = context.allocator;
     const forest = subject.parse(a) orelse return .skip;
     const arena = forest.allocator();
     const ref = roles.reference.detect(subject.path, forest.text) orelse return .skip;
-    const path = try paths.uriToPath(a, subject.doc.uri);
+    const path = try context.pathOf(subject.doc.uri);
     const collections = yaml.collections.getRoleDeclaredCollections(arena, path, subject.path) catch &.{};
     var locs = std.array_list.Managed(types.Location).init(a);
-    for (resolveRoleAllForSubject(self, a, subject, ref.name, path, collections)) |dir| {
+    for (context.resolveRoles(ref.name, path, collections)) |dir| {
         const target = roles.targets.definitionTarget(a, dir) orelse continue;
-        try locs.append(try util.fileLocation(a, target));
+        try locs.append(try context_mod.fileLocation(a, target));
     }
     if (locs.items.len == 0) return .none;
     return .{ .locations = try locs.toOwnedSlice() };
 }
 
-pub fn implementation(self: *Server, a: Allocator, subject: *Subject) !?[]const types.Location {
+pub fn implementation(context: *Context, subject: *Subject) !?[]const types.Location {
+    const a = context.allocator;
     const forest = subject.parse(a) orelse return null;
     const arena = forest.allocator();
     const ref = roles.reference.detect(subject.path, forest.text) orelse return null;
-    const path = try paths.uriToPath(a, subject.doc.uri);
+    const path = try context.pathOf(subject.doc.uri);
     const collections = yaml.collections.getRoleDeclaredCollections(arena, path, subject.path) catch &.{};
     var locs = std.array_list.Managed(types.Location).init(a);
-    for (resolveRoleAllForSubject(self, a, subject, ref.name, path, collections)) |dir| {
+    for (context.resolveRoles(ref.name, path, collections)) |dir| {
         const target = roles.targets.implementationTarget(a, dir) orelse continue;
-        try locs.append(try util.fileLocation(a, target));
+        try locs.append(try context_mod.fileLocation(a, target));
     }
     if (locs.items.len == 0) return null;
     return try locs.toOwnedSlice();
 }
 
 const testing = std.testing;
+const Fixture = @import("testing.zig").Fixture;
 
 fn testFacts(a: Allocator, path: []const u8, text: []const u8) ![]const RoleRef {
     return (try @import("../workspace/facts.zig").extract(a, path, text)).role_refs;
@@ -276,27 +254,29 @@ test "ambiguous fallback matches any shared target, not just first" {
 }
 
 test "unresolved role reference returns only its own location" {
-    var tmp = testing.tmpDir(.{});
-    defer tmp.cleanup();
+    // Without a session Workspace, and inside one where the name resolves
+    // nowhere: an unresolved reference shares no identity with its twin.
+    for ([_]bool{ false, true }) |workspace| {
+        var fixture = try Fixture.init(workspace);
+        defer fixture.deinit();
+        const text = "- hosts: all\n  roles: [missing, missing]\n";
+        try fixture.write("site.yml", text);
+        const uri = try fixture.open("site.yml", text);
+        var context = try fixture.context();
+        var subject = Subject.at(&context, .{ .uri = uri, .offset = Fixture.offsetOf(text, "missing", 1) }).?;
+        defer subject.deinit();
+        const locs = (try references(&context, &subject)).?;
+        try testing.expectEqual(@as(usize, 1), locs.len);
+        try testing.expectEqualStrings(uri, locs[0].uri);
+        try testing.expectEqual(@as(u32, 10), locs[0].range.start.character);
+    }
+    // Even an unresolved candidate may not join a resolved query.
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const root = try tmp.dir.realpathAlloc(a, ".");
-    const path = try std.fs.path.join(a, &.{ root, "site.yml" });
-    const uri = try paths.pathToUri(a, path);
-    var server = try Server.init(testing.allocator, @import("../lsp/transport.zig").Transport.init(std.fs.File.stdin(), std.fs.File.stdout()));
-    defer server.deinit();
-    _ = try server.documents.open(uri, "ansible", 1, "- hosts: all\n  roles: [missing, missing]\n");
-    var subject = Subject.at(&server, .{ .uri = uri, .offset = "- hosts: all\n  roles: [m".len }).?;
-    defer subject.deinit();
-    const locs = (try references(&server, a, &subject)).?;
-    try testing.expectEqual(@as(usize, 1), locs.len);
-    try testing.expectEqualStrings(uri, locs[0].uri);
-    try testing.expectEqual(@as(u32, 10), locs[0].range.start.character);
-    // Even an unresolved candidate may not join a resolved query.
     const base = roles.Resolver{ .allocator = a };
-    const candidate = (try testFacts(a, path, "- hosts: all\n  roles: [missing]\n"))[0];
-    try testing.expect(!roleRefMatches(base, path, candidate, &.{"/some/role"}));
+    const candidate = (try testFacts(a, "/w/site.yml", "- hosts: all\n  roles: [missing]\n"))[0];
+    try testing.expect(!roleRefMatches(base, "/w/site.yml", candidate, &.{"/some/role"}));
 }
 
 test "role card prefers README, then argument specs, then metadata" {
