@@ -185,6 +185,33 @@ outside `vars/`, `group_vars/`, and `host_vars/` is a binding only from the
 playbook whose file set loads it. Nested Workspaces are separate until opened,
 and even then each source searches only its owning Workspace.
 
+### Without a session Workspace
+
+A file that no session Workspace owns is searched with the same rules as a
+Workspace, over a smaller file set:
+
+- **Role scope.** A file inside one of a Role's conventional directories
+  (`tasks/`, `handlers/`, `defaults/`, `vars/`, `meta/`, `templates/`, `files/`,
+  `library/`) belongs to that Role, the directory below `roles/` or holding
+  `meta/main.yml`/`.yaml`; this is the rule the Workspace index uses to
+  classify files. Its file set is the Role's `defaults/`, `vars/`, `tasks/`,
+  `handlers/`, `templates/` and `meta/` files.
+- **Playbook scope.** Any other file, including a playbook elsewhere in a Role
+  directory such as `molecule/` or `tests/`, is its own file set.
+- Either set adds one level of the `vars_files`/`include_vars` targets its
+  files load, and only those targets bind their load-only keys. Without a
+  Workspace, load paths resolve from the loading file and its Role's `vars/`
+  directory, with no Workspace-root fallback.
+- Every definition in the set is reachable. Definitions are ordered by
+  precedence, then by file path and position, as in a Workspace. Root-name
+  references are ordered by file path and position; field references list
+  each file's keys, then its reads, with the Role's files in path order
+  followed by the loaded files.
+
+A called Role uses the same Role scope for implementations. When a session
+Workspace owns the Role but has not indexed it yet, its files come from disk
+and their loads resolve against that Workspace's root, as if indexed.
+
 References to roles have a different rule: their possible resolved role
 directories must overlap (ADR-0034). An ambiguous fallback invocation can find
 sites for several roles; a uniquely resolved site can have a narrower answer.
