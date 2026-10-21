@@ -150,7 +150,7 @@ pub fn classify(
         return .{ .role_reference = .{ .name = ref.name, .start = ref.start, .end = ref.end } };
     }
     const fs_path = paths.uriToPath(forest.allocator(), uri) catch return null;
-    if (try variables.Index.occurrenceInForest(forest.allocator(), forest, fs_path, offset)) |occ| {
+    if (try variables.occurrenceInForest(forest.allocator(), forest, fs_path, offset)) |occ| {
         return .{ .variable = .{
             .name = occ.name,
             .kind = occ.kind,

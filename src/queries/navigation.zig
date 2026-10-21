@@ -262,3 +262,132 @@ test "without a session Workspace the playbook is the search boundary" {
     try testing.expectEqual(@as(usize, 1), defs.len);
     try expectAt(defs[0], uri, 2, 4);
 }
+
+// Without a session Workspace the same Facts search runs over the file's Role
+// scope or Playbook scope (ADR-0032).
+
+fn locationsAt(fixture: *Fixture, relative: []const u8, text: []const u8, needle: []const u8, skip: usize, target: variable_query.Target) !?[]const types.Location {
+    const uri = try fixture.open(relative, text);
+    var context = try fixture.context();
+    var query = Query.init(&context);
+    defer query.deinit();
+    var subject = query.subjectAt(.{ .uri = uri, .offset = Fixture.offsetOf(text, needle, skip) }).?;
+    defer subject.deinit();
+    return query.bindings.locations(&subject, target);
+}
+
+test "without a Workspace a Role scope spans its conventional files and ranks them" {
+    var fixture = try Fixture.init(false);
+    defer fixture.deinit();
+    const tasks = "- name: show\n  debug:\n    msg: \"{{ app_name }}\"\n  when: app_name == 'demo'\n";
+    try fixture.write("r/meta/main.yml", "---\n");
+    try fixture.write("r/defaults/main.yml", "app_name: demo\n");
+    try fixture.write("r/vars/main.yml", "app_name: pinned\n");
+    try fixture.write("r/tasks/main.yml", tasks);
+    try fixture.write("r/templates/motd.j2", "Hello {{ app_name }}.\n");
+    // A playbook outside the Role's conventional directories has its own scope.
+    try fixture.write("r/molecule/default/converge.yml", "- hosts: all\n  vars:\n    app_name: molecule\n");
+    const uri = try fixture.open("r/tasks/main.yml", tasks);
+    var context = try fixture.context();
+    var query = Query.init(&context);
+    defer query.deinit();
+    var subject = query.subjectAt(.{ .uri = uri, .offset = Fixture.offsetOf(tasks, "app_name", 0) }).?;
+    defer subject.deinit();
+    const defs = (try query.definition(&subject)).locations;
+    try testing.expectEqual(@as(usize, 2), defs.len);
+    try expectAt(defs[0], try fixture.uri("r/vars/main.yml"), 0, 0); // Role vars, then defaults
+    try expectAt(defs[1], try fixture.uri("r/defaults/main.yml"), 0, 0);
+    try testing.expectEqual(@as(usize, 3), (try query.references(&subject, false)).?.len);
+    try testing.expectEqual(@as(usize, 5), (try query.references(&subject, true)).?.len);
+}
+
+test "without a Workspace a file outside a Role's conventional directories is its own scope" {
+    var fixture = try Fixture.init(false);
+    defer fixture.deinit();
+    const converge = "- hosts: all\n  vars:\n    app_name: molecule\n  tasks:\n    - debug: msg=\"{{ app_name }}\"\n";
+    try fixture.write("r/meta/main.yml", "---\n");
+    try fixture.write("r/defaults/main.yml", "app_name: demo\n");
+    try fixture.write("r/molecule/default/converge.yml", converge);
+    const defs = (try locationsAt(&fixture, "r/molecule/default/converge.yml", converge, "{{ app_name", 3, .definition)).?;
+    try testing.expectEqual(@as(usize, 1), defs.len);
+    try expectAt(defs[0], try fixture.uri("r/molecule/default/converge.yml"), 2, 4);
+}
+
+test "without a Workspace a map-rooted file binds only through a load in the file set" {
+    var fixture = try Fixture.init(false);
+    defer fixture.deinit();
+    const site = "- hosts: all\n  vars_files: [settings.yml]\n  tasks:\n    - debug: msg=\"{{ version }} {{ channel }} {{ config.version }}\"\n";
+    try fixture.write("settings.yml", "channel: stable\nconfig:\n  version: 3\n");
+    try fixture.write("galaxy.yml", "version: 1.0.0\n");
+    const channel = (try locationsAt(&fixture, "site.yml", site, "channel", 0, .definition)).?;
+    try testing.expectEqual(@as(usize, 1), channel.len);
+    try expectAt(channel[0], try fixture.uri("settings.yml"), 0, 0);
+    fixture.lease.?.release();
+    fixture.lease = null;
+    const field = (try locationsAt(&fixture, "site.yml", site, "config.version", 7, .definition)).?;
+    try testing.expectEqual(@as(usize, 1), field.len);
+    try expectAt(field[0], try fixture.uri("settings.yml"), 2, 2);
+    fixture.lease.?.release();
+    fixture.lease = null;
+    // Neither galaxy.yml's key nor a root `version` binding is in the set.
+    try testing.expectEqual(@as(usize, 0), (try locationsAt(&fixture, "site.yml", site, "{{ version", 3, .definition)).?.len);
+    fixture.lease.?.release();
+    fixture.lease = null;
+    // Nothing loads galaxy.yml, so its key is not a navigation subject.
+    try testing.expect((try locationsAt(&fixture, "galaxy.yml", "version: 1.0.0\n", "version", 0, .definition)) == null);
+}
+
+test "without a Workspace include_vars outranks vars_files in a playbook" {
+    var fixture = try Fixture.init(false);
+    defer fixture.deinit();
+    const play = "- hosts: all\n  vars_files: [release.yml]\n  tasks:\n    - include_vars: runtime.yml\n    - debug: msg=\"{{ rollout_channel }}\"\n";
+    try fixture.write("release.yml", "rollout_channel: planned\n");
+    try fixture.write("runtime.yml", "rollout_channel: active\n");
+    const defs = (try locationsAt(&fixture, "play.yml", play, "{{ rollout", 3, .definition)).?;
+    try testing.expectEqual(@as(usize, 2), defs.len);
+    try expectAt(defs[0], try fixture.uri("runtime.yml"), 0, 0);
+    try expectAt(defs[1], try fixture.uri("release.yml"), 0, 0);
+}
+
+test "without a Workspace a passed role parameter is implemented in the called Role on disk" {
+    var fixture = try Fixture.init(false);
+    defer fixture.deinit();
+    const site = "- hosts: all\n  roles:\n    - role: web\n      app_port: 8080\n";
+    try fixture.write("roles/web/tasks/main.yml", "- debug: msg={{ app_port }}\n");
+    try fixture.write("roles/web/defaults/main.yml", "app_port: 80\n");
+    try fixture.write("roles/web/vars/main.yml", "other: 1\napp_port: 90\n");
+    const impls = (try locationsAt(&fixture, "site.yml", site, "app_port", 0, .implementation)).?;
+    try testing.expectEqual(@as(usize, 2), impls.len);
+    try expectAt(impls[0], try fixture.uri("roles/web/vars/main.yml"), 1, 0);
+    try expectAt(impls[1], try fixture.uri("roles/web/defaults/main.yml"), 0, 0);
+}
+
+test "without a Workspace a playbook binds play vars, prompts and role parameters itself" {
+    var fixture = try Fixture.init(false);
+    defer fixture.deinit();
+    const play =
+        \\- hosts: all
+        \\  vars_prompt:
+        \\    - name: prompted_var
+        \\      prompt: Enter a value
+        \\  roles:
+        \\    - role: demo
+        \\      app_port: 7070
+        \\  tasks:
+        \\    - debug: msg="{{ prompted_var }} {{ app_port }} {{ app_name }}"
+        \\
+    ;
+    try fixture.write("roles/demo/defaults/main.yml", "app_name: demo\n");
+    const prompted = (try locationsAt(&fixture, "site.yml", play, "{{ prompted_var", 3, .definition)).?;
+    try testing.expectEqual(@as(usize, 1), prompted.len);
+    try expectAt(prompted[0], try fixture.uri("site.yml"), 2, 12);
+    fixture.lease.?.release();
+    fixture.lease = null;
+    const param = (try locationsAt(&fixture, "site.yml", play, "{{ app_port", 3, .definition)).?;
+    try testing.expectEqual(@as(usize, 1), param.len);
+    try expectAt(param[0], try fixture.uri("site.yml"), 6, 6);
+    fixture.lease.?.release();
+    fixture.lease = null;
+    // The invoked Role's defaults are outside the Playbook scope.
+    try testing.expectEqual(@as(usize, 0), (try locationsAt(&fixture, "site.yml", play, "{{ app_name", 3, .definition)).?.len);
+}

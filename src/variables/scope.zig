@@ -1,5 +1,5 @@
-//! Role/playbook scope: locating the role root, enumerating its files, and
-//! resolving `vars_files`/`include_vars` targets (ADR-0024).
+//! Role/playbook scope: classifying a file by its Role root, enumerating a
+//! Role's files, and resolving `vars_files`/`include_vars` targets (ADR-0024).
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -16,46 +16,6 @@ const conventional_dirs = [_][]const u8{ "defaults", "vars", "tasks", "handlers"
 
 pub const uriToPath = @import("../paths.zig").uriToPath;
 pub const pathToUri = @import("../paths.zig").pathToUri;
-
-/// The nearest ancestor directory that contains a conventional role subdir, or
-/// null when the file is not inside a role.
-pub fn roleRoot(allocator: Allocator, source: FileSource, path: []const u8) ?[]const u8 {
-    var dir = std.fs.path.dirname(path) orelse return null;
-    while (true) {
-        if (hasConventionalDir(allocator, source, dir) and isRoleRoot(allocator, source, dir)) {
-            return allocator.dupe(u8, dir) catch null;
-        }
-        const parent = std.fs.path.dirname(dir) orelse return null;
-        if (parent.len == 0 or std.mem.eql(u8, parent, dir)) return null;
-        dir = parent;
-    }
-}
-
-fn hasConventionalDir(allocator: Allocator, source: FileSource, dir: []const u8) bool {
-    const entries = source.listDir(allocator, dir) catch return false;
-    for (entries) |e| {
-        if (!e.is_dir) continue;
-        for (conventional_dirs) |name| {
-            if (std.mem.eql(u8, e.name, name)) return true;
-        }
-    }
-    return false;
-}
-
-fn isRoleRoot(allocator: Allocator, source: FileSource, dir: []const u8) bool {
-    if (std.fs.path.dirname(dir)) |parent| {
-        if (std.mem.eql(u8, std.fs.path.basename(parent), "roles")) return true;
-    }
-    for ([_][]const u8{ "main.yml", "main.yaml" }) |name| {
-        const meta = std.fs.path.join(allocator, &.{ dir, "meta", name }) catch continue;
-        const uri = pathToUri(allocator, meta) catch continue;
-        if (source.read(allocator, uri) catch null) |text| {
-            allocator.free(text);
-            return true;
-        }
-    }
-    return false;
-}
 
 /// Where a file sits decides what it binds (ADR-0045). A Role's own
 /// `defaults/`, `vars/`, and `meta/` files are Role data. Outside a Role's

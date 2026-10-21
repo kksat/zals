@@ -12,7 +12,7 @@ const resolve = @import("../roles/resolve.zig");
 const symbols = @import("../workspace/symbols.zig");
 const context_mod = @import("../queries/context.zig");
 const Context = context_mod.Context;
-const Workspace = context_mod.Workspace;
+const FileSet = context_mod.FileSet;
 const Known = context_mod.WorkspaceCollection;
 
 const max_results = 1000;
@@ -33,7 +33,7 @@ pub fn workspaceSymbol(context: *Context, params: Value) !Value {
     const query = json_util.string(params, "query") orelse "";
     var arr = std.json.Array.init(a);
     for (context.roots()) |root| {
-        const v = try context.workspace(root);
+        const v = try context.files(.{ .workspace = root });
         for (try collect(context, v, query)) |info| {
             if (arr.items.len >= max_results) break;
             try arr.append(try toValue(context, info));
@@ -43,8 +43,9 @@ pub fn workspaceSymbol(context: *Context, params: Value) !Value {
 }
 
 /// Workspace symbols matching a name or collection-qualified member query.
-pub fn collect(context: *Context, v: *Workspace, query: []const u8) ![]const Info {
+pub fn collect(context: *Context, v: *FileSet, query: []const u8) ![]const Info {
     const a = context.allocator;
+    const root = v.root.?;
     var out = std.array_list.Managed(Info).init(a);
     const colls = try context.workspaceCollections(v);
 
@@ -89,7 +90,7 @@ pub fn collect(context: *Context, v: *Workspace, query: []const u8) ![]const Inf
         const role_dir = resolve.enclosingRole(f.path);
         switch (f.facts.shape) {
             .playbook => {
-                const name = relative(v.root, f.path);
+                const name = relative(root, f.path);
                 if (symbols.matches(name, query)) try out.append(.{
                     .name = name,
                     .kind = .file,
@@ -100,13 +101,13 @@ pub fn collect(context: *Context, v: *Workspace, query: []const u8) ![]const Inf
             },
             .task_file => {
                 const name = std.fs.path.basename(f.path);
-                const container = if (role_dir) |rd| std.fs.path.basename(rd) else relative(v.root, std.fs.path.dirname(f.path) orelse v.root);
+                const container = if (role_dir) |rd| std.fs.path.basename(rd) else relative(root, std.fs.path.dirname(f.path) orelse root);
                 if (symbols.matches(name, query)) try out.append(.{
                     .name = name,
                     .kind = .file,
                     .uri = f.uri,
                     .whole_file = true,
-                    .container = if (std.mem.eql(u8, container, v.root)) "" else container,
+                    .container = if (std.mem.eql(u8, container, root)) "" else container,
                 });
             },
             .other => {},
@@ -114,11 +115,11 @@ pub fn collect(context: *Context, v: *Workspace, query: []const u8) ![]const Inf
         for (f.facts.symbols) |s| {
             if (!symbols.matches(s.name, query)) continue;
             const container = switch (s.kind) {
-                .play => relative(v.root, f.path),
+                .play => relative(root, f.path),
                 .task, .handler => if (s.play.len > 0) s.play else if (role_dir) |rd|
                     try std.fmt.allocPrint(a, "{s}/{s}", .{ std.fs.path.basename(rd), f.path[rd.len + 1 ..] })
                 else
-                    relative(v.root, f.path),
+                    relative(root, f.path),
             };
             try out.append(.{
                 .name = s.name,

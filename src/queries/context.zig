@@ -1,8 +1,9 @@
 //! The request-scoped navigation context (ADR-0031, ADR-0032).
 //!
 //! One value answers what navigation asks of the session during a request:
-//! the files of the Workspace that owns a path, with open documents winning
-//! over their indexed copies; the text of a URI; the LSP `Location` of a span
+//! the file set a search runs over (the Workspace that owns a path, or
+//! without one its Role or Playbook scope), as Facts with open documents
+//! winning over indexed or disk copies; the text of a URI; the LSP `Location` of a span
 //! under the client's position encoding; the search paths and Role resolver
 //! for a referencing file; the Workspace collections; and the module docs
 //! library for a file. Each answer is computed at most once per request, so
@@ -77,17 +78,36 @@ pub const Session = struct {
     encoding: document_mod.PositionEncoding = .utf16,
 };
 
-/// One Workspace's files in this request. Open documents replace their
-/// indexed copy, so unsaved edits win. A file that some vars load in the
-/// Workspace targets binds its load-only keys (ADR-0045).
-pub const Workspace = struct {
-    root: []const u8,
+/// Which files a search runs over (ADR-0032).
+pub const Scope = union(enum) {
+    /// Every file of the session Workspace rooted here.
+    workspace: []const u8,
+    /// A Role's conventional sources and one level of their vars loads: the
+    /// Role scope of a file without a session Workspace, or a called Role.
+    role: []const u8,
+    /// One playbook or task file and one level of its vars loads: the
+    /// Playbook scope of a file without a session Workspace.
+    file: []const u8,
+};
+
+/// The files of one scope in this request, as Facts. Open documents replace
+/// their indexed or disk copy, so unsaved edits win. A file that a vars load
+/// in the set targets binds its load-only keys (ADR-0045): any load in a
+/// Workspace, the base files' loads in a Role or file scope.
+pub const FileSet = struct {
+    scope: Scope,
+    /// The session Workspace root that owns the files, or null.
+    root: ?[]const u8,
     files: []const File,
-    /// Targets of every vars load in the Workspace.
+    /// Targets of the loads that admit load-only bindings.
     loaded: std.StringHashMap(void),
+    /// Role and file scopes: the base files plus one level of their loads,
+    /// all reachable. Null for a Workspace, whose Reachable definitions
+    /// depend on the referencing file.
+    reach: ?view.Reachability = null,
     collections: ?[]const WorkspaceCollection = null,
 
-    pub fn isLoaded(self: *const Workspace, path: []const u8) bool {
+    pub fn isLoaded(self: *const FileSet, path: []const u8) bool {
         return self.loaded.contains(path);
     }
 };
@@ -107,7 +127,8 @@ pub const Context = struct {
     open: std.StringHashMap(*std.StringHashMap(*Document)),
     /// Facts extracted in this request, by path.
     facts_memo: std.StringHashMap(Extracted),
-    workspaces: std.StringHashMap(*Workspace),
+    /// Built file sets, by scope.
+    sets: std.StringHashMap(*FileSet),
 
     const Extracted = struct { root: ?[]const u8, facts: facts_mod.Facts };
 
@@ -124,7 +145,7 @@ pub const Context = struct {
             .line_indices = std.StringHashMap(LineIndex).init(a),
             .open = std.StringHashMap(*std.StringHashMap(*Document)).init(a),
             .facts_memo = std.StringHashMap(Extracted).init(a),
-            .workspaces = std.StringHashMap(*Workspace).init(a),
+            .sets = std.StringHashMap(*FileSet).init(a),
         };
     }
 
@@ -162,39 +183,138 @@ pub const Context = struct {
 
     /// The Workspace that owns the file at `uri`, or null without a session
     /// Workspace.
-    pub fn workspaceOf(self: *Context, uri: []const u8) !?*Workspace {
+    pub fn workspaceOf(self: *Context, uri: []const u8) !?*FileSet {
         const root = self.workspaceRoot(try self.pathOf(uri)) orelse return null;
-        return try self.workspace(root);
+        return try self.files(.{ .workspace = root });
     }
 
-    /// The Workspace rooted at `root`, from the leased index and the open
-    /// documents.
-    pub fn workspace(self: *Context, root: []const u8) !*Workspace {
-        if (self.workspaces.get(root)) |found| return found;
+    /// The files a variable search from `uri` runs over: its session
+    /// Workspace, else its Role scope, else its Playbook scope (ADR-0032).
+    pub fn searchFiles(self: *Context, uri: []const u8) !*FileSet {
+        const path = try self.pathOf(uri);
+        if (self.workspaceRoot(path)) |root| return self.files(.{ .workspace = root });
+        if (roles.resolve.enclosingRole(path)) |dir| return self.files(.{ .role = dir });
+        return self.files(.{ .file = path });
+    }
+
+    /// The file set of `scope`, built once per request.
+    pub fn files(self: *Context, scope: Scope) !*FileSet {
         const a = self.allocator;
-        const files = try self.overlay(root, null);
-        var loaded = std.StringHashMap(void).init(a);
-        for (files) |f| {
-            for (f.facts.var_loads) |load| try loaded.put(load.path, {});
-        }
-        for (files) |*f| {
-            if (loaded.contains(f.path)) f.facts = try f.facts.loaded(a);
-        }
-        const found = try a.create(Workspace);
-        found.* = .{ .root = root, .files = files, .loaded = loaded };
-        try self.workspaces.put(root, found);
+        const key = switch (scope) {
+            .workspace => |root| try std.fmt.allocPrint(a, "w:{s}", .{root}),
+            .role => |dir| try std.fmt.allocPrint(a, "r:{s}", .{dir}),
+            .file => |path| try std.fmt.allocPrint(a, "f:{s}", .{path}),
+        };
+        if (self.sets.get(key)) |found| return found;
+        const found = try a.create(FileSet);
+        found.* = switch (scope) {
+            .workspace => |root| try self.workspaceSet(root),
+            .role => |dir| try self.roleSet(dir),
+            .file => |path| try self.fileSet(path),
+        };
+        try self.sets.put(key, found);
         return found;
     }
 
-    /// The Workspace's files below `directory`, ordered like `workspace`, with
-    /// the same open-document overlay but without load-target promotion.
-    pub fn filesWithin(self: *Context, root: []const u8, directory: []const u8) ![]File {
-        return self.overlay(root, directory);
+    /// Every file of the Workspace, with every load target promoted.
+    fn workspaceSet(self: *Context, root: []const u8) !FileSet {
+        const a = self.allocator;
+        const all = try self.overlay(root, null);
+        var loaded = std.StringHashMap(void).init(a);
+        for (all) |f| {
+            for (f.facts.var_loads) |load| try loaded.put(load.path, {});
+        }
+        for (all) |*f| {
+            if (loaded.contains(f.path)) f.facts = try f.facts.loaded(a);
+        }
+        return .{ .scope = .{ .workspace = root }, .root = root, .files = all, .loaded = loaded };
+    }
+
+    /// A Role's conventional sources: the Workspace's, when it has indexed or
+    /// opened any, else those on disk.
+    fn roleSet(self: *Context, dir: []const u8) !FileSet {
+        const a = self.allocator;
+        const root = self.workspaceRoot(try std.fs.path.join(a, &.{ dir, "tasks", "main.yml" }));
+        var base = std.array_list.Managed(File).init(a);
+        if (root) |r| for (try self.overlay(r, dir)) |f| {
+            if (view.isCalleeSource(f.path, dir)) try base.append(f);
+        };
+        if (base.items.len == 0) {
+            for (try variables.scope.enumerateFiles(a, self.source(), dir)) |path| {
+                if (try self.extracted(root, path, try paths.pathToUri(a, path))) |f| try base.append(f);
+            }
+            std.mem.sort(File, base.items, {}, lessPath);
+        }
+        return self.withLoads(.{ .role = dir }, root, &base);
+    }
+
+    /// One file, its open document winning.
+    fn fileSet(self: *Context, path: []const u8) !FileSet {
+        const a = self.allocator;
+        const root = self.workspaceRoot(path);
+        var base = std.array_list.Managed(File).init(a);
+        if (try self.extracted(root, path, try paths.pathToUri(a, path))) |f| try base.append(f);
+        return self.withLoads(.{ .file = path }, root, &base);
+    }
+
+    /// Add one level of the base files' vars-load targets. Provenance is
+    /// frozen first: a target's own loads never extend the set.
+    fn withLoads(self: *Context, scope: Scope, root: ?[]const u8, list: *std.array_list.Managed(File)) !FileSet {
+        const a = self.allocator;
+        var reach_paths = std.array_list.Managed([]const u8).init(a);
+        var loads = std.array_list.Managed(variables.scope.VarFileLoad).init(a);
+        for (list.items) |f| try appendUnique(&reach_paths, f.path);
+        for (list.items) |f| for (f.facts.var_loads) |load| {
+            try loads.append(load);
+            try appendUnique(&reach_paths, load.path);
+        };
+        var loaded = std.StringHashMap(void).init(a);
+        for (loads.items) |load| {
+            if (loaded.contains(load.path)) continue;
+            try loaded.put(load.path, {});
+            try self.addLoadTarget(root, list, load.path);
+        }
+        return .{
+            .scope = scope,
+            .root = root,
+            .files = try list.toOwnedSlice(),
+            .loaded = loaded,
+            .reach = .{ .paths = try reach_paths.toOwnedSlice(), .loads = try loads.toOwnedSlice() },
+        };
+    }
+
+    /// A load target joins with its load-only bindings (ADR-0045): from the
+    /// set, else its open document or indexed entry in the Workspace, else
+    /// its text. Explicit loads are Ansible data whatever their extension.
+    fn addLoadTarget(self: *Context, root: ?[]const u8, list: *std.array_list.Managed(File), path: []const u8) !void {
+        const a = self.allocator;
+        var existing: ?*File = null;
+        for (list.items) |*f| if (std.mem.eql(u8, f.path, path)) {
+            existing = f;
+        };
+        if (discover.isAnsibleFile(std.fs.path.basename(path))) {
+            if (existing) |f| {
+                f.facts = try f.facts.loaded(a);
+                return;
+            }
+            if (root) |r| if (try self.workspaceFile(r, path)) |found| {
+                var file = found;
+                file.facts = try file.facts.loaded(a);
+                try list.append(file);
+                return;
+            };
+        }
+        const uri = try paths.pathToUri(a, path);
+        const body = (try self.text(uri)) orelse return;
+        const dependency = try facts_mod.extractDependencyIn(a, root, path, body);
+        // Normal non-Ansible source-candidate facts are deliberately empty.
+        // Only an explicit load authorizes their hydration.
+        if (existing) |f| f.facts = dependency else try list.append(.{ .path = path, .uri = uri, .facts = dependency });
     }
 
     /// One Workspace file: its open document, else its indexed entry, else
     /// null when neither belongs to `root`.
-    pub fn workspaceFile(self: *Context, root: []const u8, path: []const u8) !?File {
+    fn workspaceFile(self: *Context, root: []const u8, path: []const u8) !?File {
         if ((try self.openIn(root)).get(path)) |doc| return try self.openFile(root, path, doc);
         const entry = self.index().get(path) orelse return null;
         if (!std.mem.eql(u8, entry.root, root)) return null;
@@ -207,14 +327,14 @@ pub const Context = struct {
         const a = self.allocator;
         const open = try self.openIn(root);
         const entries = if (within) |dir| try self.index().entriesWithin(a, root, dir) else try self.index().entriesOf(a, root);
-        var files = std.array_list.Managed(File).init(a);
+        var out = std.array_list.Managed(File).init(a);
         var replaced = std.StringHashMap(void).init(a);
         for (entries) |entry| {
             if (open.get(entry.path)) |doc| {
-                try files.append(try self.openFile(root, entry.path, doc));
+                try out.append(try self.openFile(root, entry.path, doc));
                 try replaced.put(entry.path, {});
             } else {
-                try files.append(.{ .path = entry.path, .uri = try paths.pathToUri(a, entry.path), .facts = entry.facts });
+                try out.append(.{ .path = entry.path, .uri = try paths.pathToUri(a, entry.path), .facts = entry.facts });
             }
         }
         var rest = open.iterator();
@@ -222,9 +342,9 @@ pub const Context = struct {
             const path = item.key_ptr.*;
             if (replaced.contains(path)) continue;
             if (within) |dir| if (!isBelow(path, dir)) continue;
-            try files.append(try self.openFile(root, path, item.value_ptr.*));
+            try out.append(try self.openFile(root, path, item.value_ptr.*));
         }
-        return files.toOwnedSlice();
+        return out.toOwnedSlice();
     }
 
     /// Open documents that belong to the Workspace at `root`, by path.
@@ -274,10 +394,12 @@ pub const Context = struct {
     }
 
     /// Paths whose definitions can apply in the file at `path` (Reachable
-    /// definitions): its role scope and that Role's invokers, resolved by
+    /// definitions). A Role or file scope is reachable as a whole. In a
+    /// Workspace: the file's role scope and that Role's invokers, resolved by
     /// directory with each invoking file's search paths, or the task file's
     /// includers; plus one level of their vars loads.
-    pub fn reachableFiles(self: *Context, ws: *Workspace, path: []const u8) !view.Reachability {
+    pub fn reachableFiles(self: *Context, ws: *FileSet, path: []const u8) !view.Reachability {
+        if (ws.reach) |reach| return reach;
         const a = self.allocator;
         const role_dir = roles.resolve.enclosingRole(path);
         var invokers = std.array_list.Managed([]const u8).init(a);
@@ -297,15 +419,17 @@ pub const Context = struct {
 
     /// Metadata-defined collections: the Workspace root, or any directory below
     /// `ansible_collections/` within the Workspace's file set (ADR-0038).
-    pub fn workspaceCollections(self: *Context, ws: *Workspace) ![]const WorkspaceCollection {
+    pub fn workspaceCollections(self: *Context, ws: *FileSet) ![]const WorkspaceCollection {
         if (ws.collections) |colls| return colls;
+        const ws_root = ws.root orelse return &.{};
+        if (ws.scope != .workspace) return &.{};
         const a = self.allocator;
         var out = std.array_list.Managed(WorkspaceCollection).init(a);
         for (ws.files) |f| {
             const base = std.fs.path.basename(f.path);
             if (!std.mem.eql(u8, base, "galaxy.yml") and !std.mem.eql(u8, base, "galaxy.yaml")) continue;
             const dir = std.fs.path.dirname(f.path) orelse continue;
-            if (!isWorkspaceCollectionRoot(ws.root, dir)) continue;
+            if (!isWorkspaceCollectionRoot(ws_root, dir)) continue;
             const body = (try self.text(f.uri)) orelse "";
             const name = galaxyName(a, body) orelse continue;
             try out.append(.{ .name = name, .dir = dir, .metadata_uri = f.uri });
@@ -321,7 +445,7 @@ pub const Context = struct {
     pub fn roleResolver(self: *Context, path: []const u8, declared_collections: []const []const u8) roles.Resolver {
         const root = self.workspaceRoot(path);
         const collections: []const WorkspaceCollection = if (root) |r| blk: {
-            const ws = self.workspace(r) catch break :blk &.{};
+            const ws = self.files(.{ .workspace = r }) catch break :blk &.{};
             break :blk self.workspaceCollections(ws) catch &.{};
         } else &.{};
         return .{
@@ -342,7 +466,7 @@ pub const Context = struct {
     }
 
     /// Role search paths for the file at `path`, memoised per directory.
-    pub fn rolesPaths(self: *Context, path: []const u8) ![]const []const u8 {
+    fn rolesPaths(self: *Context, path: []const u8) ![]const []const u8 {
         const dir = std.fs.path.dirname(path) orelse path;
         if (self.roles_paths.get(dir)) |found| return found;
         const found = try project_config.rolesPaths(self.allocator, self.projectContext(path), path);
@@ -470,6 +594,15 @@ fn roleRefResolvesTo(base: roles.Resolver, file_path: []const u8, ref: facts_mod
         if (std.mem.eql(u8, dir, target)) return true;
     }
     return false;
+}
+
+fn lessPath(_: void, x: File, y: File) bool {
+    return std.mem.order(u8, x.path, y.path) == .lt;
+}
+
+fn appendUnique(list: *std.array_list.Managed([]const u8), item: []const u8) !void {
+    for (list.items) |x| if (std.mem.eql(u8, x, item)) return;
+    try list.append(item);
 }
 
 fn sameRoot(x: ?[]const u8, y: ?[]const u8) bool {

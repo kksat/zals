@@ -39,7 +39,7 @@ pub fn resolve(context: *Context, name: []const u8, file_path: []const u8) !?[]c
         if (isDir(dir)) return dir;
     }
     if (context.workspaceRoot(file_path)) |root| {
-        for (try context.workspaceCollections(try context.workspace(root))) |c| {
+        for (try context.workspaceCollections(try context.files(.{ .workspace = root }))) |c| {
             if (std.mem.eql(u8, c.name, name)) return c.dir;
         }
     }

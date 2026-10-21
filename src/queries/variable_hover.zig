@@ -26,24 +26,17 @@ const Candidate = struct {
     start: usize,
     site: ?variables.Site,
     reachable: bool,
-    facts: ?*const Facts = null,
+    facts: *const Facts,
 };
 
 /// Presentation selects candidates before any source reads or descriptions.
 /// Keep all metadata entries so render's totals and truncation remain exact.
-pub fn workspaceEntries(a: Allocator, cache: *descriptions.Cache, defs: []const view.Occurrence, files: []const view.File) ![]const Entry {
+pub fn bindingEntries(a: Allocator, cache: *descriptions.Cache, defs: []const view.Occurrence, files: []const view.File) ![]const Entry {
     const candidates = try a.alloc(Candidate, defs.len);
     for (defs, 0..) |def, i| {
         const file = view.find(files, def.path) orelse unreachable;
         candidates[i] = .{ .uri = def.uri, .start = def.start, .site = def.site, .reachable = def.reachable, .facts = &file.facts };
     }
-    return listedEntries(a, cache, candidates);
-}
-
-/// Fallback offsets must have been discovered through Context.source().
-pub fn fallbackEntries(a: Allocator, cache: *descriptions.Cache, defs: []const variables.Occurrence) ![]const Entry {
-    const candidates = try a.alloc(Candidate, defs.len);
-    for (defs, 0..) |def, i| candidates[i] = .{ .uri = def.uri, .start = def.start, .site = def.site, .reachable = true };
     return listedEntries(a, cache, candidates);
 }
 
@@ -59,11 +52,7 @@ fn listedEntries(a: Allocator, cache: *descriptions.Cache, candidates: []const C
         // count-only placeholders and are never passed to line().
         const listed = if (i < reachable) i == 0 or i - 1 < max_listed else i - reachable < max_listed;
         if (!listed) continue;
-        const binding = if (candidate.facts) |facts|
-            descriptions.Binding.indexed(candidate.uri, candidate.start, facts.*)
-        else
-            descriptions.Binding{ .uri = candidate.uri, .start = candidate.start };
-        const description = try cache.describe(binding);
+        const description = try cache.describe(descriptions.Binding.indexed(candidate.uri, candidate.start, candidate.facts.*));
         entries[i].line = description.line;
         if (description.value) |raw| entries[i].value = dedentValue(a, raw, 0, raw.len) catch null;
     }

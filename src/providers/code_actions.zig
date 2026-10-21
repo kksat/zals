@@ -16,7 +16,7 @@
 //!
 //! The provider is document-scoped and parses the document once. The variable
 //! under the cursor comes from the shared variable model
-//! (`variables.Index.occurrenceInForest`); the enclosing task comes from the
+//! (`variables.index.occurrenceInForest`); the enclosing task comes from the
 //! YAML DOM's parent pointers and source ranges.
 
 const std = @import("std");
@@ -147,7 +147,7 @@ pub fn actions(
         }
 
         // Add: the cursor is on a variable occurrence.
-        if (try variables.Index.occurrenceInForest(a, &forest, path, sel.start)) |cur| {
+        if (try variables.index.occurrenceInForest(a, &forest, path, sel.start)) |cur| {
             if (try addAction(a, text, task, container, cur.name)) |act| try out.append(act);
         }
     }
