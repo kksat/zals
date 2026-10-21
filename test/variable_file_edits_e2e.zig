@@ -192,12 +192,14 @@ test "a callee load outside vars/ supplies a passed field implementation from th
     const vars = try s.span(receiver ++ "vars/main.yml", "    <region_name>: receiver-region-vars");
     const default = try s.span(receiver ++ "defaults/main.yml", "    <region_name>: receiver-region-default");
 
-    // Unloaded on disk, the settings file is not a callee binding.
+    // Unloaded on disk, the settings file is not a callee binding, and the
+    // Role's map-rooted `templates/settings.yml.j2` never is.
     try expectLocations(&.{ vars, default }, try s.navigate("textDocument/implementation", caller));
 
     const tasks_uri = try s.openDisk(receiver ++ "tasks/main.yml");
     try s.change(tasks_uri, callee_load);
-    // include_vars precedence precedes role vars and defaults.
+    // include_vars precedence precedes role vars and defaults; the Role
+    // template still binds nothing.
     try expectLocations(&.{ loaded, vars, default }, try s.navigate("textDocument/implementation", caller));
 }
 
@@ -224,6 +226,7 @@ test "a callee load outside vars/ supplies a passed field implementation from an
         \\
     );
     const loaded: anchor.Location = .{ .uri = loaded_uri, .range = range(3, 4, 3, 15) };
+    // Still no binding from the Role's `templates/settings.yml.j2`.
     try expectLocations(&.{ loaded, vars, default }, try s.navigate("textDocument/implementation", caller));
 }
 

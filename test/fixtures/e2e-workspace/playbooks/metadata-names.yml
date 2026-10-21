@@ -24,4 +24,4 @@
 
     - name: Report names spelled like inventory, docs, and changelog keys
       ansible.builtin.debug:
-        msg: "{{ webservers }} {{ site_name }} {{ releases }}"
+        msg: "{{ groups.webservers }} {{ site_name }} {{ releases }}"

@@ -52,7 +52,8 @@ directory and bind only because they are loaded. `group_vars/all.yml` and
 `host_vars/localhost.yml` bind without a load.
 `playbooks/settings/receiver-values.yml` is deliberately unloaded on disk, so
 its `region_name` joins no field group; buffer scenarios load it from the
-receiver Role.
+receiver Role. That Role's `templates/settings.yml.j2` spells the same
+`input_config.endpoint.region_name` path and must never be a callee binding.
 
 Files under `negative/` contain intentional non-matches or missing targets;
 positive playbooks remain structurally valid Ansible. The marker file is
