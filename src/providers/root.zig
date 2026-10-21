@@ -5,7 +5,6 @@ pub const code_actions = @import("code_actions.zig");
 pub const validation = @import("validation.zig");
 pub const collections = @import("collections.zig");
 pub const workspace_symbols = @import("workspace_symbols.zig");
-pub const workspace_view = @import("workspace_view.zig");
 
 test {
     @import("std").testing.refAllDecls(@This());

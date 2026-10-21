@@ -6,7 +6,7 @@ const Allocator = std.mem.Allocator;
 const yaml = @import("../yaml/root.zig");
 const variables = @import("../variables/root.zig");
 const paths = @import("../paths.zig");
-const wv = @import("../providers/workspace_view.zig");
+const view = @import("../workspace/view.zig");
 const descriptions = @import("binding_descriptions.zig");
 const Facts = @import("../workspace/facts.zig").Facts;
 
@@ -31,16 +31,16 @@ const Candidate = struct {
 
 /// Presentation selects candidates before any source reads or descriptions.
 /// Keep all metadata entries so render's totals and truncation remain exact.
-pub fn workspaceEntries(a: Allocator, cache: *descriptions.Cache, defs: []const wv.view.Occurrence, files: []const wv.File) ![]const Entry {
+pub fn workspaceEntries(a: Allocator, cache: *descriptions.Cache, defs: []const view.Occurrence, files: []const view.File) ![]const Entry {
     const candidates = try a.alloc(Candidate, defs.len);
     for (defs, 0..) |def, i| {
-        const file = wv.view.find(files, def.path) orelse unreachable;
+        const file = view.find(files, def.path) orelse unreachable;
         candidates[i] = .{ .uri = def.uri, .start = def.start, .site = def.site, .reachable = def.reachable, .facts = &file.facts };
     }
     return listedEntries(a, cache, candidates);
 }
 
-/// Fallback offsets must have been discovered through cache.source().
+/// Fallback offsets must have been discovered through Context.source().
 pub fn fallbackEntries(a: Allocator, cache: *descriptions.Cache, defs: []const variables.Occurrence) ![]const Entry {
     const candidates = try a.alloc(Candidate, defs.len);
     for (defs, 0..) |def, i| candidates[i] = .{ .uri = def.uri, .start = def.start, .site = def.site, .reachable = true };

@@ -12,6 +12,7 @@ const Server = @import("server.zig").Server;
 const Document = @import("../workspace/document.zig").Document;
 const providers = @import("../providers/root.zig");
 const cursor = @import("../cursor.zig");
+const Context = @import("../queries/context.zig").Context;
 
 pub fn handleRequest(self: *Server, a: Allocator, id: Value, method: []const u8, params: Value) !void {
     if (std.mem.eql(u8, method, "initialize")) return onInitialize(self, a, id, params);
@@ -25,27 +26,29 @@ pub fn handleRequest(self: *Server, a: Allocator, id: Value, method: []const u8,
     // Workspace/role/collection reads borrow one revision. Notifications
     // run separately, so documents, roots, settings and the selected venv also
     // remain stable without copying them into a second snapshot.
-    var query = self.index.acquireQuery(!self.watching_files);
-    defer query.release();
+    var lease = self.index.acquireQuery(!self.watching_files);
+    defer lease.release();
+    // Holding the navigation context is holding the lease.
+    var context = try self.navigationContext(a, &lease);
 
     if (std.mem.eql(u8, method, "textDocument/completion"))
-        return self.sendResult(a, id, try completionResult(self, a, params));
+        return self.sendResult(a, id, try completionResult(self, &context, params));
     if (std.mem.eql(u8, method, "completionItem/resolve"))
         return self.sendResult(a, id, try resolveResult(self, a, params));
     if (std.mem.eql(u8, method, "textDocument/hover"))
-        return self.sendResult(a, id, try navigation.result(self, a, .hover, params));
+        return self.sendResult(a, id, try navigation.result(&context, .hover, params));
     if (std.mem.eql(u8, method, "textDocument/definition"))
-        return self.sendResult(a, id, try navigation.result(self, a, .definition, params));
+        return self.sendResult(a, id, try navigation.result(&context, .definition, params));
     if (std.mem.eql(u8, method, "textDocument/implementation"))
-        return self.sendResult(a, id, try navigation.result(self, a, .implementation, params));
+        return self.sendResult(a, id, try navigation.result(&context, .implementation, params));
     if (std.mem.eql(u8, method, "textDocument/references"))
-        return self.sendResult(a, id, try navigation.result(self, a, .references, params));
+        return self.sendResult(a, id, try navigation.result(&context, .references, params));
     if (std.mem.eql(u8, method, "textDocument/semanticTokens/full"))
         return self.sendResult(a, id, try semanticResult(self, a, params));
     if (std.mem.eql(u8, method, "textDocument/documentSymbol"))
         return self.sendResult(a, id, try providers.document_symbols.documentSymbol(self, a, params));
     if (std.mem.eql(u8, method, "workspace/symbol"))
-        return self.sendResult(a, id, try providers.workspace_symbols.workspaceSymbol(self, a, params));
+        return self.sendResult(a, id, try providers.workspace_symbols.workspaceSymbol(&context, params));
     if (std.mem.eql(u8, method, "textDocument/codeAction"))
         return self.sendResult(a, id, try providers.code_actions.codeActions(self, a, params));
     return self.sendError(a, id, -32601, "method not found");
@@ -98,9 +101,10 @@ fn emptyCompletion(a: Allocator) !Value {
     return encode.completionList(a, .{ .items = &.{} });
 }
 
-fn completionResult(self: *Server, a: Allocator, params: Value) !Value {
-    const loc = navigation.cursorAt(&self.documents, params) orelse return emptyCompletion(a);
-    if (try providers.collections.completion(self, a, loc.doc, loc.offset)) |items| {
+fn completionResult(self: *Server, context: *Context, params: Value) !Value {
+    const a = context.allocator;
+    const loc = navigation.cursorAt(context.session.documents, params) orelse return emptyCompletion(a);
+    if (try providers.collections.completion(context, loc.doc, loc.offset)) |items| {
         return encode.completionList(a, .{ .items = items });
     }
     var opened = cursor.Doc.open(a, loc.doc.bytes()) catch return emptyCompletion(a);
