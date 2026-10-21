@@ -76,7 +76,7 @@ it in this list.
 | `src/lsp/` | JSON-RPC framing, message types, capability negotiation, dispatch, and the navigation protocol adapter (definition, implementation, references, hover) |
 | `src/providers/` | One module per remaining LSP feature (semantic tokens, completion, document symbols, Workspace symbols, code actions, validation) |
 | `src/queries/` | Typed semantic navigation over the request-scoped navigation context (`context.zig`): Workspace files with open documents winning, text, locations, role resolution |
-| `src/variables/` | Jinja scanning, definition-site detection, role/playbook scope, the variable index |
+| `src/variables/` | Jinja scanning, definition-site detection, role/playbook scope, per-document occurrences |
 | `src/roles/` | Role reference detection, name-to-directory resolution, navigation targets |
 | `src/services/` | Docs library, schema cache/service/validator, validation manager, config |
 | `src/yaml/` | YAML parser interface, tree-sitter backend, semantic DOM, path utilities |
@@ -121,8 +121,9 @@ with open documents layered on top. References is name-based. Go-to-definition
 and hover rank the reachable definitions (role scope or playbook, the
 playbooks that invoke the role or include the task file, and their vars files)
 by precedence and list the others after them. Files outside a session
-Workspace fall back to the role or playbook file set read through the
-`FileSource` seam.
+Workspace search their Role or Playbook scope instead, extracted into the same
+Facts and searched by the same `src/workspace/view.zig` functions
+([scope guide](variable-navigation.md#without-a-session-workspace)).
 
 ## 5a. Roles
 
