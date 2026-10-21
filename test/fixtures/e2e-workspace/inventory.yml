@@ -1,0 +1,6 @@
+---
+all:
+  children:
+    webservers:
+      hosts:
+        localhost:

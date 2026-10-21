@@ -7,6 +7,21 @@
   vars:
     version: 2
   tasks:
+    - name: Load runtime settings from outside a vars directory
+      ansible.builtin.include_vars: settings/runtime-metadata.yml
+
     - name: Report metadata-like variables
       ansible.builtin.debug:
         msg: "{{ version }} {{ plugin_routing }} {{ platforms }}"
+
+    - name: Report variables from conventional variable directories
+      ansible.builtin.debug:
+        msg: "{{ deploy_region }} {{ deploy_host_label }} {{ action_groups }}"
+
+    - name: Report fields of a loaded settings map
+      ansible.builtin.debug:
+        msg: "{{ release_window.opens }} {{ release_window.image }}"
+
+    - name: Report names spelled like inventory, docs, and changelog keys
+      ansible.builtin.debug:
+        msg: "{{ webservers }} {{ site_name }} {{ releases }}"

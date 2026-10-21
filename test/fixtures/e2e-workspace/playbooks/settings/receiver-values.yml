@@ -1,0 +1,4 @@
+---
+input_config:
+  endpoint:
+    region_name: settings-region
