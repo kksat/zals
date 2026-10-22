@@ -394,6 +394,45 @@ fn pingModule(a: Allocator) !docs.Module {
     };
 }
 
+test "playbook imports use Play context instead of Module lookup" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    for ([_][]const u8{ "import_playbook", "ansible.builtin.import_playbook", "ansible.legacy.import_playbook" }) |name| {
+        const src = try std.fmt.allocPrint(a, "- {s}: other.yml\n  vars: {{x: 1}}\n", .{name});
+        var opened = try Doc.open(testing.allocator, src);
+        defer opened.deinit();
+        for ([_][]const u8{ name, "vars" }) |at| {
+            const off = std.mem.indexOf(u8, src, at).?;
+            const cur = (try opened.at("file:///play.yml", off, emptyDocs())).?;
+            switch (cur) {
+                .play_keyword => |k| try testing.expectEqualStrings(at, k.name),
+                else => return error.ExpectedPlayContext,
+            }
+        }
+    }
+}
+
+test "ambiguous task roots and rescue-only cursor behaviour remain compatible" {
+    const src = "- rescue: []\n";
+    var opened = try Doc.open(testing.allocator, src);
+    defer opened.deinit();
+    const off = std.mem.indexOf(u8, src, "rescue").?;
+    const cur = (try opened.at("file:///play.yml", off, emptyDocs())).?;
+    switch (cur) {
+        .task_keyword => |k| {
+            try testing.expect(!k.known);
+            try testing.expect(k.offer_play_keywords);
+        },
+        else => return error.ExpectedTaskContext,
+    }
+    const role = (try opened.at("file:///roles/r/tasks/main.yml", off, emptyDocs())).?;
+    switch (role) {
+        .task_keyword => |k| try testing.expect(!k.offer_play_keywords),
+        else => return error.ExpectedTaskContext,
+    }
+}
+
 test "hosts is a play keyword" {
     const src =
         \\- hosts: all

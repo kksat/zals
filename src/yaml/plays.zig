@@ -34,7 +34,9 @@ pub fn shape(root: *const Node) Shape {
 }
 
 fn playKind(map: *const Node) ?Kind {
-    if (dom.findPair(map, "import_playbook") != null) return .playbook_import;
+    inline for (.{ "import_playbook", "ansible.builtin.import_playbook", "ansible.legacy.import_playbook" }) |name| {
+        if (dom.findPair(map, name) != null) return .playbook_import;
+    }
     for (map.items) |pair| {
         const name = (pair.key orelse continue).stringValue() orelse continue;
         if (keywords.isPlayExclusiveKeyword(name)) return .play;
@@ -149,8 +151,8 @@ test "structure classification table" {
         .{ .text = "- hosts: all\n  tasks: []\n", .shape = .playbook, .kind = .play, .lists = 1 },
         .{ .text = "- tasks: []\n", .shape = .playbook, .kind = .play, .lists = 1 },
         .{ .text = "- import_playbook: other.yml\n", .shape = .playbook, .kind = .playbook_import },
-        .{ .text = "- ansible.builtin.import_playbook: other.yml\n", .shape = .task_list, .kind = .task, .ambiguous = true },
-        .{ .text = "- ansible.legacy.import_playbook: other.yml\n", .shape = .task_list, .kind = .task, .ambiguous = true },
+        .{ .text = "- ansible.builtin.import_playbook: other.yml\n", .shape = .playbook, .kind = .playbook_import },
+        .{ .text = "- ansible.legacy.import_playbook: other.yml\n", .shape = .playbook, .kind = .playbook_import },
         .{ .text = "- name: uncertain\n", .shape = .task_list, .kind = .task, .ambiguous = true },
         .{ .text = "- ping:\n", .file = .{ .role_tasks = true }, .shape = .task_list, .kind = .task },
         .{ .text = "- tasks: []\n", .file = .{ .role_tasks = true }, .shape = .playbook, .kind = .task, .lists = 1 },
