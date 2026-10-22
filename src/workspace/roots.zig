@@ -115,6 +115,24 @@ pub fn warnDue(enabled: bool, missing: bool, already_sent: bool, ready: bool) bo
     return enabled and missing and !already_sent and ready;
 }
 
+/// Resolve symlinks once for Workspace ownership and membership comparisons.
+/// A not-yet-existing path keeps its suffix below the nearest existing ancestor.
+/// The caller frees the result.
+pub fn resolvedPath(allocator: Allocator, path: []const u8) ![]const u8 {
+    return std.fs.cwd().realpathAlloc(allocator, path) catch |err| {
+        if (err == error.OutOfMemory) return error.OutOfMemory;
+        const parent = std.fs.path.dirname(path) orelse {
+            const cwd = try std.process.getCwdAlloc(allocator);
+            defer allocator.free(cwd);
+            return std.fs.path.join(allocator, &.{ cwd, path });
+        };
+        if (std.mem.eql(u8, parent, path)) return allocator.dupe(u8, path);
+        const resolved = try resolvedPath(allocator, parent);
+        defer allocator.free(resolved);
+        return std.fs.path.join(allocator, &.{ resolved, std.fs.path.basename(path) });
+    };
+}
+
 fn locateStart(allocator: Allocator, start: []const u8) !?[]u8 {
     if (start.len == 0) return null;
     if (std.fs.cwd().openDir(start, .{})) |opened| {

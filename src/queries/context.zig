@@ -157,7 +157,9 @@ pub const Context = struct {
     /// navigation request goes through here, so path-form rules (for
     /// example symlinked roots) apply in one place.
     pub fn pathOf(self: *const Context, uri: []const u8) ![]const u8 {
-        return paths.uriToPath(self.allocator, uri);
+        const path = try paths.uriToPath(self.allocator, uri);
+        defer self.allocator.free(path);
+        return roots_mod.resolvedPath(self.allocator, path);
     }
 
     /// The open document at `uri`, or null.
@@ -623,6 +625,50 @@ fn readFile(a: Allocator, path: []const u8) ?[]const u8 {
 }
 
 const testing = std.testing;
+
+test "symlinked opened folders overlay unsaved documents with resolved paths" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.makePath("workspace/.git");
+    try tmp.dir.writeFile(.{ .sub_path = "workspace/site.yml", .data = "- hosts: all\n  vars: {disk_only: true}\n" });
+    try tmp.dir.symLink("workspace", "linked", .{ .is_directory = true });
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const base = try tmp.dir.realpathAlloc(a, ".");
+    const root = try tmp.dir.realpathAlloc(a, "workspace");
+    const linked = try std.fs.path.join(a, &.{ base, "linked/site.yml" });
+    const uri = try paths.pathToUri(a, linked);
+    var documents = DocumentStore.init(testing.allocator, .utf16);
+    defer documents.deinit();
+    _ = try documents.open(uri, "ansible", 1, "- hosts: all\n  vars: {unsaved: true}\n");
+    const fresh = try paths.pathToUri(a, try std.fs.path.join(a, &.{ base, "linked/new/tasks.yml" }));
+    _ = try documents.open(fresh, "ansible", 1, "- debug: {msg: '{{ unsaved }}'}\n");
+    const idx = try WorkspaceIndex.create(testing.allocator);
+    defer idx.destroy();
+    try idx.scanNow(root, ".git");
+    var lease = idx.acquireQuery(false);
+    defer lease.release();
+    var context = Context.init(a, &lease, .{
+        .documents = &documents,
+        .workspaces = .{ .roots = &.{root} },
+        .docs = undefined, // This test never requests module documentation.
+    });
+    const ws = (try context.workspaceOf(uri)).?;
+    try testing.expectEqual(@as(usize, 2), ws.files.len);
+    const path = try context.pathOf(uri);
+    try testing.expectEqualStrings(try std.fs.path.join(a, &.{ root, "site.yml" }), path);
+    var found = false;
+    for (ws.files) |file| {
+        if (!std.mem.eql(u8, file.path, path)) continue;
+        found = true;
+        try testing.expectEqualStrings(uri, file.uri);
+        try testing.expectEqual(@as(usize, 1), file.facts.var_defs.len);
+        try testing.expectEqualStrings("unsaved", file.facts.var_defs[0].name);
+    }
+    try testing.expect(found);
+    try testing.expectEqualStrings(try std.fs.path.join(a, &.{ root, "new/tasks.yml" }), try context.pathOf(fresh));
+}
 
 test "galaxy name" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
