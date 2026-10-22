@@ -10,7 +10,6 @@ const DocumentStore = @import("../workspace/store.zig").DocumentStore;
 const PositionEncoding = @import("../workspace/document.zig").PositionEncoding;
 const Settings = @import("../workspace/settings.zig").Settings;
 const workspace_session = @import("../workspace/session.zig");
-const paths = @import("../paths.zig");
 const workspace_index = @import("../workspace/index.zig");
 const WorkspaceIndex = workspace_index.WorkspaceIndex;
 const handlers = @import("handlers.zig");
@@ -201,30 +200,14 @@ pub const Server = struct {
         self.watching_files = true;
     }
 
-    /// Re-index one file on disk if it belongs to a session Workspace.
+    /// Re-index one file on disk if it is a member of a session Workspace.
     pub fn reindexPath(self: *Server, a: Allocator, path: []const u8) void {
-        const root = self.workspaceRootFor(a, path) orelse {
-            self.index.remove(path);
+        const resolved = workspace_session.resolvedPath(a, path) catch return;
+        const root = self.session.snapshot().member(resolved) orelse {
+            self.index.remove(resolved);
             return;
         };
-        const discovery = @import("../workspace/discover.zig");
-        if (!discovery.isWorkspaceFile(path) or !discovery.belongsToWorkspace(root, path, self.settings.root_marker)) return;
-        self.index.reindex(root, path);
-    }
-
-    /// Session Workspace roots as filesystem paths.
-    pub fn workspacePaths(self: *Server) []const []const u8 {
-        return self.session.snapshot().roots;
-    }
-
-    /// The session Workspace root that owns `file_path`, or null.
-    pub fn workspaceRootFor(self: *Server, a: Allocator, file_path: []const u8) ?[]const u8 {
-        return self.session.snapshot().owner(a, file_path);
-    }
-
-    /// The virtual environment whose collections are searched.
-    pub fn venvPath(self: *Server) []const u8 {
-        return self.session.snapshot().venv;
+        self.index.reindex(root, resolved);
     }
 
     /// The navigation context for one request, borrowing `lease`. Module
@@ -235,12 +218,8 @@ pub const Server = struct {
     pub fn navigationContext(self: *Server, a: Allocator, lease: *const WorkspaceIndex.QueryLease) !navigation_context.Context {
         return navigation_context.Context.init(a, lease, .{
             .documents = &self.documents,
-            .workspaces = .{
-                .roots = self.workspacePaths(),
-                .marker = self.settings.root_marker,
-                .venv = self.venvPath(),
-                .ansible_config = &self.ansible_config,
-            },
+            .workspaces = self.session.snapshot(),
+            .ansible_config = &self.ansible_config,
             .docs = navigation_context.Docs.contextual(&self.contextual_docs),
             .encoding = self.encoding,
         });

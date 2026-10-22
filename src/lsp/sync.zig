@@ -8,6 +8,7 @@ const types = @import("types.zig");
 const Server = @import("server.zig").Server;
 const providers = @import("../providers/root.zig");
 const paths = @import("../paths.zig");
+const workspace_session = @import("../workspace/session.zig");
 
 pub fn didOpen(self: *Server, a: Allocator, params: Value) !void {
     const td = json_util.field(params, "textDocument") orelse return;
@@ -57,7 +58,8 @@ pub fn didChangeWatchedFiles(self: *Server, a: Allocator, params: Value) !void {
         const kind = json_util.integer(c, "type") orelse 2;
         const path = paths.uriToPath(a, uri) catch continue;
         if (kind == 3) {
-            self.index.remove(path);
+            const resolved = workspace_session.resolvedPath(a, path) catch continue;
+            self.index.remove(resolved);
         } else {
             self.reindexPath(a, path);
         }
@@ -79,4 +81,51 @@ pub fn didChangeWorkspaceFolders(self: *Server, a: Allocator, params: Value) !vo
         }
     }
     try self.applySession(a, .{ .folders_changed = .{ .removed = removed.items, .added = added.items } });
+}
+
+test "saved and watched symlink paths use the snapshot's resolved membership" {
+    const testing = std.testing;
+    const Transport = @import("transport.zig").Transport;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.makePath("workspace/.git");
+    try tmp.dir.symLink("workspace", "linked", .{ .is_directory = true });
+    const output = try tmp.dir.createFile("messages", .{ .read = true });
+    defer output.close();
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const base = try tmp.dir.realpathAlloc(a, ".");
+    const root = try tmp.dir.realpathAlloc(a, "workspace");
+    const path = try std.fs.path.join(a, &.{ root, "site.yml" });
+    const uri = try paths.pathToUri(a, try std.fs.path.join(a, &.{ base, "linked/site.yml" }));
+    var server = try Server.init(testing.allocator, Transport.init(output, output), null);
+    defer server.deinit();
+    server.settings.validation_enabled = false;
+    try server.applySession(a, .{ .initialize = .{ .folders = &.{try paths.pathToUri(a, root)}, .config = .{} } });
+    var td = json_util.obj(a);
+    try td.put("uri", json_util.str(uri));
+    var saved = json_util.obj(a);
+    try saved.put("textDocument", .{ .object = td });
+    try tmp.dir.writeFile(.{ .sub_path = "workspace/site.yml", .data = "- hosts: all\n  vars: {saved_value: true}\n" });
+    try didSave(&server, a, .{ .object = saved });
+    try testing.expectEqualStrings("saved_value", server.index.get(path).?.facts.var_defs[0].name);
+
+    // Deleted files still resolve through the existing symlinked ancestor.
+    try tmp.dir.deleteFile("workspace/site.yml");
+    var change = json_util.obj(a);
+    try change.put("uri", json_util.str(uri));
+    try change.put("type", json_util.num(3));
+    var changes = std.json.Array.init(a);
+    try changes.append(.{ .object = change });
+    var watched = json_util.obj(a);
+    try watched.put("changes", .{ .array = changes });
+    try didChangeWatchedFiles(&server, a, .{ .object = watched });
+    try testing.expect(server.index.get(path) == null);
+
+    // A newly created nested marker excludes the file without a session event.
+    try tmp.dir.makePath("workspace/nested/.git");
+    try tmp.dir.writeFile(.{ .sub_path = "workspace/nested/site.yml", .data = "- hosts: all\n" });
+    server.reindexPath(a, try std.fs.path.join(a, &.{ base, "linked/nested/site.yml" }));
+    try testing.expectEqual(@as(usize, 0), server.index.count());
 }

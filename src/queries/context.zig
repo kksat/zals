@@ -27,7 +27,7 @@ const workspace_index = @import("../workspace/index.zig");
 const WorkspaceIndex = workspace_index.WorkspaceIndex;
 const facts_mod = @import("../workspace/facts.zig");
 const discover = @import("../workspace/discover.zig");
-const roots_mod = @import("../workspace/roots.zig");
+const workspace_session = @import("../workspace/session.zig");
 const yaml = @import("../yaml/root.zig");
 const variables = @import("../variables/root.zig");
 const roles = @import("../roles/root.zig");
@@ -40,17 +40,6 @@ pub const view = @import("../workspace/view.zig");
 
 pub const File = view.File;
 pub const WorkspaceCollection = roles.resolve.WorkspaceCollection;
-
-/// The session's Workspaces as one request sees them (ADR-0014, ADR-0032).
-pub const Workspaces = struct {
-    /// Session Workspace roots, as paths.
-    roots: []const []const u8 = &.{},
-    marker: []const u8 = roots_mod.default_marker,
-    /// The selected virtual environment (ADR-0037).
-    venv: []const u8 = ".venv",
-    /// Lazily dumped `ansible-config` fallback paths.
-    ansible_config: ?*AnsibleConfig = null,
-};
 
 /// The module docs library for a list of effective collections paths
 /// (ADR-0037). Getting a cold library may shell out to `ansible-doc`.
@@ -72,7 +61,9 @@ pub const Docs = struct {
 pub const Session = struct {
     /// Open documents.
     documents: *DocumentStore,
-    workspaces: Workspaces = .{},
+    workspaces: workspace_session.Snapshot = .{},
+    /// Lazily dumped `ansible-config` fallback paths (not Workspace lifecycle).
+    ansible_config: ?*AnsibleConfig = null,
     docs: Docs,
     /// The client's position encoding.
     encoding: document_mod.PositionEncoding = .utf16,
@@ -159,7 +150,7 @@ pub const Context = struct {
     pub fn pathOf(self: *const Context, uri: []const u8) ![]const u8 {
         const path = try paths.uriToPath(self.allocator, uri);
         defer self.allocator.free(path);
-        return roots_mod.resolvedPath(self.allocator, path);
+        return workspace_session.resolvedPath(self.allocator, path);
     }
 
     /// The open document at `uri`, or null.
@@ -177,8 +168,7 @@ pub const Context = struct {
     pub fn workspaceRoot(self: *Context, path: []const u8) ?[]const u8 {
         const dir = std.fs.path.dirname(path) orelse path;
         if (self.owners.get(dir)) |owner| return owner;
-        const owned = roots_mod.owning(self.allocator, path, self.session.workspaces.roots, self.session.workspaces.marker) catch return null;
-        const owner = if (owned) |o| o[0] else null;
+        const owner = self.session.workspaces.owner(self.allocator, path);
         self.owners.put(dir, owner) catch {};
         return owner;
     }
@@ -358,8 +348,8 @@ pub const Context = struct {
         var it = self.session.documents.docs.valueIterator();
         while (it.next()) |doc| {
             const path = self.pathOf(doc.*.uri) catch continue;
-            if (!discover.belongsToWorkspace(root, path, self.session.workspaces.marker)) continue;
-            if (!discover.isWorkspaceFile(path)) continue;
+            const member = self.session.workspaces.member(path) orelse continue;
+            if (!std.mem.eql(u8, root, member)) continue;
             try found.put(path, doc.*);
         }
         try self.open.put(root, found);
@@ -490,7 +480,7 @@ pub const Context = struct {
         return .{
             .workspace_root = root,
             .venv = self.session.workspaces.venv,
-            .config = self.session.workspaces.ansible_config,
+            .config = self.session.ansible_config,
             .workspace_collections = if (root) |r| if (self.index().info(r)) |info| info.collection_paths else &.{} else &.{},
         };
     }
@@ -639,6 +629,9 @@ test "symlinked opened folders overlay unsaved documents with resolved paths" {
     const root = try tmp.dir.realpathAlloc(a, "workspace");
     const linked = try std.fs.path.join(a, &.{ base, "linked/site.yml" });
     const uri = try paths.pathToUri(a, linked);
+    var session = try workspace_session.Session.init(testing.allocator, null);
+    defer session.deinit();
+    _ = try session.apply(a, .{ .initialize = .{ .folders = &.{try paths.pathToUri(a, try std.fs.path.join(a, &.{ base, "linked" }))}, .config = .{} } });
     var documents = DocumentStore.init(testing.allocator, .utf16);
     defer documents.deinit();
     _ = try documents.open(uri, "ansible", 1, "- hosts: all\n  vars: {unsaved: true}\n");
@@ -651,7 +644,7 @@ test "symlinked opened folders overlay unsaved documents with resolved paths" {
     defer lease.release();
     var context = Context.init(a, &lease, .{
         .documents = &documents,
-        .workspaces = .{ .roots = &.{root} },
+        .workspaces = session.snapshot(),
         .docs = undefined, // This test never requests module documentation.
     });
     const ws = (try context.workspaceOf(uri)).?;
