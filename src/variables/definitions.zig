@@ -151,7 +151,7 @@ fn walk(
                 const val = pair.val orelse continue;
 
                 if (std.mem.eql(u8, key, "vars") and val.isMap()) {
-                    try addMapKeys(val, varsSite(node, file), out);
+                    if (varsSite(node, file)) |site| try addMapKeys(val, site, out);
                     // Structured variable values are data, not nested Ansible
                     // directives that introduce another `vars:` binding map.
                     continue;
@@ -200,7 +200,9 @@ fn roleParams(
             const key_node = pair.key orelse continue;
             const name = key_node.stringValue() orelse continue;
             if (std.mem.eql(u8, name, "vars")) {
-                if (pair.val) |value| if (value.isMap()) try addMapKeys(value, varsSite(item, .{}), out);
+                if (pair.val) |value| if (value.isMap()) {
+                    if (varsSite(item, .{})) |site| try addMapKeys(value, site, out);
+                };
                 continue;
             }
             if (std.mem.eql(u8, name, "role")) continue;
@@ -210,12 +212,14 @@ fn roleParams(
     }
 }
 
-fn varsSite(map: *const Node, file: plays.File) Site {
+fn varsSite(map: *const Node, file: plays.File) ?Site {
     return switch (plays.classify(map, file).kind) {
         .play => .play_vars,
         .block => .block_vars,
-        // Keep import vars as task_vars until the separate D2 scope fix.
-        .playbook_import, .task, .role_invocation, .none => .task_vars,
+        // These vars belong to the imported Plays, not sibling Plays here.
+        // Import-to-playbook reachability is not modeled yet.
+        .playbook_import => null,
+        .task, .role_invocation, .none => .task_vars,
     };
 }
 
@@ -269,6 +273,31 @@ fn collectGeneral(src: []const u8) ![]Definition {
     errdefer list.deinit();
     try collect(testing.allocator, &forest, .general, &list);
     return list.toOwnedSlice();
+}
+
+test "playbook import vars do not bind in the importing file" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    for ([_][]const u8{ "import_playbook", "ansible.builtin.import_playbook", "ansible.legacy.import_playbook" }) |name| {
+        const src = try std.fmt.allocPrint(
+            a,
+            "- {s}: other.yml\n  vars: {{x: 1, config: {{port: 80}}}}\n" ++
+                "- hosts: all\n  vars: {{x: 2}}\n  tasks:\n    - debug: {{msg: \"{{{{ x }}}}\"}}\n",
+            .{name},
+        );
+        var forest = try yaml.parse(a, src);
+        defer forest.deinit();
+        var defs = std.array_list.Managed(Definition).init(a);
+        try collect(a, &forest, .general, &defs);
+        try testing.expectEqual(@as(usize, 1), defs.items.len);
+        try testing.expectEqualStrings("x", defs.items[0].name);
+        try testing.expectEqual(Site.play_vars, defs.items[0].site);
+        try testing.expectEqual(std.mem.indexOf(u8, src, "x: 2").?, defs.items[0].start);
+        var fields = std.array_list.Managed(@import("fields.zig").Definition).init(a);
+        try @import("fields.zig").below(a, &forest, defs.items, &fields);
+        try testing.expectEqual(@as(usize, 0), fields.items.len);
+    }
 }
 
 test "vars, set_fact, register, loop_var" {

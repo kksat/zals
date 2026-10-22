@@ -176,6 +176,13 @@ files they load. A task file outside a role reaches its direct includers and
 one level of their vars-file loads. Remaining Workspace definitions are still
 listed, but are not ranked as active candidates.
 
+`vars:` on a playbook import (`import_playbook`,
+`ansible.builtin.import_playbook`, or `ansible.legacy.import_playbook`) does
+not bind variables in the importing file: those values must not shadow a
+sibling Play's own `vars:`. Ansible applies import vars to the imported Plays,
+but navigation does not yet follow that import-to-playbook reachability edge
+or rank the import's values above the imported Play's vars.
+
 These are static, file-level approximations, not Ansible execution: task/block
 lexical lifetime, include order, inventory, extra-vars, and dynamically computed
 paths are not fully modeled. No-session requests retain the smaller enclosing
