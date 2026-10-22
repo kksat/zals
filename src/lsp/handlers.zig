@@ -77,8 +77,7 @@ pub fn handleNotification(self: *Server, a: Allocator, method: []const u8, param
         try self.settings.update(params);
         const marker_changed = !std.mem.eql(u8, previous, self.settings.root_marker);
         if (marker_changed) self.warned_missing_workspace = false;
-        try self.rebuildWorkspaces();
-        if (marker_changed) try self.syncIndex(true);
+        try self.rebuildWorkspaces(marker_changed);
         try self.warnMissingWorkspace(a);
         return;
     }
@@ -205,6 +204,33 @@ fn onInitialize(self: *Server, a: Allocator, id: Value, params: Value) !void {
     try result.put("serverInfo", .{ .object = info });
 
     try self.sendResult(a, id, .{ .object = result });
+}
+
+test "marker changes scan each newly resolved Workspace only once" {
+    const testing = std.testing;
+    const Transport = @import("transport.zig").Transport;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.makeDir(".git");
+    try tmp.dir.makePath("child/next-marker");
+    const output = try tmp.dir.createFile("messages", .{ .read = true });
+    defer output.close();
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const child = try tmp.dir.realpathAlloc(a, "child");
+    const uri = try @import("../paths.zig").pathToUri(a, child);
+    var server = try Server.init(testing.allocator, Transport.init(output, output));
+    defer server.deinit();
+    server.initialized = true;
+    try server.setOpenedFolders(&.{uri});
+    const before = server.index.next_generation;
+    const changed = try std.json.parseFromSliceLeaky(Value, a,
+        \\{"settings":{"ansible":{"workspace":{"rootMarker":"next-marker"}}}}
+    , .{});
+    try handleNotification(&server, a, "workspace/didChangeConfiguration", changed);
+    try testing.expectEqual(before + 1, server.index.next_generation);
+    try testing.expectEqualStrings(child, server.root_paths.items[0]);
 }
 
 test "removed refresh leaves settings and Workspaces unchanged while standard configuration still works" {
