@@ -219,8 +219,8 @@ test "removed refresh leaves settings and Workspaces unchanged while standard co
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const root = try tmp.dir.realpathAlloc(a, ".");
-    const root_uri = try @import("../paths.zig").pathToUri(a, root);
+    const root_path = try tmp.dir.realpathAlloc(a, ".");
+    const root_uri = try @import("../paths.zig").pathToUri(a, root_path);
     const ids = [_]Value{ .{ .integer = 0 }, json_util.str("refresh") };
     {
         var server = try Server.init(testing.allocator, Transport.init(output, output));
@@ -233,23 +233,23 @@ test "removed refresh leaves settings and Workspaces unchanged while standard co
         try testing.expectEqualStrings("workspace-marker", server.settings.root_marker);
         try testing.expectEqualStrings("custom-venv", server.settings.venv_path);
         try testing.expect(!server.settings.validation_enabled);
-        try testing.expectEqual(@as(usize, 1), server.root_uris.items.len);
-        try testing.expectEqualStrings(root_uri, server.root_uris.items[0]);
+        try testing.expectEqual(@as(usize, 1), server.root_paths.items.len);
+        try testing.expectEqualStrings(root_path, server.root_paths.items[0]);
 
         for (ids) |id| {
             try handleRequest(&server, a, id, "ansible/refreshConfiguration", .null);
             try testing.expectEqualStrings("workspace-marker", server.settings.root_marker);
             try testing.expectEqualStrings("custom-venv", server.settings.venv_path);
             try testing.expect(!server.settings.validation_enabled);
-            try testing.expectEqual(@as(usize, 1), server.root_uris.items.len);
-            try testing.expectEqualStrings(root_uri, server.root_uris.items[0]);
+            try testing.expectEqual(@as(usize, 1), server.root_paths.items.len);
+            try testing.expectEqualStrings(root_path, server.root_paths.items[0]);
         }
         try handleNotification(&server, a, "ansible/refreshConfiguration", .null);
         try testing.expectEqualStrings("workspace-marker", server.settings.root_marker);
         try testing.expectEqualStrings("custom-venv", server.settings.venv_path);
         try testing.expect(!server.settings.validation_enabled);
-        try testing.expectEqual(@as(usize, 1), server.root_uris.items.len);
-        try testing.expectEqualStrings(root_uri, server.root_uris.items[0]);
+        try testing.expectEqual(@as(usize, 1), server.root_paths.items.len);
+        try testing.expectEqualStrings(root_path, server.root_paths.items[0]);
 
         const changed = try std.json.parseFromSliceLeaky(Value, a,
             \\{"settings":{"ansible":{"workspace":{"rootMarker":"next-marker"},"python":{"venvPath":"next-venv"},"validation":{"enabled":false}}}}
@@ -258,8 +258,8 @@ test "removed refresh leaves settings and Workspaces unchanged while standard co
         try testing.expectEqualStrings("next-marker", server.settings.root_marker);
         try testing.expectEqualStrings("next-venv", server.settings.venv_path);
         try testing.expect(!server.settings.validation_enabled);
-        try testing.expectEqual(@as(usize, 1), server.root_uris.items.len);
-        try testing.expectEqualStrings(root_uri, server.root_uris.items[0]);
+        try testing.expectEqual(@as(usize, 1), server.root_paths.items.len);
+        try testing.expectEqualStrings(root_path, server.root_paths.items[0]);
     }
 
     try output.seekTo(0);
