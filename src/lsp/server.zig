@@ -46,8 +46,8 @@ pub const Server = struct {
     supports_create_file: bool = false,
     /// Folders the client opened, before Workspace resolution.
     opened_uris: std.array_list.Managed([]const u8),
-    /// Resolved Workspace URIs, one per distinct `.git`.
-    root_uris: std.array_list.Managed([]const u8),
+    /// Resolved Workspace paths, one per distinct `.git`.
+    root_paths: std.array_list.Managed([]const u8),
     /// True when at least one opened folder has no Workspace.
     missing_workspace: bool = false,
     warned_missing_workspace: bool = false,
@@ -86,7 +86,7 @@ pub const Server = struct {
             .docs_service = DocsService.init(allocator),
             .contextual_docs = docs_service.ContextLibraries.init(allocator, runner),
             .opened_uris = std.array_list.Managed([]const u8).init(allocator),
-            .root_uris = std.array_list.Managed([]const u8).init(allocator),
+            .root_paths = std.array_list.Managed([]const u8).init(allocator),
             .index = index,
         };
     }
@@ -107,8 +107,8 @@ pub const Server = struct {
         self.docs_service.deinit();
         for (self.opened_uris.items) |u| self.allocator.free(u);
         self.opened_uris.deinit();
-        for (self.root_uris.items) |u| self.allocator.free(u);
-        self.root_uris.deinit();
+        for (self.root_paths.items) |p| self.allocator.free(p);
+        self.root_paths.deinit();
         // Flush any queued outgoing messages before tearing down the writer.
         self.writer.deinit();
     }
@@ -211,26 +211,16 @@ pub const Server = struct {
     }
 
     pub fn rebuildWorkspaces(self: *Server) !void {
-        for (self.root_uris.items) |u| self.allocator.free(u);
-        self.root_uris.clearRetainingCapacity();
-        self.missing_workspace = false;
-        for (self.opened_uris.items) |uri| {
-            const path = try paths.uriToPath(self.allocator, uri);
-            defer self.allocator.free(path);
-            const found = try roots.find(self.allocator, path, self.settings.root_marker);
-            if (found) |root| {
-                defer self.allocator.free(root);
-                const root_uri = try paths.pathToUri(self.allocator, root);
-                errdefer self.allocator.free(root_uri);
-                if (containsUri(self.root_uris.items, root_uri)) {
-                    self.allocator.free(root_uri);
-                } else {
-                    try self.root_uris.append(root_uri);
-                }
-            } else {
-                self.missing_workspace = true;
-            }
-        }
+        var arena = std.heap.ArenaAllocator.init(self.allocator);
+        defer arena.deinit();
+        const a = arena.allocator();
+        var opened = std.array_list.Managed([]const u8).init(a);
+        for (self.opened_uris.items) |uri| try opened.append(try paths.uriToPath(a, uri));
+        const resolved = try roots.resolve(self.allocator, opened.items, self.settings.root_marker);
+        for (self.root_paths.items) |path| self.allocator.free(path);
+        self.root_paths.deinit();
+        self.root_paths = resolved.roots;
+        self.missing_workspace = resolved.missing;
         try self.syncIndex(false);
     }
 
@@ -238,10 +228,7 @@ pub const Server = struct {
     /// Workspace (the root marker changed). No-op before `initialized`.
     pub fn syncIndex(self: *Server, rescan: bool) !void {
         if (!self.initialized) return;
-        var arena = std.heap.ArenaAllocator.init(self.allocator);
-        defer arena.deinit();
-        const session = try self.workspacePaths(arena.allocator());
-        try self.index.syncRoots(self.pool, session, self.settings.root_marker, rescan);
+        try self.index.syncRoots(self.pool, self.workspacePaths(), self.settings.root_marker, rescan);
     }
 
     /// Ask the client to watch navigation and collection source files
@@ -280,15 +267,13 @@ pub const Server = struct {
     }
 
     /// Session Workspace roots as filesystem paths.
-    pub fn workspacePaths(self: *Server, a: Allocator) ![]const []const u8 {
-        var list = std.array_list.Managed([]const u8).init(a);
-        for (self.root_uris.items) |u| try list.append(try paths.uriToPath(a, u));
-        return list.toOwnedSlice();
+    pub fn workspacePaths(self: *Server) []const []const u8 {
+        return self.root_paths.items;
     }
 
     /// The session Workspace root that owns `file_path`, or null.
     pub fn workspaceRootFor(self: *Server, a: Allocator, file_path: []const u8) ?[]const u8 {
-        const session = self.workspacePaths(a) catch return null;
+        const session = self.workspacePaths();
         const owned = roots.owning(a, file_path, session, self.settings.root_marker) catch return null;
         return if (owned) |o| o[0] else null;
     }
@@ -307,7 +292,7 @@ pub const Server = struct {
         return navigation_context.Context.init(a, lease, .{
             .documents = &self.documents,
             .workspaces = .{
-                .roots = try self.workspacePaths(a),
+                .roots = self.workspacePaths(),
                 .marker = self.settings.root_marker,
                 .venv = self.venvPath(),
                 .ansible_config = &self.ansible_config,
@@ -331,10 +316,3 @@ pub const Server = struct {
         self.warned_missing_workspace = true;
     }
 };
-
-fn containsUri(uris: []const []const u8, uri: []const u8) bool {
-    for (uris) |existing| {
-        if (std.mem.eql(u8, existing, uri)) return true;
-    }
-    return false;
-}
