@@ -110,11 +110,6 @@ pub fn owning(
     return null;
 }
 
-/// One session warning, after the client is ready, when a folder has no Workspace.
-pub fn warnDue(enabled: bool, missing: bool, already_sent: bool, ready: bool) bool {
-    return enabled and missing and !already_sent and ready;
-}
-
 /// Resolve symlinks once for Workspace ownership and membership comparisons.
 /// A not-yet-existing path keeps its suffix below the nearest existing ancestor.
 /// The caller frees the result.
@@ -445,12 +440,4 @@ test "blank or path marker falls back to .git" {
     try testing.expectEqualStrings(default_marker, effectiveMarker("foo/bar"));
     try testing.expectEqualStrings("ansible.cfg", effectiveMarker("ansible.cfg"));
     try testing.expectEqualStrings(".ansible-lint", effectiveMarker(".ansible-lint"));
-}
-
-test "missing workspace warning is one session notice" {
-    try testing.expect(warnDue(true, true, false, true));
-    try testing.expect(!warnDue(false, true, false, true));
-    try testing.expect(!warnDue(true, false, false, true));
-    try testing.expect(!warnDue(true, true, true, true));
-    try testing.expect(!warnDue(true, true, false, false));
 }

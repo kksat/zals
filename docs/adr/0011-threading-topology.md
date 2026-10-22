@@ -30,6 +30,8 @@ thread can apply results without busy-waiting.
 
 Implemented in `concurrency/pool.zig` (worker pool), `services/docs_service.zig`
 (docs prefetch + cache writes), and `lsp/writer.zig` (outgoing writer thread).
+`workspace/session.zig` owns Workspace lifecycle state on the main thread;
+`lsp/server.zig` applies its returned index and warning effects there.
 The docs library guards its maps with a mutex held only during ingestion, never
 across an `ansible-doc` subprocess. Parsing, linting, and schema validation
 remain on the main thread for now; the self-pipe is not needed until those move

@@ -78,6 +78,5 @@ pub fn didChangeWorkspaceFolders(self: *Server, a: Allocator, params: Value) !vo
             if (json_util.string(f, "uri")) |uri| try added.append(uri);
         }
     }
-    try self.applyOpenedChange(removed.items, added.items);
-    try self.warnMissingWorkspace(a);
+    try self.applySession(a, .{ .folders_changed = .{ .removed = removed.items, .added = added.items } });
 }

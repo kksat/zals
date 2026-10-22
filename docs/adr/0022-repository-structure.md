@@ -24,6 +24,7 @@ src/
   yaml/         parser interface, tree-sitter backend, DOM, path utilities
   exec/         command-runner interface and POSIX backend
   workspace/    document store, git Workspaces, settings
+    session.zig session Workspace events, effects and ownership snapshot
   cli.zig       argument parsing
   root.zig      library root
   main.zig      CLI entry point
