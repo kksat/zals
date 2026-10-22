@@ -20,6 +20,7 @@
 //! YAML DOM's parent pointers and source ranges.
 
 const std = @import("std");
+const plays = @import("../yaml/plays.zig");
 const Allocator = std.mem.Allocator;
 const Value = std.json.Value;
 const json_util = @import("../lsp/json_util.zig");
@@ -734,7 +735,7 @@ fn nearestTaskItem(node: *Node) ?*Node {
 fn isDebugTask(map: *Node) bool {
     const key = moduleKey(map) orelse return false;
     const name = key.stringValue() orelse return false;
-    return isModuleKey(name, "debug");
+    return plays.isAction(name, "debug");
 }
 
 /// The first key of a task map that is not a task keyword — the module key.
@@ -746,14 +747,6 @@ fn moduleKey(map: *Node) ?*Node {
         return key;
     }
     return null;
-}
-
-fn isModuleKey(key: []const u8, name: []const u8) bool {
-    if (std.mem.eql(u8, key, name)) return true;
-    if (key.len > name.len + 1 and key[key.len - name.len - 1] == '.') {
-        return std.mem.endsWith(u8, key, name);
-    }
-    return false;
 }
 
 fn indexOf(seq: *Node, item: *Node) ?usize {

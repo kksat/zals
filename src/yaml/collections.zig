@@ -4,6 +4,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const dom = @import("dom.zig");
 const Node = dom.Node;
+const plays = @import("plays.zig");
 const AncestryBuilder = @import("ancestry.zig").AncestryBuilder;
 
 fn appendForMap(_arena: Allocator, out: *std.array_list.Managed([]const u8), map: *const Node) !void {
@@ -58,8 +59,7 @@ fn roleModuleMap(map: *const Node) bool {
     for (map.items) |pair| {
         const key = (pair.key orelse continue).stringValue() orelse continue;
         for ([_][]const u8{ "include_role", "import_role" }) |module| {
-            if (std.mem.eql(u8, key, module) or
-                (std.mem.endsWith(u8, key, module) and key.len > module.len and key[key.len - module.len - 1] == '.')) return true;
+            if (plays.isAction(key, module)) return true;
         }
     }
     return false;

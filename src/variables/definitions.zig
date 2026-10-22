@@ -6,6 +6,7 @@
 //! `argument_specs` options.
 
 const std = @import("std");
+const plays = @import("../yaml/plays.zig");
 const Allocator = std.mem.Allocator;
 const dom = @import("../yaml/dom.zig");
 const Node = dom.Node;
@@ -139,7 +140,7 @@ fn walk(
                     // Structured variable values are data, not nested Ansible
                     // directives that introduce another `vars:` binding map.
                     continue;
-                } else if (isModuleKey(key, "set_fact") and val.isMap()) {
+                } else if (plays.isAction(key, "set_fact") and val.isMap()) {
                     try addMapKeys(val, .set_fact, out);
                     continue;
                 } else if (std.mem.eql(u8, key, "register") and val.isScalar()) {
@@ -207,14 +208,6 @@ fn varsSite(map: *const Node) Site {
         dom.findPair(map, "rescue") != null or
         dom.findPair(map, "always") != null) return .block_vars;
     return .task_vars;
-}
-
-fn isModuleKey(key: []const u8, name: []const u8) bool {
-    if (std.mem.eql(u8, key, name)) return true;
-    if (key.len > name.len + 1 and key[key.len - name.len - 1] == '.') {
-        return std.mem.endsWith(u8, key, name);
-    }
-    return false;
 }
 
 fn addMapKeys(
