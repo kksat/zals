@@ -7,6 +7,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const yaml = @import("../yaml/root.zig");
 const Node = yaml.Node;
+const plays = yaml.plays;
 
 pub const Kind = enum { play, task, handler };
 
@@ -32,24 +33,18 @@ pub fn collect(a: Allocator, forest: *const yaml.Forest, path: []const u8) !Resu
     const in_handlers = std.mem.indexOf(u8, path, "/handlers/") != null;
     for (forest.roots) |root| {
         if (!root.isSeq()) continue;
-        if (isPlaybook(root)) {
+        if (plays.shape(root) == .playbook) {
             shape = .playbook;
             for (root.items) |play| {
                 if (!play.isMap()) continue;
                 const play_name = nameOf(play) orelse "";
                 if (nameNode(play)) |n| try out.append(.{ .name = try a.dupe(u8, play_name), .kind = .play, .start = n.start, .end = n.end });
-                for (play.items) |pair| {
-                    const key = (pair.key orelse continue).stringValue() orelse continue;
-                    const val = pair.val orelse continue;
-                    if (!val.isSeq()) continue;
-                    if (std.mem.eql(u8, key, "handlers")) {
-                        try tasks(a, val, .handler, play_name, &out);
-                    } else if (std.mem.eql(u8, key, "tasks") or std.mem.eql(u8, key, "pre_tasks") or std.mem.eql(u8, key, "post_tasks")) {
-                        try tasks(a, val, .task, play_name, &out);
-                    }
+                var lists = plays.taskLists(play, plays.classify(play, .{}));
+                while (lists.next()) |list| {
+                    try tasks(a, list.seq, if (list.handler) .handler else .task, play_name, &out);
                 }
             }
-        } else if (hasMapItem(root)) {
+        } else if (plays.shape(root) == .task_list) {
             shape = .task_file;
             try tasks(a, root, if (in_handlers) .handler else .task, "", &out);
         }
@@ -63,10 +58,8 @@ fn tasks(a: Allocator, seq: *Node, kind: Kind, play: []const u8, out: *std.array
         if (nameNode(item)) |n| {
             try out.append(.{ .name = try a.dupe(u8, n.stringValue().?), .kind = kind, .play = try a.dupe(u8, play), .start = n.start, .end = n.end });
         }
-        for ([_][]const u8{ "block", "rescue", "always" }) |section| {
-            const p = yaml.dom.findPair(item, section) orelse continue;
-            if (p.val) |v| if (v.isSeq()) try tasks(a, v, kind, play, out);
-        }
+        var lists = plays.taskLists(item, plays.classify(item, .{}));
+        while (lists.next()) |list| try tasks(a, list.seq, kind, play, out);
     }
 }
 
@@ -80,22 +73,6 @@ fn nameNode(map: *Node) ?*Node {
 
 fn nameOf(map: *Node) ?[]const u8 {
     return (nameNode(map) orelse return null).stringValue();
-}
-
-fn isPlaybook(seq: *Node) bool {
-    for (seq.items) |item| {
-        if (!item.isMap()) continue;
-        for (item.items) |pair| {
-            const name = (pair.key orelse continue).stringValue() orelse continue;
-            if (yaml.keywords.isPlayExclusiveKeyword(name) or std.mem.eql(u8, name, "import_playbook")) return true;
-        }
-    }
-    return false;
-}
-
-fn hasMapItem(seq: *Node) bool {
-    for (seq.items) |item| if (item.isMap()) return true;
-    return false;
 }
 
 /// Case-insensitive substring match; an empty query matches everything.

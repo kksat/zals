@@ -30,7 +30,6 @@ const Document = @import("../workspace/document.zig").Document;
 const yaml = @import("../yaml/root.zig");
 const dom = yaml.dom;
 const Node = yaml.Node;
-const keywords = yaml.keywords;
 const variables = @import("../variables/root.zig");
 const paths = @import("../paths.zig");
 
@@ -214,7 +213,7 @@ fn addAction(
     } else {
         const play = if (container) |c| enclosingPlay(c) else null;
         const p = play orelse return null;
-        if (isImportPlaybook(p)) return null;
+        if (plays.classify(p, .{}).kind == .playbook_import) return null;
         edit = (try playInsertion(a, text, p, var_name, eol)) orelse return null;
     }
 
@@ -587,13 +586,16 @@ fn isTaskListSeq(seq: *Node) bool {
     if (!seq.isSeq()) return false;
     if (seq.parent == null) {
         if (seq.items.len == 0) return false;
-        return isTaskItem(seq.items[0]);
+        return switch (plays.classify(seq.items[0], .{}).kind) {
+            .task, .block => true,
+            else => false,
+        };
     }
     const pair = seq.parent.?;
-    if (!pair.isPair()) return false;
-    const key = pair.key orelse return false;
-    const name = key.stringValue() orelse return false;
-    return isTaskSection(name);
+    const map = pair.parent orelse return false;
+    var lists = plays.taskLists(map, plays.classify(map, .{}));
+    while (lists.next()) |list| if (list.seq == seq) return true;
+    return false;
 }
 
 /// The direct items of `seq` whose line range intersects `sel`.
@@ -674,48 +676,13 @@ fn findContainerNode(node: *Node, text: []const u8, offset: usize) ?*Node {
     return best;
 }
 
-/// True when `map` is a direct item of a task-list sequence: a task section
-/// (`tasks`, `pre_tasks`, `post_tasks`, `handlers`, `block`, `rescue`,
-/// `always`) or an item of a task file's root sequence.
-fn isTaskItem(map: *Node) bool {
-    const seq = map.parent orelse return false;
-    if (!seq.isSeq()) return false;
-    if (seq.parent == null) return !isPlay(map);
-    const pair = seq.parent.?;
-    if (!pair.isPair()) return false;
-    const key = pair.key orelse return false;
-    const name = key.stringValue() orelse return false;
-    return isTaskSection(name);
-}
-
-fn isTaskSection(name: []const u8) bool {
-    return std.mem.eql(u8, name, "tasks") or
-        std.mem.eql(u8, name, "pre_tasks") or
-        std.mem.eql(u8, name, "post_tasks") or
-        std.mem.eql(u8, name, "handlers") or
-        std.mem.eql(u8, name, "block") or
-        std.mem.eql(u8, name, "rescue") or
-        std.mem.eql(u8, name, "always");
-}
-
-fn isPlay(map: *Node) bool {
-    for (map.items) |pair| {
-        const key = pair.key orelse continue;
-        const name = key.stringValue() orelse continue;
-        if (keywords.isPlayExclusiveKeyword(name)) return true;
-        if (std.mem.eql(u8, name, "import_playbook")) return true;
-    }
-    return false;
-}
-
-fn isImportPlaybook(map: *Node) bool {
-    return dom.findPair(map, "import_playbook") != null;
-}
-
 fn enclosingPlay(node: *Node) ?*Node {
     var cur: ?*Node = node;
     while (cur) |n| {
-        if (n.isMap() and isPlay(n)) return n;
+        switch (plays.classify(n, .{}).kind) {
+            .play, .playbook_import => return n,
+            else => {},
+        }
         cur = n.parent;
     }
     return null;
@@ -726,27 +693,19 @@ fn enclosingPlay(node: *Node) ?*Node {
 fn nearestTaskItem(node: *Node) ?*Node {
     var cur: ?*Node = node;
     while (cur) |n| {
-        if (n.isMap() and isTaskItem(n)) return n;
+        switch (plays.classify(n, .{}).kind) {
+            .task, .block => return n,
+            else => {},
+        }
         cur = n.parent;
     }
     return null;
 }
 
 fn isDebugTask(map: *Node) bool {
-    const key = moduleKey(map) orelse return false;
-    const name = key.stringValue() orelse return false;
-    return plays.isAction(name, "debug");
-}
-
-/// The first key of a task map that is not a task keyword — the module key.
-fn moduleKey(map: *Node) ?*Node {
-    for (map.items) |pair| {
-        const key = pair.key orelse continue;
-        const name = key.stringValue() orelse continue;
-        if (keywords.isTaskKeyword(name)) continue;
-        return key;
-    }
-    return null;
+    const ref = plays.module(map) orelse return false;
+    // ADR-0028 is keyed to a Module key, not action/local_action (D5).
+    return ref.is_key and plays.isAction(ref.name, "debug");
 }
 
 fn indexOf(seq: *Node, item: *Node) ?usize {
