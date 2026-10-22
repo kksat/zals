@@ -15,6 +15,7 @@ const Document = @import("../workspace/document.zig").Document;
 const yaml = @import("../yaml/root.zig");
 const dom = yaml.dom;
 const Node = yaml.Node;
+const plays = yaml.plays;
 const DocumentSymbol = lsp.DocumentSymbol;
 const SymbolKind = lsp.SymbolKind;
 
@@ -54,32 +55,11 @@ fn walkRoot(
     out: *std.array_list.Managed(DocumentSymbol),
 ) Allocator.Error!void {
     if (root.isMap()) return walkMap(a, doc, root, out);
-    if (!root.isSeq()) return;
-    if (hasPlay(root)) return walkPlaybook(a, doc, root, out);
-    if (hasMapItem(root)) {
-        const kind: SymbolKind = if (isHandlersDir(uri)) .event else .object;
-        return collectTasks(a, doc, root, kind, out);
+    switch (plays.shape(root)) {
+        .playbook => try walkPlaybook(a, doc, root, out),
+        .task_list => try collectTasks(a, doc, root, if (isHandlersDir(uri)) .event else .object, out),
+        .other => {},
     }
-}
-
-/// A seq root is a playbook when any item carries a play-exclusive keyword or
-/// is an `import_playbook` directive.
-fn hasPlay(seq: *const Node) bool {
-    for (seq.items) |item| {
-        if (!item.isMap()) continue;
-        for (item.items) |pair| {
-            const key = pair.key orelse continue;
-            const name = key.stringValue() orelse continue;
-            if (yaml.keywords.isPlayExclusiveKeyword(name)) return true;
-            if (std.mem.eql(u8, name, "import_playbook")) return true;
-        }
-    }
-    return false;
-}
-
-fn hasMapItem(seq: *const Node) bool {
-    for (seq.items) |item| if (item.isMap()) return true;
-    return false;
 }
 
 fn walkPlaybook(
@@ -112,24 +92,20 @@ fn collectPlayChildren(
     play: *const Node,
     out: *std.array_list.Managed(DocumentSymbol),
 ) Allocator.Error!void {
+    var lists = plays.taskLists(play, plays.classify(play, .{}));
+    var next = lists.next();
     for (play.items) |pair| {
         const key = pair.key orelse continue;
         const name = key.stringValue() orelse continue;
         const val = pair.val orelse continue;
         if (std.mem.eql(u8, name, "roles") and val.isSeq()) {
             try collectRoleInvocations(a, doc, val, out);
-        } else if (isTaskSection(name) and val.isSeq()) {
-            const kind: SymbolKind = if (std.mem.eql(u8, name, "handlers")) .event else .object;
-            try collectTasks(a, doc, val, kind, out);
+        } else if (next) |list| {
+            if (val != list.seq) continue;
+            try collectTasks(a, doc, list.seq, if (list.handler) .event else .object, out);
+            next = lists.next();
         }
     }
-}
-
-fn isTaskSection(name: []const u8) bool {
-    return std.mem.eql(u8, name, "tasks") or
-        std.mem.eql(u8, name, "pre_tasks") or
-        std.mem.eql(u8, name, "post_tasks") or
-        std.mem.eql(u8, name, "handlers");
 }
 
 fn collectTasks(
@@ -143,7 +119,7 @@ fn collectTasks(
     for (seq.items) |item| {
         n += 1;
         if (!item.isMap()) continue;
-        if (isBlock(item)) {
+        if (plays.classify(item, .{}).kind == .block) {
             try out.append(try blockSymbol(a, doc, item, n));
         } else {
             try out.append(try taskSymbol(a, doc, item, kind, n));
@@ -153,13 +129,10 @@ fn collectTasks(
 
 fn blockSymbol(a: Allocator, doc: *const Document, map: *const Node, n: usize) Allocator.Error!DocumentSymbol {
     var children = std.array_list.Managed(DocumentSymbol).init(a);
-    for (map.items) |pair| {
-        const key = pair.key orelse continue;
-        const name = key.stringValue() orelse continue;
-        const val = pair.val orelse continue;
-        if (isBlockSection(name) and val.isSeq()) {
-            try collectTasks(a, doc, val, .object, &children);
-        }
+    var lists = plays.taskLists(map, plays.classify(map, .{}));
+    while (lists.next()) |list| {
+        // Preserve the outline's current Block-child labels until D3.
+        try collectTasks(a, doc, list.seq, .object, &children);
     }
     const name = if (pairValue(map, "name")) |v| v.stringValue() orelse "" else "";
     const final = if (name.len > 0)
@@ -184,7 +157,8 @@ fn taskSymbol(
     n: usize,
 ) Allocator.Error!DocumentSymbol {
     const name_node = pairValue(map, "name");
-    const mod = moduleKey(map);
+    const ref = plays.module(map);
+    const mod = if (ref) |m| if (m.is_key) m.node else null else null;
     const name = if (name_node) |v| v.stringValue() orelse "" else "";
     const mod_name = if (mod) |k| k.stringValue() orelse "" else "";
     const final = if (name.len > 0)
@@ -206,30 +180,6 @@ fn taskSymbol(
         .range = rangeOf(doc, map),
         .selectionRange = rangeOf(doc, sel),
     };
-}
-
-/// The first key of a task map that is not a task keyword — the module being
-/// invoked. Purely structural; no docs-catalog lookup.
-fn moduleKey(map: *const Node) ?*Node {
-    for (map.items) |pair| {
-        const key = pair.key orelse continue;
-        const name = key.stringValue() orelse continue;
-        if (yaml.keywords.isTaskKeyword(name)) continue;
-        return key;
-    }
-    return null;
-}
-
-fn isBlock(map: *const Node) bool {
-    return dom.findPair(map, "block") != null or
-        dom.findPair(map, "rescue") != null or
-        dom.findPair(map, "always") != null;
-}
-
-fn isBlockSection(name: []const u8) bool {
-    return std.mem.eql(u8, name, "block") or
-        std.mem.eql(u8, name, "rescue") or
-        std.mem.eql(u8, name, "always");
 }
 
 fn collectRoleInvocations(
