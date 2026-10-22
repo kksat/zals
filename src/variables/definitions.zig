@@ -130,6 +130,8 @@ fn walk(
 ) !void {
     switch (node.kind) {
         .map => {
+            var lists = plays.taskLists(node, plays.classify(node, .{}));
+            var next = lists.next();
             for (node.items) |pair| {
                 const key_node = pair.key orelse continue;
                 const key = key_node.stringValue() orelse continue;
@@ -162,20 +164,17 @@ fn walk(
                 }
                 // Recurse only through Ansible play/task containers. Module
                 // arguments and other keyword values are data, not directives.
-                if (isTaskContainer(key)) try walk(allocator, val, text, out);
+                if (next) |list| {
+                    if (val == list.seq) {
+                        try walk(allocator, val, text, out);
+                        next = lists.next();
+                    }
+                }
             }
         },
         .seq => for (node.items) |item| try walk(allocator, item, text, out),
         else => {},
     }
-}
-
-/// Ansible play/task containers, excluding keyword values and module data.
-pub fn isTaskContainer(key: []const u8) bool {
-    for ([_][]const u8{ "tasks", "handlers", "pre_tasks", "post_tasks", "block", "rescue", "always" }) |container| {
-        if (std.mem.eql(u8, key, container)) return true;
-    }
-    return false;
 }
 
 fn roleParams(
@@ -199,15 +198,12 @@ fn roleParams(
 }
 
 fn varsSite(map: *const Node) Site {
-    if (dom.findPair(map, "hosts") != null or
-        dom.findPair(map, "tasks") != null or
-        dom.findPair(map, "roles") != null or
-        dom.findPair(map, "pre_tasks") != null or
-        dom.findPair(map, "post_tasks") != null) return .play_vars;
-    if (dom.findPair(map, "block") != null or
-        dom.findPair(map, "rescue") != null or
-        dom.findPair(map, "always") != null) return .block_vars;
-    return .task_vars;
+    return switch (plays.classify(map, .{}).kind) {
+        .play => .play_vars,
+        .block => .block_vars,
+        // Keep import vars as task_vars until the separate D2 scope fix.
+        .playbook_import, .task, .role_invocation, .none => .task_vars,
+    };
 }
 
 fn addMapKeys(
