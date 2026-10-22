@@ -258,12 +258,15 @@ fn mapSymbol(
 }
 
 fn playName(a: Allocator, map: *const Node, n: usize) Allocator.Error![]const u8 {
-    inline for (.{ "name", "hosts", "import_playbook" }) |key| {
+    inline for (.{ "name", "hosts" }) |key| {
         if (pairValue(map, key)) |v| {
             if (v.stringValue()) |s| {
                 if (s.len > 0) return dup(a, s);
             }
         }
+    }
+    if (importValue(map)) |v| {
+        if (v.stringValue()) |s| if (s.len > 0) return dup(a, s);
     }
     return std.fmt.allocPrint(a, "Play {d}", .{n});
 }
@@ -276,10 +279,16 @@ fn playDetail(a: Allocator, map: *const Node) Allocator.Error!?[]const u8 {
 }
 
 fn playSelection(map: *const Node) ?*Node {
-    inline for (.{ "name", "hosts", "import_playbook" }) |key| {
+    inline for (.{ "name", "hosts" }) |key| {
         if (pairValue(map, key)) |v| return v;
     }
-    return null;
+    return importValue(map);
+}
+
+fn importValue(map: *const Node) ?*Node {
+    if (plays.classify(map, .{}).kind != .playbook_import) return null;
+    const ref = plays.module(map) orelse return null;
+    return ref.node.parent.?.val;
 }
 
 fn pairValue(map: *const Node, name: []const u8) ?*Node {
@@ -504,18 +513,18 @@ test "unclassifiable sequence yields no symbols" {
     try testing.expectEqual(@as(usize, 0), syms.len);
 }
 
-test "import_playbook is a play-level entry" {
-    const src =
-        \\- import_playbook: other.yml
-        \\
-    ;
+test "all built-in import_playbook spellings are Play-level entries" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const syms = try outline(a, src, "file:///site.yml");
-    try testing.expectEqual(@as(usize, 1), syms.len);
-    try testing.expectEqualStrings("other.yml", syms[0].name);
-    try testing.expectEqual(SymbolKind.module, syms[0].kind);
+    for ([_][]const u8{ "import_playbook", "ansible.builtin.import_playbook", "ansible.legacy.import_playbook" }) |name| {
+        const src = try std.fmt.allocPrint(a, "- {s}: other.yml\n", .{name});
+        const syms = try outline(a, src, "file:///site.yml");
+        try testing.expectEqual(@as(usize, 1), syms.len);
+        try testing.expectEqualStrings("other.yml", syms[0].name);
+        try testing.expectEqual(SymbolKind.module, syms[0].kind);
+        try testing.expectEqual(@as(u32, @intCast(name.len + 4)), syms[0].selectionRange.start.character);
+    }
 }
 
 test "selectionRange is contained by range" {

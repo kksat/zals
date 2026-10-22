@@ -1041,17 +1041,20 @@ test "no add action in a role defaults file" {
     try testing.expectEqual(@as(usize, 0), acts.len);
 }
 
-test "no add action for import_playbook" {
-    const src =
-        \\- import_playbook: "{{ playbook_name }}"
-        \\
-    ;
+test "no debug or extract action for any built-in import_playbook spelling" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-
-    const acts = try run(a, src, "/p/site.yml", "playbook_name");
-    try testing.expectEqual(@as(usize, 0), acts.len);
+    for ([_][]const u8{ "import_playbook", "ansible.builtin.import_playbook", "ansible.legacy.import_playbook" }) |name| {
+        const src = try std.fmt.allocPrint(a, "- {s}: \"{{{{ playbook_name }}}}\"\n  vars: {{x: 1}}\n", .{name});
+        for ([_][]const u8{ "playbook_name", "x: 1" }) |at| {
+            const off = std.mem.indexOf(u8, src, at).?;
+            const acts = try actions(a, src, "/p/site.yml", .{ .start = off, .end = off }, null, .{ .dir = "/p", .ext = ".yml", .exists = testExists });
+            try testing.expectEqual(@as(usize, 0), acts.len);
+        }
+        const acts = try actions(a, src, "/p/site.yml", .{ .start = 0, .end = src.len }, null, .{ .dir = "/p", .ext = ".yml", .exists = testExists });
+        try testing.expectEqual(@as(usize, 0), acts.len);
+    }
 }
 
 test "remove a debug task" {
