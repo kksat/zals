@@ -13,6 +13,7 @@ const Document = @import("../workspace/document.zig").Document;
 const providers = @import("../providers/root.zig");
 const cursor = @import("../cursor.zig");
 const Context = @import("../queries/context.zig").Context;
+const SessionConfig = @import("../workspace/session.zig").Config;
 
 pub fn handleRequest(self: *Server, a: Allocator, id: Value, method: []const u8, params: Value) !void {
     if (std.mem.eql(u8, method, "initialize")) return onInitialize(self, a, id, params);
@@ -58,9 +59,8 @@ pub fn handleNotification(self: *Server, a: Allocator, method: []const u8, param
     if (std.mem.eql(u8, method, "initialized")) {
         self.initialized = true;
         self.docs_service.start(&self.docs, self.pool);
-        try self.warnMissingWorkspace(a);
         try self.registerFileWatchers(a);
-        try self.syncIndex(false);
+        try self.applySession(a, .ready);
         return;
     }
     if (std.mem.eql(u8, method, "exit")) {
@@ -72,13 +72,8 @@ pub fn handleNotification(self: *Server, a: Allocator, method: []const u8, param
     if (std.mem.eql(u8, method, "textDocument/didClose")) return sync.didClose(self, params);
     if (std.mem.eql(u8, method, "textDocument/didSave")) return sync.didSave(self, a, params);
     if (std.mem.eql(u8, method, "workspace/didChangeConfiguration")) {
-        const previous = try self.allocator.dupe(u8, self.settings.root_marker);
-        defer self.allocator.free(previous);
         try self.settings.update(params);
-        const marker_changed = !std.mem.eql(u8, previous, self.settings.root_marker);
-        if (marker_changed) self.warned_missing_workspace = false;
-        try self.rebuildWorkspaces(marker_changed);
-        try self.warnMissingWorkspace(a);
+        try self.applySession(a, .{ .config_changed = SessionConfig.from(&self.settings) });
         return;
     }
     if (std.mem.eql(u8, method, "workspace/didChangeWorkspaceFolders")) {
@@ -194,7 +189,7 @@ fn onInitialize(self: *Server, a: Allocator, id: Value, params: Value) !void {
         try opened.append(uri);
     }
     const has_folders = opened.items.len > 0;
-    try self.setOpenedFolders(opened.items);
+    try self.applySession(a, .{ .initialize = .{ .folders = opened.items, .config = SessionConfig.from(&self.settings) } });
 
     var result = json_util.obj(a);
     try result.put("capabilities", try capabilities.build(a, encoding_name, has_folders));
@@ -220,17 +215,17 @@ test "marker changes scan each newly resolved Workspace only once" {
     const a = arena.allocator();
     const child = try tmp.dir.realpathAlloc(a, "child");
     const uri = try @import("../paths.zig").pathToUri(a, child);
-    var server = try Server.init(testing.allocator, Transport.init(output, output));
+    var server = try Server.init(testing.allocator, Transport.init(output, output), null);
     defer server.deinit();
-    server.initialized = true;
-    try server.setOpenedFolders(&.{uri});
+    try server.applySession(a, .{ .initialize = .{ .folders = &.{uri}, .config = .{} } });
+    try server.applySession(a, .ready);
     const before = server.index.next_generation;
     const changed = try std.json.parseFromSliceLeaky(Value, a,
         \\{"settings":{"ansible":{"workspace":{"rootMarker":"next-marker"}}}}
     , .{});
     try handleNotification(&server, a, "workspace/didChangeConfiguration", changed);
     try testing.expectEqual(before + 1, server.index.next_generation);
-    try testing.expectEqualStrings(child, server.root_paths.items[0]);
+    try testing.expectEqualStrings(child, server.session.snapshot().roots[0]);
 }
 
 test "removed refresh leaves settings and Workspaces unchanged while standard configuration still works" {
@@ -249,7 +244,7 @@ test "removed refresh leaves settings and Workspaces unchanged while standard co
     const root_uri = try @import("../paths.zig").pathToUri(a, root_path);
     const ids = [_]Value{ .{ .integer = 0 }, json_util.str("refresh") };
     {
-        var server = try Server.init(testing.allocator, Transport.init(output, output));
+        var server = try Server.init(testing.allocator, Transport.init(output, output), null);
         defer server.deinit(); // Flush the writer before inspecting the wire output.
         var params = try std.json.parseFromSliceLeaky(Value, a,
             \\{"initializationOptions":{"ansible":{"workspace":{"rootMarker":"workspace-marker"},"python":{"venvPath":"custom-venv"},"validation":{"enabled":false}}}}
@@ -259,23 +254,23 @@ test "removed refresh leaves settings and Workspaces unchanged while standard co
         try testing.expectEqualStrings("workspace-marker", server.settings.root_marker);
         try testing.expectEqualStrings("custom-venv", server.settings.venv_path);
         try testing.expect(!server.settings.validation_enabled);
-        try testing.expectEqual(@as(usize, 1), server.root_paths.items.len);
-        try testing.expectEqualStrings(root_path, server.root_paths.items[0]);
+        try testing.expectEqual(@as(usize, 1), server.session.snapshot().roots.len);
+        try testing.expectEqualStrings(root_path, server.session.snapshot().roots[0]);
 
         for (ids) |id| {
             try handleRequest(&server, a, id, "ansible/refreshConfiguration", .null);
             try testing.expectEqualStrings("workspace-marker", server.settings.root_marker);
             try testing.expectEqualStrings("custom-venv", server.settings.venv_path);
             try testing.expect(!server.settings.validation_enabled);
-            try testing.expectEqual(@as(usize, 1), server.root_paths.items.len);
-            try testing.expectEqualStrings(root_path, server.root_paths.items[0]);
+            try testing.expectEqual(@as(usize, 1), server.session.snapshot().roots.len);
+            try testing.expectEqualStrings(root_path, server.session.snapshot().roots[0]);
         }
         try handleNotification(&server, a, "ansible/refreshConfiguration", .null);
         try testing.expectEqualStrings("workspace-marker", server.settings.root_marker);
         try testing.expectEqualStrings("custom-venv", server.settings.venv_path);
         try testing.expect(!server.settings.validation_enabled);
-        try testing.expectEqual(@as(usize, 1), server.root_paths.items.len);
-        try testing.expectEqualStrings(root_path, server.root_paths.items[0]);
+        try testing.expectEqual(@as(usize, 1), server.session.snapshot().roots.len);
+        try testing.expectEqualStrings(root_path, server.session.snapshot().roots[0]);
 
         const changed = try std.json.parseFromSliceLeaky(Value, a,
             \\{"settings":{"ansible":{"workspace":{"rootMarker":"next-marker"},"python":{"venvPath":"next-venv"},"validation":{"enabled":false}}}}
@@ -284,8 +279,8 @@ test "removed refresh leaves settings and Workspaces unchanged while standard co
         try testing.expectEqualStrings("next-marker", server.settings.root_marker);
         try testing.expectEqualStrings("next-venv", server.settings.venv_path);
         try testing.expect(!server.settings.validation_enabled);
-        try testing.expectEqual(@as(usize, 1), server.root_paths.items.len);
-        try testing.expectEqualStrings(root_path, server.root_paths.items[0]);
+        try testing.expectEqual(@as(usize, 1), server.session.snapshot().roots.len);
+        try testing.expectEqualStrings(root_path, server.session.snapshot().roots[0]);
     }
 
     try output.seekTo(0);

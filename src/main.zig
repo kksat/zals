@@ -88,8 +88,7 @@ pub fn main() !void {
         std.fs.File.stdin(),
         std.fs.File.stdout(),
     );
-    var server = try zals.lsp.Server.init(allocator, transport);
+    var server = try zals.lsp.Server.init(allocator, transport, options.venv);
     defer server.deinit();
-    server.venv_override = options.venv;
     try server.run();
 }

@@ -15,6 +15,7 @@ pub const workspace = struct {
     pub const DocumentStore = @import("workspace/store.zig").DocumentStore;
     pub const Settings = @import("workspace/settings.zig").Settings;
     pub const roots = @import("workspace/roots.zig");
+    pub const session = @import("workspace/session.zig");
     pub const discover = @import("workspace/discover.zig");
     pub const facts = @import("workspace/facts.zig");
     pub const index = @import("workspace/index.zig");
@@ -37,6 +38,7 @@ test {
     _ = @import("lsp/handlers.zig");
     _ = @import("workspace/document.zig");
     _ = @import("workspace/roots.zig");
+    _ = @import("workspace/session.zig");
     _ = @import("workspace/discover.zig");
     _ = @import("workspace/facts.zig");
     _ = @import("workspace/file_refs.zig");

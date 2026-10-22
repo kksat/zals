@@ -40,6 +40,10 @@ file or directory name, and the same walk uses that name instead. That
 redefines the Workspace and is supported at the user's risk. A blank value,
 `.` or `..`, or a name that contains a path separator is treated as `.git`.
 
+Implemented in `workspace/roots.zig` (marker resolution),
+`workspace/session.zig` (session events, roots, warning and ownership snapshot),
+and `queries/context.zig` (request-scoped navigation reads).
+
 ## Consequences
 
 - Workspace-scoped search uses the git root, including paths the client did not

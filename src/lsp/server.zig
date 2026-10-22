@@ -9,7 +9,7 @@ const Transport = @import("transport.zig").Transport;
 const DocumentStore = @import("../workspace/store.zig").DocumentStore;
 const PositionEncoding = @import("../workspace/document.zig").PositionEncoding;
 const Settings = @import("../workspace/settings.zig").Settings;
-const roots = @import("../workspace/roots.zig");
+const workspace_session = @import("../workspace/session.zig");
 const paths = @import("../paths.zig");
 const workspace_index = @import("../workspace/index.zig");
 const WorkspaceIndex = workspace_index.WorkspaceIndex;
@@ -44,15 +44,7 @@ pub const Server = struct {
     /// True when the client advertises `workspace.workspaceEdit.resourceOperations`
     /// containing `create` (needed by the extract code actions).
     supports_create_file: bool = false,
-    /// Folders the client opened, before Workspace resolution.
-    opened_uris: std.array_list.Managed([]const u8),
-    /// Resolved Workspace paths, one per distinct `.git`.
-    root_paths: std.array_list.Managed([]const u8),
-    /// True when at least one opened folder has no Workspace.
-    missing_workspace: bool = false,
-    warned_missing_workspace: bool = false,
-    /// `--venv <path>`; wins over `ansible.python.venvPath`. Borrowed from argv.
-    venv_override: ?[]const u8 = null,
+    session: workspace_session.Session,
     /// Workspace index (ADR-0031).
     index: *WorkspaceIndex,
     /// The client supports dynamic registration of watched files.
@@ -60,7 +52,7 @@ pub const Server = struct {
     /// Watched-file events keep the index current; otherwise it re-stats.
     watching_files: bool = false,
 
-    pub fn init(allocator: Allocator, transport: Transport) !Server {
+    pub fn init(allocator: Allocator, transport: Transport, venv_override: ?[]const u8) !Server {
         const runner = exec.Posix.posixRunner();
         // Leave room for file parsing alongside blocking docs bootstrap, but
         // bound the pool on both large and single-core machines.
@@ -85,8 +77,7 @@ pub const Server = struct {
             .pool = pool,
             .docs_service = DocsService.init(allocator),
             .contextual_docs = docs_service.ContextLibraries.init(allocator, runner),
-            .opened_uris = std.array_list.Managed([]const u8).init(allocator),
-            .root_paths = std.array_list.Managed([]const u8).init(allocator),
+            .session = try workspace_session.Session.init(allocator, venv_override),
             .index = index,
         };
     }
@@ -105,10 +96,7 @@ pub const Server = struct {
         self.schemas.deinit();
         self.ansible_config.deinit();
         self.docs_service.deinit();
-        for (self.opened_uris.items) |u| self.allocator.free(u);
-        self.opened_uris.deinit();
-        for (self.root_paths.items) |p| self.allocator.free(p);
-        self.root_paths.deinit();
+        self.session.deinit();
         // Flush any queued outgoing messages before tearing down the writer.
         self.writer.deinit();
     }
@@ -177,58 +165,16 @@ pub const Server = struct {
         try out.sendNotification(self.writer, a, method, params);
     }
 
-    /// Replace the opened folders and recompute Workspace roots from `.git`.
-    pub fn setOpenedFolders(self: *Server, uris: []const []const u8) !void {
-        for (self.opened_uris.items) |u| self.allocator.free(u);
-        self.opened_uris.clearRetainingCapacity();
-        for (uris) |uri| try self.opened_uris.append(try self.allocator.dupe(u8, uri));
-        try self.rebuildWorkspaces(false);
-    }
-
-    /// Apply a `workspace/didChangeWorkspaceFolders` event to the opened set.
-    pub fn applyOpenedChange(self: *Server, removed: []const []const u8, added: []const []const u8) !void {
-        for (removed) |uri| {
-            var i: usize = 0;
-            while (i < self.opened_uris.items.len) : (i += 1) {
-                if (std.mem.eql(u8, self.opened_uris.items[i], uri)) {
-                    self.allocator.free(self.opened_uris.items[i]);
-                    _ = self.opened_uris.orderedRemove(i);
-                    break;
-                }
-            }
+    /// Apply session effects on the main thread, index before warning.
+    pub fn applySession(self: *Server, a: Allocator, event: workspace_session.Event) !void {
+        const effects = try self.session.apply(a, event);
+        if (effects.sync) |sync_effect| {
+            try self.index.syncRoots(self.pool, sync_effect.roots, sync_effect.marker, sync_effect.rescan);
         }
-        for (added) |uri| {
-            var exists = false;
-            for (self.opened_uris.items) |existing| {
-                if (std.mem.eql(u8, existing, uri)) {
-                    exists = true;
-                    break;
-                }
-            }
-            if (!exists) try self.opened_uris.append(try self.allocator.dupe(u8, uri));
+        if (effects.warning) |message| {
+            try out.showMessage(self.writer, a, 2, message);
+            try out.logMessage(self.writer, a, 2, message);
         }
-        try self.rebuildWorkspaces(false);
-    }
-
-    pub fn rebuildWorkspaces(self: *Server, rescan: bool) !void {
-        var arena = std.heap.ArenaAllocator.init(self.allocator);
-        defer arena.deinit();
-        const a = arena.allocator();
-        var opened = std.array_list.Managed([]const u8).init(a);
-        for (self.opened_uris.items) |uri| try opened.append(try paths.uriToPath(a, uri));
-        const resolved = try roots.resolve(self.allocator, opened.items, self.settings.root_marker);
-        for (self.root_paths.items) |path| self.allocator.free(path);
-        self.root_paths.deinit();
-        self.root_paths = resolved.roots;
-        self.missing_workspace = resolved.missing;
-        try self.syncIndex(rescan);
-    }
-
-    /// Scan new Workspaces and drop removed ones. `rescan` re-scans every
-    /// Workspace (the root marker changed). No-op before `initialized`.
-    pub fn syncIndex(self: *Server, rescan: bool) !void {
-        if (!self.initialized) return;
-        try self.index.syncRoots(self.pool, self.workspacePaths(), self.settings.root_marker, rescan);
     }
 
     /// Ask the client to watch navigation and collection source files
@@ -268,19 +214,17 @@ pub const Server = struct {
 
     /// Session Workspace roots as filesystem paths.
     pub fn workspacePaths(self: *Server) []const []const u8 {
-        return self.root_paths.items;
+        return self.session.snapshot().roots;
     }
 
     /// The session Workspace root that owns `file_path`, or null.
     pub fn workspaceRootFor(self: *Server, a: Allocator, file_path: []const u8) ?[]const u8 {
-        const session = self.workspacePaths();
-        const owned = roots.owning(a, file_path, session, self.settings.root_marker) catch return null;
-        return if (owned) |o| o[0] else null;
+        return self.session.snapshot().owner(a, file_path);
     }
 
     /// The virtual environment whose collections are searched.
     pub fn venvPath(self: *Server) []const u8 {
-        return self.venv_override orelse self.settings.venv_path;
+        return self.session.snapshot().venv;
     }
 
     /// The navigation context for one request, borrowing `lease`. Module
@@ -300,19 +244,5 @@ pub const Server = struct {
             .docs = navigation_context.Docs.contextual(&self.contextual_docs),
             .encoding = self.encoding,
         });
-    }
-
-    /// One session warning when an opened folder has no Workspace.
-    pub fn warnMissingWorkspace(self: *Server, a: Allocator) !void {
-        if (!roots.warnDue(
-            self.settings.missing_git_warning,
-            self.missing_workspace,
-            self.warned_missing_workspace,
-            self.initialized,
-        )) return;
-        const message = try roots.missingMessage(a, self.settings.root_marker);
-        try out.showMessage(self.writer, a, 2, message);
-        try out.logMessage(self.writer, a, 2, message);
-        self.warned_missing_workspace = true;
     }
 };
