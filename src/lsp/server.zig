@@ -182,7 +182,7 @@ pub const Server = struct {
         for (self.opened_uris.items) |u| self.allocator.free(u);
         self.opened_uris.clearRetainingCapacity();
         for (uris) |uri| try self.opened_uris.append(try self.allocator.dupe(u8, uri));
-        try self.rebuildWorkspaces();
+        try self.rebuildWorkspaces(false);
     }
 
     /// Apply a `workspace/didChangeWorkspaceFolders` event to the opened set.
@@ -207,10 +207,10 @@ pub const Server = struct {
             }
             if (!exists) try self.opened_uris.append(try self.allocator.dupe(u8, uri));
         }
-        try self.rebuildWorkspaces();
+        try self.rebuildWorkspaces(false);
     }
 
-    pub fn rebuildWorkspaces(self: *Server) !void {
+    pub fn rebuildWorkspaces(self: *Server, rescan: bool) !void {
         var arena = std.heap.ArenaAllocator.init(self.allocator);
         defer arena.deinit();
         const a = arena.allocator();
@@ -221,7 +221,7 @@ pub const Server = struct {
         self.root_paths.deinit();
         self.root_paths = resolved.roots;
         self.missing_workspace = resolved.missing;
-        try self.syncIndex(false);
+        try self.syncIndex(rescan);
     }
 
     /// Scan new Workspaces and drop removed ones. `rescan` re-scans every
