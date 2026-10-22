@@ -119,20 +119,20 @@ fn collectTasks(
     for (seq.items) |item| {
         n += 1;
         if (!item.isMap()) continue;
-        if (plays.classify(item, .{}).kind == .block) {
-            try out.append(try blockSymbol(a, doc, item, n));
+        const class = plays.classify(item, .{ .handlers = kind == .event });
+        if (class.kind == .block) {
+            try out.append(try blockSymbol(a, doc, item, n, class));
         } else {
             try out.append(try taskSymbol(a, doc, item, kind, n));
         }
     }
 }
 
-fn blockSymbol(a: Allocator, doc: *const Document, map: *const Node, n: usize) Allocator.Error!DocumentSymbol {
+fn blockSymbol(a: Allocator, doc: *const Document, map: *const Node, n: usize, class: plays.Class) Allocator.Error!DocumentSymbol {
     var children = std.array_list.Managed(DocumentSymbol).init(a);
-    var lists = plays.taskLists(map, plays.classify(map, .{}));
+    var lists = plays.taskLists(map, class);
     while (lists.next()) |list| {
-        // Preserve the outline's current Block-child labels until D3.
-        try collectTasks(a, doc, list.seq, .object, &children);
+        try collectTasks(a, doc, list.seq, if (list.handler) .event else .object, &children);
     }
     const name = if (pairValue(map, "name")) |v| v.stringValue() orelse "" else "";
     const final = if (name.len > 0)
@@ -412,6 +412,34 @@ test "playbook outline: play, roles, tasks, handlers, block" {
 
     try testing.expectEqualStrings("Restart", kids[3].name);
     try testing.expectEqual(SymbolKind.event, kids[3].kind);
+}
+
+test "Handler Block children retain Handler kinds and fallback names" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const sections =
+        \\    - block:
+        \\        - name: Restart web
+        \\          service: name=web state=restarted
+        \\      rescue:
+        \\        - debug: msg=recovered
+        \\      always:
+        \\        - action: debug msg=done
+        \\
+    ;
+    const src = try std.fmt.allocPrint(a, "- hosts: all\n  handlers:\n{s}", .{sections});
+    const syms = try outline(a, src, "file:///site.yml");
+    const block = syms[0].children.?[0];
+    try testing.expectEqual(SymbolKind.array, block.kind);
+    const kids = block.children.?;
+    try testing.expectEqual(@as(usize, 3), kids.len);
+    for (kids) |kid| try testing.expectEqual(SymbolKind.event, kid.kind);
+    try testing.expectEqualStrings("Restart web", kids[0].name);
+    try testing.expectEqualStrings("Handler 1", kids[2].name);
+
+    const file = try outline(a, sections, "file:///roles/demo/handlers/main.yml");
+    for (file[0].children.?) |kid| try testing.expectEqual(SymbolKind.event, kid.kind);
 }
 
 test "task file: module-key fallback and no play" {
