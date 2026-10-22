@@ -7,6 +7,7 @@ pub const path = @import("path.zig");
 pub const ancestry = @import("ancestry.zig");
 pub const keywords = @import("keywords.zig");
 pub const predicates = @import("predicates.zig");
+pub const plays = @import("plays.zig");
 pub const collections = @import("collections.zig");
 pub const options = @import("options.zig");
 pub const jsonify = @import("jsonify.zig");
