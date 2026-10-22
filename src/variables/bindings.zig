@@ -24,7 +24,9 @@ pub fn collect(scratch: Allocator, forest: *const yaml.Forest, kind: definitions
     var roots = std.array_list.Managed(definitions.Definition).init(scratch);
     try definitions.collect(scratch, forest, kind, &roots);
     var loaded_roots = std.array_list.Managed(definitions.Definition).init(scratch);
-    if (kind == .general) try definitions.collectLoaded(forest, &loaded_roots);
+    // Task/Handler locations refine general files without changing whether
+    // a static vars load can admit a map-rooted document there (ADR-0045).
+    if (kind == .general or kind == .role_tasks or kind == .role_handlers) try definitions.collectLoaded(forest, &loaded_roots);
     return .{
         .roots = roots.items,
         .fields = try fieldsBelow(scratch, forest, roots.items),
@@ -58,6 +60,20 @@ test "a map-rooted general file binds only when loaded" {
     try testing.expectEqual(@as(usize, 3), vars_file.roots.len);
     try testing.expectEqual(@as(usize, 1), vars_file.fields.len);
     try testing.expectEqual(@as(usize, 0), vars_file.loaded_roots.len);
+}
+
+test "Role task and Handler paths retain general-file load-only bindings" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var forest = try yaml.parse(a, "settings: {port: 80}\n");
+    defer forest.deinit();
+    for ([_]definitions.FileKind{ .role_tasks, .role_handlers }) |kind| {
+        const bound = try collect(a, &forest, kind);
+        try testing.expectEqual(@as(usize, 0), bound.roots.len);
+        try testing.expectEqual(@as(usize, 1), bound.loaded_roots.len);
+        try testing.expectEqual(@as(usize, 1), bound.loaded_fields.len);
+    }
 }
 
 test "a playbook's bindings do not depend on loads" {

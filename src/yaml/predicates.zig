@@ -1,7 +1,8 @@
 //! Cursor-path adapters over the Ansible structure classifier.
 
-const std = @import("std");
-const Allocator = std.mem.Allocator;
+const Allocator = @import("std").mem.Allocator;
+const scope = @import("../variables/scope.zig");
+const roles = @import("../roles/resolve.zig");
 const dom = @import("dom.zig");
 const Node = dom.Node;
 const AncestryBuilder = @import("ancestry.zig").AncestryBuilder;
@@ -30,17 +31,13 @@ pub fn isTaskParam(arena: Allocator, path: []*Node) bool {
 /// roots are uncertain, allowing completion to offer Play keywords too.
 pub fn isPlayParam(arena: Allocator, path: []*Node, file_uri: ?[]const u8) ?bool {
     const map = keyMap(arena, path) orelse return false;
-    const class = plays.classify(map, .{ .role_tasks = if (file_uri) |uri| isInRoleTasks(uri) else false });
+    const file: plays.File = if (file_uri) |uri| blk: {
+        const path_name = scope.uriToPath(arena, uri) catch break :blk .{};
+        break :blk scope.fileKind(path_name, roles.enclosingRoleFromPath(path_name)).structure();
+    } else .{};
+    const class = plays.classify(map, file);
     if (class.ambiguous) return null;
     return class.kind == .play or class.kind == .playbook_import;
-}
-
-fn isInRoleTasks(uri: []const u8) bool {
-    const marker = "/roles/";
-    const idx = std.mem.indexOf(u8, uri, marker) orelse return false;
-    const rest = uri[idx + marker.len ..];
-    const slash = std.mem.indexOfScalar(u8, rest, '/') orelse return false;
-    return std.mem.startsWith(u8, rest[slash..], "/tasks/");
 }
 
 pub fn isBlockParam(arena: Allocator, path: []*Node) bool {

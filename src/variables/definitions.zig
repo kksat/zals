@@ -56,7 +56,19 @@ pub const Definition = struct {
 /// What a file's documents can bind (ADR-0045). `vars_file` and a loaded
 /// `general` file bind their map-rooted documents' top-level keys; an unloaded
 /// `general` file binds only the sites inside its plays and tasks.
-pub const FileKind = enum { role_defaults, role_vars, role_meta, vars_file, general };
+pub const FileKind = enum {
+    role_defaults,
+    role_vars,
+    role_meta,
+    role_tasks,
+    role_handlers,
+    vars_file,
+    general,
+
+    pub fn structure(self: FileKind) plays.File {
+        return .{ .role_tasks = self == .role_tasks or self == .role_handlers, .handlers = self == .role_handlers };
+    }
+};
 
 /// Collect every definition in `forest`. `text` is the source the offsets refer
 /// to (usually `forest.text`).
@@ -76,10 +88,10 @@ pub fn collect(
             // is variable data only in a Variable file; elsewhere it is
             // package, tool, or inventory configuration until a load targets
             // the file (see `collectLoaded`).
-            .vars_file, .general => if (root.isMap()) {
+            .role_tasks, .role_handlers, .vars_file, .general => if (root.isMap()) {
                 if (kind == .vars_file) try topLevelKeys(root, .vars_files, out);
             } else {
-                try walk(allocator, root, text, out);
+                try walk(allocator, root, text, kind.structure(), out);
             },
         }
     }
@@ -126,11 +138,12 @@ fn walk(
     allocator: Allocator,
     node: *const Node,
     text: []const u8,
+    file: plays.File,
     out: *std.array_list.Managed(Definition),
 ) !void {
     switch (node.kind) {
         .map => {
-            var lists = plays.taskLists(node, plays.classify(node, .{}));
+            var lists = plays.taskLists(node, plays.classify(node, file));
             var next = lists.next();
             for (node.items) |pair| {
                 const key_node = pair.key orelse continue;
@@ -138,7 +151,7 @@ fn walk(
                 const val = pair.val orelse continue;
 
                 if (std.mem.eql(u8, key, "vars") and val.isMap()) {
-                    try addMapKeys(val, varsSite(node), out);
+                    try addMapKeys(val, varsSite(node, file), out);
                     // Structured variable values are data, not nested Ansible
                     // directives that introduce another `vars:` binding map.
                     continue;
@@ -166,13 +179,13 @@ fn walk(
                 // arguments and other keyword values are data, not directives.
                 if (next) |list| {
                     if (val == list.seq) {
-                        try walk(allocator, val, text, out);
+                        try walk(allocator, val, text, file, out);
                         next = lists.next();
                     }
                 }
             }
         },
-        .seq => for (node.items) |item| try walk(allocator, item, text, out),
+        .seq => for (node.items) |item| try walk(allocator, item, text, file, out),
         else => {},
     }
 }
@@ -187,7 +200,7 @@ fn roleParams(
             const key_node = pair.key orelse continue;
             const name = key_node.stringValue() orelse continue;
             if (std.mem.eql(u8, name, "vars")) {
-                if (pair.val) |value| if (value.isMap()) try addMapKeys(value, varsSite(item), out);
+                if (pair.val) |value| if (value.isMap()) try addMapKeys(value, varsSite(item, .{}), out);
                 continue;
             }
             if (std.mem.eql(u8, name, "role")) continue;
@@ -197,8 +210,8 @@ fn roleParams(
     }
 }
 
-fn varsSite(map: *const Node) Site {
-    return switch (plays.classify(map, .{}).kind) {
+fn varsSite(map: *const Node, file: plays.File) Site {
+    return switch (plays.classify(map, file).kind) {
         .play => .play_vars,
         .block => .block_vars,
         // Keep import vars as task_vars until the separate D2 scope fix.

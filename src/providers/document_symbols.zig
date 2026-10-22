@@ -16,6 +16,8 @@ const yaml = @import("../yaml/root.zig");
 const dom = yaml.dom;
 const Node = yaml.Node;
 const plays = yaml.plays;
+const scope = @import("../variables/scope.zig");
+const roles = @import("../roles/resolve.zig");
 const DocumentSymbol = lsp.DocumentSymbol;
 const SymbolKind = lsp.SymbolKind;
 
@@ -42,8 +44,10 @@ pub fn symbols(a: Allocator, doc: *const Document, uri: []const u8) ![]DocumentS
     var forest = try yaml.parse(a, doc.bytes());
     defer forest.deinit();
 
+    const path = try scope.uriToPath(a, uri);
+    const file = scope.fileKind(path, roles.enclosingRoleFromPath(path)).structure();
     var out = std.array_list.Managed(DocumentSymbol).init(a);
-    for (forest.roots) |root| try walkRoot(a, doc, root, uri, &out);
+    for (forest.roots) |root| try walkRoot(a, doc, root, file, &out);
     return out.toOwnedSlice();
 }
 
@@ -51,13 +55,13 @@ fn walkRoot(
     a: Allocator,
     doc: *const Document,
     root: *const Node,
-    uri: []const u8,
+    file: plays.File,
     out: *std.array_list.Managed(DocumentSymbol),
 ) Allocator.Error!void {
     if (root.isMap()) return walkMap(a, doc, root, out);
     switch (plays.shape(root)) {
         .playbook => try walkPlaybook(a, doc, root, out),
-        .task_list => try collectTasks(a, doc, root, if (isHandlersDir(uri)) .event else .object, out),
+        .task_list => try collectTasks(a, doc, root, if (file.handlers) .event else .object, out),
         .other => {},
     }
 }
@@ -314,13 +318,6 @@ fn ownedChildren(list: *std.array_list.Managed(DocumentSymbol)) Allocator.Error!
     return try list.toOwnedSlice();
 }
 
-fn isHandlersDir(uri: []const u8) bool {
-    var path = uri;
-    if (std.mem.startsWith(u8, path, "file://")) path = path["file://".len..];
-    const dir = std.fs.path.dirname(path) orelse return false;
-    return std.mem.eql(u8, std.fs.path.basename(dir), "handlers");
-}
-
 fn toValue(a: Allocator, sym: DocumentSymbol) Allocator.Error!Value {
     var o = json_util.obj(a);
     try o.put("name", json_util.str(sym.name));
@@ -477,6 +474,22 @@ test "handlers file labels tasks as handlers" {
     try testing.expectEqual(@as(usize, 1), syms.len);
     try testing.expectEqualStrings("ansible.builtin.service", syms[0].name);
     try testing.expectEqual(SymbolKind.event, syms[0].kind);
+}
+
+test "Handler file classification is relative to the Role root" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    for ([_]struct { uri: []const u8, kind: SymbolKind }{
+        .{ .uri = "file:///w/roles/r/handlers/sub/more.yml", .kind = .event },
+        .{ .uri = "file:///w/roles/r/handlers/sub%20dir/more.yml", .kind = .event },
+        .{ .uri = "file:///x/handlers/project/site.yml", .kind = .object },
+        .{ .uri = "file:///x/handlers/project/roles/r/tasks/main.yml", .kind = .object },
+        .{ .uri = "file:///w/roles/r/tasks/handlers/more.yml", .kind = .object },
+    }) |case| {
+        const syms = try outline(a, "- name: Restart web\n  debug: msg=hi\n", case.uri);
+        try testing.expectEqual(case.kind, syms[0].kind);
+    }
 }
 
 test "vars file: nested maps become fields" {

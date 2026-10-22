@@ -8,6 +8,8 @@ const Allocator = std.mem.Allocator;
 const yaml = @import("../yaml/root.zig");
 const Node = yaml.Node;
 const plays = yaml.plays;
+const scope = @import("../variables/scope.zig");
+const roles = @import("../roles/resolve.zig");
 
 pub const Kind = enum { play, task, handler };
 
@@ -30,7 +32,7 @@ pub const Result = struct {
 pub fn collect(a: Allocator, forest: *const yaml.Forest, path: []const u8) !Result {
     var out = std.array_list.Managed(Symbol).init(a);
     var shape: Shape = .other;
-    const in_handlers = std.mem.indexOf(u8, path, "/handlers/") != null;
+    const file = scope.fileKind(path, roles.enclosingRole(path)).structure();
     for (forest.roots) |root| {
         if (!root.isSeq()) continue;
         if (plays.shape(root) == .playbook) {
@@ -46,7 +48,7 @@ pub fn collect(a: Allocator, forest: *const yaml.Forest, path: []const u8) !Resu
             }
         } else if (plays.shape(root) == .task_list) {
             shape = .task_file;
-            try tasks(a, root, if (in_handlers) .handler else .task, "", &out);
+            try tasks(a, root, if (file.handlers) .handler else .task, "", &out);
         }
     }
     return .{ .shape = shape, .symbols = try out.toOwnedSlice() };
@@ -128,6 +130,39 @@ test "task files in handlers/ hold handlers" {
     const r = try collect(a, &forest, "/w/roles/nginx/handlers/main.yml");
     try testing.expectEqual(Shape.task_file, r.shape);
     try testing.expectEqual(Kind.handler, r.symbols[0].kind);
+}
+
+test "Handler files use Role-relative paths, not a Workspace ancestor" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var forest = try yaml.parse(a, "- name: Restart web\n  debug: msg=hi\n");
+    defer forest.deinit();
+    for ([_]struct { path: []const u8, kind: Kind }{
+        .{ .path = "/w/roles/r/handlers/sub/more.yml", .kind = .handler },
+        .{ .path = "/x/handlers/project/site.yml", .kind = .task },
+        .{ .path = "/x/handlers/project/roles/r/tasks/main.yml", .kind = .task },
+        .{ .path = "/w/roles/r/tasks/handlers/more.yml", .kind = .task },
+    }) |case| {
+        const result = try collect(a, &forest, case.path);
+        try testing.expectEqual(case.kind, result.symbols[0].kind);
+    }
+}
+
+test "standalone Role Handler files use the metadata-supported Role root" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.makePath("standalone/meta");
+    try tmp.dir.writeFile(.{ .sub_path = "standalone/meta/main.yml", .data = "" });
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const root = try tmp.dir.realpathAlloc(a, "standalone");
+    const path = try std.fs.path.join(a, &.{ root, "handlers/sub/more.yml" });
+    var forest = try yaml.parse(a, "- name: Restart web\n  debug: msg=hi\n");
+    defer forest.deinit();
+    const result = try collect(a, &forest, path);
+    try testing.expectEqual(Kind.handler, result.symbols[0].kind);
 }
 
 test "matching is a case-insensitive substring" {
