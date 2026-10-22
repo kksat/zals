@@ -240,12 +240,7 @@ test "git directory above an opened subfolder" {
     try expectWorkspace(a, try fix.join(a, "playbooks"), workspace);
     try expectWorkspace(a, try fix.join(a, "playbooks/site.yml"), workspace);
 
-    var set = try resolve(a, &.{try fix.join(a, "playbooks")}, default_marker);
-    defer set.deinit();
-    try testing.expect(!set.missing);
-    try testing.expectEqual(@as(usize, 1), set.roots.items.len);
-    try testing.expectEqualStrings(workspace, set.roots.items[0]);
-    const role = try owning(a, try fix.join(a, "roles/web/tasks/main.yml"), set.roots.items, default_marker);
+    const role = try owning(a, try fix.join(a, "roles/web/tasks/main.yml"), &.{workspace}, default_marker);
     try testing.expectEqualStrings(workspace, role.?[0]);
 }
 
@@ -281,15 +276,9 @@ test "nested git directory lies outside the parent" {
     try expectWorkspace(a, try fix.join(a, "playbooks/site.yml"), parent);
     try expectWorkspace(a, try fix.join(a, "vendor/lib/tasks/main.yml"), nested);
 
-    var parent_only = try resolve(a, &.{parent}, default_marker);
-    defer parent_only.deinit();
-    try testing.expect(try owning(a, try fix.join(a, "vendor/lib/tasks/main.yml"), parent_only.roots.items, default_marker) == null);
-    try testing.expectEqualStrings(parent, (try owning(a, try fix.join(a, "playbooks/site.yml"), parent_only.roots.items, default_marker)).?[0]);
-
-    var both = try resolve(a, &.{ parent, nested }, default_marker);
-    defer both.deinit();
-    try testing.expectEqual(@as(usize, 2), both.roots.items.len);
-    try testing.expectEqualStrings(nested, (try owning(a, try fix.join(a, "vendor/lib/tasks/main.yml"), both.roots.items, default_marker)).?[0]);
+    try testing.expect(try owning(a, try fix.join(a, "vendor/lib/tasks/main.yml"), &.{parent}, default_marker) == null);
+    try testing.expectEqualStrings(parent, (try owning(a, try fix.join(a, "playbooks/site.yml"), &.{parent}, default_marker)).?[0]);
+    try testing.expectEqualStrings(nested, (try owning(a, try fix.join(a, "vendor/lib/tasks/main.yml"), &.{ parent, nested }, default_marker)).?[0]);
 }
 
 test "nested git file lies outside the parent" {
@@ -307,55 +296,8 @@ test "nested git file lies outside the parent" {
     const nested = try fix.real(a, "vendor/lib");
 
     try expectWorkspace(a, try fix.join(a, "vendor/lib"), nested);
-    var parent_only = try resolve(a, &.{parent}, default_marker);
-    defer parent_only.deinit();
-    try testing.expect(try owning(a, try fix.join(a, "vendor/lib/tasks/main.yml"), parent_only.roots.items, default_marker) == null);
-
-    var opened = try resolve(a, &.{try fix.join(a, "vendor/lib")}, default_marker);
-    defer opened.deinit();
-    try testing.expectEqualStrings(nested, opened.roots.items[0]);
-}
-
-test "two folders under one git are one workspace" {
-    const gpa = testing.allocator;
-    var fix = try Fix.init(gpa);
-    defer fix.deinit();
-    var arena = std.heap.ArenaAllocator.init(gpa);
-    defer arena.deinit();
-    const a = arena.allocator();
-
-    try fix.gitDir("");
-    try fix.touch("playbooks/site.yml");
-    try fix.touch("roles/web/tasks/main.yml");
-    var set = try resolve(a, &.{
-        try fix.join(a, "playbooks"),
-        try fix.join(a, "roles"),
-    }, default_marker);
-    defer set.deinit();
-    try testing.expect(!set.missing);
-    try testing.expectEqual(@as(usize, 1), set.roots.items.len);
-    try testing.expectEqualStrings(try fix.real(a, ""), set.roots.items[0]);
-}
-
-test "two git directories are two workspaces" {
-    const gpa = testing.allocator;
-    var fix = try Fix.init(gpa);
-    defer fix.deinit();
-    var arena = std.heap.ArenaAllocator.init(gpa);
-    defer arena.deinit();
-    const a = arena.allocator();
-
-    try fix.gitDir("acme");
-    try fix.gitDir("other");
-    var set = try resolve(a, &.{
-        try fix.join(a, "acme"),
-        try fix.join(a, "other"),
-    }, default_marker);
-    defer set.deinit();
-    try testing.expect(!set.missing);
-    try testing.expectEqual(@as(usize, 2), set.roots.items.len);
-    try testing.expectEqualStrings(try fix.real(a, "acme"), set.roots.items[0]);
-    try testing.expectEqualStrings(try fix.real(a, "other"), set.roots.items[1]);
+    try testing.expect(try owning(a, try fix.join(a, "vendor/lib/tasks/main.yml"), &.{parent}, default_marker) == null);
+    try testing.expectEqualStrings(nested, (try owning(a, try fix.join(a, "vendor/lib/tasks/main.yml"), &.{nested}, default_marker)).?[0]);
 }
 
 test "no git has no workspace" {
@@ -368,10 +310,6 @@ test "no git has no workspace" {
 
     try fix.touch("site.yml");
     try testing.expect(try find(a, try fix.join(a, "site.yml"), default_marker) == null);
-    var set = try resolve(a, &.{try fix.join(a, "")}, default_marker);
-    defer set.deinit();
-    try testing.expect(set.missing);
-    try testing.expectEqual(@as(usize, 0), set.roots.items.len);
 }
 
 test "worktree git file is its own workspace beside the main checkout" {
@@ -388,14 +326,7 @@ test "worktree git file is its own workspace beside the main checkout" {
     const worktree = try fix.real(a, "acme-wt");
     try expectWorkspace(a, try fix.join(a, "acme-wt/site.yml"), worktree);
 
-    var set = try resolve(a, &.{
-        try fix.join(a, "acme"),
-        try fix.join(a, "acme-wt"),
-    }, default_marker);
-    defer set.deinit();
-    try testing.expectEqual(@as(usize, 2), set.roots.items.len);
-    try testing.expectEqualStrings(try fix.real(a, "acme"), set.roots.items[0]);
-    try testing.expectEqualStrings(worktree, set.roots.items[1]);
+    try expectWorkspace(a, try fix.join(a, "acme"), try fix.real(a, "acme"));
 }
 
 test "opening the git directory itself resolves to its parent" {
