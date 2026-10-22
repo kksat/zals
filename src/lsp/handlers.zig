@@ -201,40 +201,12 @@ fn onInitialize(self: *Server, a: Allocator, id: Value, params: Value) !void {
     try self.sendResult(a, id, .{ .object = result });
 }
 
-test "marker changes scan each newly resolved Workspace only once" {
-    const testing = std.testing;
-    const Transport = @import("transport.zig").Transport;
-    var tmp = testing.tmpDir(.{});
-    defer tmp.cleanup();
-    try tmp.dir.makeDir(".git");
-    try tmp.dir.makePath("child/next-marker");
-    const output = try tmp.dir.createFile("messages", .{ .read = true });
-    defer output.close();
-    var arena = std.heap.ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-    const a = arena.allocator();
-    const child = try tmp.dir.realpathAlloc(a, "child");
-    const uri = try @import("../paths.zig").pathToUri(a, child);
-    var server = try Server.init(testing.allocator, Transport.init(output, output), null);
-    defer server.deinit();
-    try server.applySession(a, .{ .initialize = .{ .folders = &.{uri}, .config = .{} } });
-    try server.applySession(a, .ready);
-    const before = server.index.next_generation;
-    const changed = try std.json.parseFromSliceLeaky(Value, a,
-        \\{"settings":{"ansible":{"workspace":{"rootMarker":"next-marker"}}}}
-    , .{});
-    try handleNotification(&server, a, "workspace/didChangeConfiguration", changed);
-    try testing.expectEqual(before + 1, server.index.next_generation);
-    try testing.expectEqualStrings(child, server.session.snapshot().roots[0]);
-}
-
-test "removed refresh leaves settings and Workspaces unchanged while standard configuration still works" {
+test "removed refresh leaves settings and Workspaces unchanged (ADR-0043)" {
     const testing = std.testing;
     const Transport = @import("transport.zig").Transport;
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
     (try tmp.dir.createFile("workspace-marker", .{})).close();
-    (try tmp.dir.createFile("next-marker", .{})).close();
     const output = try tmp.dir.createFile("messages", .{ .read = true });
     defer output.close();
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
@@ -251,36 +223,22 @@ test "removed refresh leaves settings and Workspaces unchanged while standard co
         , .{});
         try params.object.put("rootUri", json_util.str(root_uri));
         try handleRequest(&server, a, .{ .integer = 1 }, "initialize", params);
-        try testing.expectEqualStrings("workspace-marker", server.settings.root_marker);
-        try testing.expectEqualStrings("custom-venv", server.settings.venv_path);
-        try testing.expect(!server.settings.validation_enabled);
-        try testing.expectEqual(@as(usize, 1), server.session.snapshot().roots.len);
-        try testing.expectEqualStrings(root_path, server.session.snapshot().roots[0]);
-
-        for (ids) |id| {
-            try handleRequest(&server, a, id, "ansible/refreshConfiguration", .null);
+        // Requests are rejected and notifications ignored (ADR-0043).
+        for ([_]?Value{ ids[0], ids[1], null }) |maybe_id| {
+            if (maybe_id) |id| {
+                try handleRequest(&server, a, id, "ansible/refreshConfiguration", .null);
+            } else {
+                try handleNotification(&server, a, "ansible/refreshConfiguration", .null);
+            }
+            const snapshot = server.session.snapshot();
             try testing.expectEqualStrings("workspace-marker", server.settings.root_marker);
             try testing.expectEqualStrings("custom-venv", server.settings.venv_path);
             try testing.expect(!server.settings.validation_enabled);
-            try testing.expectEqual(@as(usize, 1), server.session.snapshot().roots.len);
-            try testing.expectEqualStrings(root_path, server.session.snapshot().roots[0]);
+            try testing.expectEqualStrings("workspace-marker", snapshot.marker);
+            try testing.expectEqualStrings("custom-venv", snapshot.venv);
+            try testing.expectEqual(@as(usize, 1), snapshot.roots.len);
+            try testing.expectEqualStrings(root_path, snapshot.roots[0]);
         }
-        try handleNotification(&server, a, "ansible/refreshConfiguration", .null);
-        try testing.expectEqualStrings("workspace-marker", server.settings.root_marker);
-        try testing.expectEqualStrings("custom-venv", server.settings.venv_path);
-        try testing.expect(!server.settings.validation_enabled);
-        try testing.expectEqual(@as(usize, 1), server.session.snapshot().roots.len);
-        try testing.expectEqualStrings(root_path, server.session.snapshot().roots[0]);
-
-        const changed = try std.json.parseFromSliceLeaky(Value, a,
-            \\{"settings":{"ansible":{"workspace":{"rootMarker":"next-marker"},"python":{"venvPath":"next-venv"},"validation":{"enabled":false}}}}
-        , .{});
-        try handleNotification(&server, a, "workspace/didChangeConfiguration", changed);
-        try testing.expectEqualStrings("next-marker", server.settings.root_marker);
-        try testing.expectEqualStrings("next-venv", server.settings.venv_path);
-        try testing.expect(!server.settings.validation_enabled);
-        try testing.expectEqual(@as(usize, 1), server.session.snapshot().roots.len);
-        try testing.expectEqualStrings(root_path, server.session.snapshot().roots[0]);
     }
 
     try output.seekTo(0);
@@ -301,6 +259,6 @@ test "removed refresh leaves settings and Workspaces unchanged while standard co
         try testing.expectEqual(@as(i64, -32601), json_util.field(err, "code").?.integer);
         try testing.expectEqualStrings("method not found", json_util.string(err, "message").?);
     }
-    // Neither the removed notification nor standard configuration emits a response.
+    // The removed notification emits no response.
     try testing.expectEqual(@as(?[]u8, null), try transport.readMessage(a));
 }
