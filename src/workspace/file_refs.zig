@@ -5,6 +5,7 @@
 //! `include_vars` path (scalar or `file:`). Jinja-valued paths are skipped.
 
 const std = @import("std");
+const plays = @import("../yaml/plays.zig");
 const Allocator = std.mem.Allocator;
 const yaml = @import("../yaml/root.zig");
 const Node = yaml.Node;
@@ -63,9 +64,9 @@ const Ctx = struct {
             .map => for (node.items) |pair| {
                 const key = if (pair.key) |k| k.stringValue() orelse "" else "";
                 const val = pair.val orelse continue;
-                if (isModuleKey(key, "include_tasks") or isModuleKey(key, "import_tasks")) {
+                if (plays.isAction(key, "include_tasks") or plays.isAction(key, "import_tasks")) {
                     try self.pathArg(.task_file, val);
-                } else if (isModuleKey(key, "include_vars")) {
+                } else if (plays.isAction(key, "include_vars")) {
                     try self.pathArg(.vars_file, val);
                 } else if (std.mem.eql(u8, key, "vars_files")) {
                     if (val.isSeq()) {
@@ -116,11 +117,6 @@ const Ctx = struct {
         });
     }
 };
-
-fn isModuleKey(key: []const u8, name: []const u8) bool {
-    if (std.mem.eql(u8, key, name)) return true;
-    return key.len > name.len + 1 and key[key.len - name.len - 1] == '.' and std.mem.endsWith(u8, key, name);
-}
 
 fn isJinja(s: []const u8) bool {
     return std.mem.indexOf(u8, s, "{{") != null or std.mem.indexOf(u8, s, "{%") != null;

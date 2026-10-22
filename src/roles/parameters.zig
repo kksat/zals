@@ -1,5 +1,6 @@
 //! Passed-role parameter detection and selected-entrypoint option contracts.
 const std = @import("std");
+const plays = @import("../yaml/plays.zig");
 const Allocator = std.mem.Allocator;
 const yaml = @import("../yaml/root.zig");
 const variables = @import("../variables/root.zig");
@@ -47,7 +48,7 @@ pub fn parameterAt(path: []*yaml.Node) ?Parameter {
     }
     for (owner.items) |p| {
         const k = (p.key orelse continue).stringValue() orelse continue;
-        if (!isModuleKey(k, "include_role") and !isModuleKey(k, "import_role")) continue;
+        if (!plays.isAction(k, "include_role") and !plays.isAction(k, "import_role")) continue;
         const args = p.val orelse return null;
         const role = roleArg(args, "name") orelse return null;
         const tasks_from = roleArg(args, "tasks_from");
@@ -169,11 +170,6 @@ fn dedent(a: Allocator, text: []const u8, start: usize, end: usize) ![]const u8 
         try out.appendSlice(line[cut..]);
     }
     return out.toOwnedSlice();
-}
-
-fn isModuleKey(key: []const u8, name: []const u8) bool {
-    if (std.mem.eql(u8, key, name)) return true;
-    return key.len > name.len + 1 and key[key.len - name.len - 1] == '.' and std.mem.endsWith(u8, key, name);
 }
 
 fn stripExt(name: []const u8) []const u8 {

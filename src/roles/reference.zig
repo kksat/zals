@@ -11,6 +11,7 @@
 //! provider handles them.
 
 const std = @import("std");
+const plays = @import("../yaml/plays.zig");
 const dom = @import("../yaml/dom.zig");
 const Node = dom.Node;
 
@@ -31,7 +32,7 @@ pub fn detect(path: []*Node, text: []const u8) ?Reference {
     // Cursor on a pair value.
     if (parent.isPair() and parent.val == node) {
         const key = keyOf(parent) orelse return null;
-        if (isModuleKey(key, "include_role") or isModuleKey(key, "import_role")) {
+        if (plays.isAction(key, "include_role") or plays.isAction(key, "import_role")) {
             return kvRoleName(node, text);
         }
         const listed = inList(path, "roles") or inList(path, "dependencies");
@@ -82,7 +83,7 @@ fn inRoleModule(path: []*Node) bool {
     const pair = path[path.len - 4];
     if (!pair.isPair()) return false;
     const k = keyOf(pair) orelse return false;
-    return isModuleKey(k, "include_role") or isModuleKey(k, "import_role");
+    return plays.isAction(k, "include_role") or plays.isAction(k, "import_role");
 }
 
 fn keyOf(pair: *Node) ?[]const u8 {
@@ -136,14 +137,6 @@ fn isSource(s: []const u8) bool {
 
 fn isJinja(s: []const u8) bool {
     return std.mem.indexOf(u8, s, "{{") != null or std.mem.indexOf(u8, s, "{%") != null;
-}
-
-fn isModuleKey(key: []const u8, name: []const u8) bool {
-    if (std.mem.eql(u8, key, name)) return true;
-    if (key.len > name.len + 1 and key[key.len - name.len - 1] == '.') {
-        return std.mem.endsWith(u8, key, name);
-    }
-    return false;
 }
 
 const testing = std.testing;
