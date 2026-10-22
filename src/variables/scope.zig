@@ -148,6 +148,8 @@ fn walkTargets(
 ) !void {
     switch (node.kind) {
         .map => {
+            var lists = plays.taskLists(node, plays.classify(node, .{}));
+            var next = lists.next();
             for (node.items) |pair| {
                 const key = if (pair.key) |k| k.stringValue() orelse continue else continue;
                 const val = pair.val orelse continue;
@@ -156,7 +158,12 @@ fn walkTargets(
                 } else if (plays.isAction(key, "include_vars")) {
                     try addIncludeVars(allocator, val, file_path, root, out);
                 }
-                if (definitions.isTaskContainer(key)) try walkTargets(allocator, val, file_path, root, out);
+                if (next) |list| {
+                    if (val == list.seq) {
+                        try walkTargets(allocator, val, file_path, root, out);
+                        next = lists.next();
+                    }
+                }
             }
         },
         .seq => for (node.items) |item| try walkTargets(allocator, item, file_path, root, out),
@@ -272,6 +279,26 @@ test "Variable file locations are an allowlist, not every map-rooted file" {
     // Inside a Role only its own defaults/ and vars/ are Variable files.
     try testing.expectEqual(FileKind.general, fileKind("/w/roles/r/templates/vars/app.yml.j2", "/w/roles/r"));
     try testing.expectEqual(FileKind.vars_file, fileKind("/w/roles/r/molecule/default/group_vars/all.yml", "/w/roles/r"));
+}
+
+test "data-shaped file references do not become variable loads (D8 compatibility)" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var forest = try yaml.parse(a,
+        \\- hosts: all
+        \\  vars:
+        \\    data: {vars_files: [a.yml]}
+        \\  tasks:
+        \\    - debug:
+        \\        include_tasks: b.yml
+        \\
+    );
+    defer forest.deinit();
+    const refs = try file_refs.collect(a, &forest, "/nowhere-zals/site.yml", null);
+    try testing.expectEqual(@as(usize, 2), refs.len);
+    const loads = try varFileLoads(a, &forest, "/nowhere-zals/site.yml", null);
+    try testing.expectEqual(@as(usize, 0), loads.len);
 }
 
 test "vars_files and include_vars targets" {

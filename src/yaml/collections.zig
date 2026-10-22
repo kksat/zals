@@ -43,26 +43,16 @@ fn declarationMap(file_path: []const u8, path: []*Node, i: usize) bool {
     const map = path[i];
     if (!map.isMap()) return false;
     if (i == 0) return roleMetadata(file_path);
-    if (!path[i - 1].isSeq()) return false;
-    // Plays are top-level sequence maps. A bare task file is also a sequence,
-    // but only a task that invokes a role can contain a role-name site there.
-    if (i == 1) return dom.findPair(map, "hosts") != null or roleModuleMap(map);
-    if (i < 2 or !path[i - 2].isPair()) return false;
-    const key = (path[i - 2].key orelse return false).stringValue() orelse return false;
-    for ([_][]const u8{ "tasks", "pre_tasks", "post_tasks", "handlers", "block", "rescue", "always" }) |task_key| {
-        if (std.mem.eql(u8, key, task_key)) return true;
-    }
-    return false;
-}
-
-fn roleModuleMap(map: *const Node) bool {
-    for (map.items) |pair| {
-        const key = (pair.key orelse continue).stringValue() orelse continue;
-        for ([_][]const u8{ "include_role", "import_role" }) |module| {
-            if (plays.isAction(key, module)) return true;
-        }
-    }
-    return false;
+    const class = plays.classify(map, .{});
+    return switch (class.kind) {
+        .play => true,
+        .task, .block => if (map.parent.?.parent != null) true else blk: {
+            // A bare task root declares role context only for a role Module.
+            const ref = plays.module(map) orelse break :blk false;
+            break :blk ref.is_key and (plays.isAction(ref.name, "include_role") or plays.isAction(ref.name, "import_role"));
+        },
+        else => false,
+    };
 }
 
 fn roleMetadata(file_path: []const u8) bool {
