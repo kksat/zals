@@ -153,13 +153,23 @@ pub const Resolver = struct {
 /// ancestor named like a conventional role subdirectory, when that parent sits
 /// in a `roles/` directory or has `meta/main.yml`/`.yaml`. Null outside a role.
 pub fn enclosingRole(path: []const u8) ?[]const u8 {
+    return enclosingRoleWith(path, isRoleDir);
+}
+
+/// Ownership knowable from the path alone: a conventional subdirectory of
+/// roles/<name>. Document-scoped callers must not read standalone Role metadata.
+pub fn enclosingRoleFromPath(path: []const u8) ?[]const u8 {
+    return enclosingRoleWith(path, isRolePath);
+}
+
+fn enclosingRoleWith(path: []const u8, comptime accepts: fn ([]const u8) bool) ?[]const u8 {
     var dir = std.fs.path.dirname(path) orelse return null;
     while (true) {
         const base = std.fs.path.basename(dir);
         for (role_subdirs) |sub| {
             if (!std.mem.eql(u8, base, sub)) continue;
             const role_dir = std.fs.path.dirname(dir) orelse return null;
-            if (isRoleDir(role_dir)) return role_dir;
+            if (accepts(role_dir)) return role_dir;
         }
         const parent = std.fs.path.dirname(dir) orelse return null;
         if (parent.len == 0 or std.mem.eql(u8, parent, dir)) return null;
@@ -167,10 +177,13 @@ pub fn enclosingRole(path: []const u8) ?[]const u8 {
     }
 }
 
+fn isRolePath(dir: []const u8) bool {
+    const parent = std.fs.path.dirname(dir) orelse return false;
+    return std.mem.eql(u8, std.fs.path.basename(parent), "roles");
+}
+
 fn isRoleDir(dir: []const u8) bool {
-    if (std.fs.path.dirname(dir)) |parent| {
-        if (std.mem.eql(u8, std.fs.path.basename(parent), "roles")) return true;
-    }
+    if (isRolePath(dir)) return true;
     var buf: [std.fs.max_path_bytes]u8 = undefined;
     for ([_][]const u8{ "main.yml", "main.yaml" }) |name| {
         const meta = std.fmt.bufPrint(&buf, "{s}/meta/{s}", .{ dir, name }) catch continue;
@@ -424,6 +437,12 @@ test "workspace fallback returns every match, nearest first" {
     const first = resolver.resolveAll("db", from_apps);
     try testing.expectEqual(@as(usize, 1), first.len);
     try testing.expectEqualStrings(try std.fs.path.join(aa, &.{ apps, "db" }), first[0]);
+}
+
+test "path-only Role ownership needs no metadata reads" {
+    try testing.expectEqualStrings("/w/roles/web", enclosingRoleFromPath("/w/roles/web/handlers/sub/x.yml").?);
+    try testing.expectEqualStrings("/w/roles/web", enclosingRoleFromPath("/w/roles/web/tasks/handlers/x.yml").?);
+    try testing.expect(enclosingRoleFromPath("/x/handlers/project/site.yml") == null);
 }
 
 test "enclosing role" {

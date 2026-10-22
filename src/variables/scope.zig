@@ -52,6 +52,8 @@ fn roleFileKind(path: []const u8, role: []const u8) ?FileKind {
     // and vars/main/**/*.yml. Keep their intrinsic Role precedence.
     if (std.mem.eql(u8, parent, "defaults")) return .role_defaults;
     if (std.mem.eql(u8, parent, "vars")) return .role_vars;
+    if (std.mem.eql(u8, parent, "tasks")) return .role_tasks;
+    if (std.mem.eql(u8, parent, "handlers")) return .role_handlers;
     if (std.mem.eql(u8, parent, "meta") and std.mem.eql(u8, dir, file_dir)) return .role_meta;
     for (conventional_dirs) |name| {
         if (std.mem.eql(u8, parent, name)) return .general;
@@ -246,11 +248,12 @@ test "file kind is based on the actual Role root, not the directory name alone" 
     try testing.expectEqual(FileKind.role_defaults, fileKind("/w/roles/r/defaults/main.yml", "/w/roles/r"));
     try testing.expectEqual(FileKind.role_vars, fileKind("/w/roles/r/vars/main.yml", "/w/roles/r"));
     try testing.expectEqual(FileKind.role_meta, fileKind("/w/roles/r/meta/main.yml", "/w/roles/r"));
-    try testing.expectEqual(FileKind.general, fileKind("/w/roles/r/tasks/main.yml", "/w/roles/r"));
+    try testing.expectEqual(FileKind.role_tasks, fileKind("/w/roles/r/tasks/main.yml", "/w/roles/r"));
+    try testing.expectEqual(FileKind.role_handlers, fileKind("/w/roles/r/handlers/sub/more.yml", "/w/roles/r"));
     try testing.expectEqual(FileKind.role_defaults, fileKind("/w/standalone/defaults/main/settings.yml", "/w/standalone"));
     try testing.expectEqual(FileKind.role_vars, fileKind("/w/standalone/vars/main/nested/settings.yaml", "/w/standalone"));
     try testing.expectEqual(FileKind.general, fileKind("/w/standalone-other/defaults/main.yml", "/w/standalone"));
-    try testing.expectEqual(FileKind.general, fileKind("/w/standalone/tasks/vars/data.yml", "/w/standalone"));
+    try testing.expectEqual(FileKind.role_tasks, fileKind("/w/standalone/tasks/vars/data.yml", "/w/standalone"));
     try testing.expectEqual(FileKind.general, fileKind("/w/standalone/meta/nested/data.yml", "/w/standalone"));
 }
 
