@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.3.0](https://github.com/kksat/zals/compare/v0.2.0...v0.3.0) (2026-10-24)
+
+
+### Features
+
+* **release:** gate initial publication on approved curated notes ([3e56128](https://github.com/kksat/zals/commit/3e561281ec002647b1d3d5ac432ad5ded27f81f5))
+* **release:** separate public and technical changelogs ([e856f77](https://github.com/kksat/zals/commit/e856f77da63720ec31d84bc1f44b1f1dcbe642f0))
+* **release:** validate curated notes and reviewed candidate coverage ([ca4128b](https://github.com/kksat/zals/commit/ca4128b9f93cf1bec0f72d946c8b1bf8d283a40e))
+
+
+### Bug Fixes
+
+* **navigation:** treat FQCN import_playbook as a playbook import ([c8f3ce6](https://github.com/kksat/zals/commit/c8f3ce6ac5cd5bacaef813161337cd7e217d9109))
+* **release:** allow reviewed coverage-only notes refreshes ([c93bdbd](https://github.com/kksat/zals/commit/c93bdbd26cbe600fa2ae9fa712ff925a3b060753))
+* **release:** bind published tags to approved candidate commits ([c0445f5](https://github.com/kksat/zals/commit/c0445f5f480efd7c8fa596cc048edff5cde7303f))
+* **release:** mark ordinary PR readiness without bypassing bot gates ([ed5e16f](https://github.com/kksat/zals/commit/ed5e16fb92c3330f5306299e05923ae3e62ca150))
+* **release:** preserve component-prefixed publication retries ([d8ed8b9](https://github.com/kksat/zals/commit/d8ed8b98bf5ad86dd889f858ee00637a99b7d97c))
+* **release:** recover component-prefixed release tags ([ef2f757](https://github.com/kksat/zals/commit/ef2f75718e2fb8369749e793cb0bb8087b7ea5d3))
+* **release:** refresh bot PR branches before readiness validation ([4274555](https://github.com/kksat/zals/commit/4274555c1d116f78a433d931d8a21e9b42ab3799))
+* **release:** refuse to rewrite existing release prose ([16e3c48](https://github.com/kksat/zals/commit/16e3c485f35ce621ca730b4af45add4c60f12f7e))
+* **release:** reject unresolved draft publication targets ([e57be60](https://github.com/kksat/zals/commit/e57be60ee59fcd16b8b3feef93a4ff3a7d10de64))
+* **release:** require approval before the notes PR merge ([524c840](https://github.com/kksat/zals/commit/524c84031d43d5aefd0dfedc16f3b0f345a6b28b))
+* **release:** skip uploads for identical published assets ([59b8d14](https://github.com/kksat/zals/commit/59b8d1456836a2baa1c063b58ead33fcfb0b65cc))
+* **release:** upload recovery assets without rewriting release prose ([e4aea88](https://github.com/kksat/zals/commit/e4aea88ad0a2d8fa8d932696ef5cea67a253aeb0))
+* **release:** validate the canonical VSIX changelog asset ([765184a](https://github.com/kksat/zals/commit/765184a2c101ef3de80a0a161c2f0d0b72c517cb))
+* **symbols:** detect role handler files relative to the role root ([2f4bb06](https://github.com/kksat/zals/commit/2f4bb0682ca4d381d2d9f0559c906224fce62f68))
+* **symbols:** label tasks in handler blocks as handlers ([4c63ae0](https://github.com/kksat/zals/commit/4c63ae020bb99921bba2456bf557119be1b9a983))
+* **variables:** bind top-level keys only in Variable files ([f9f50fe](https://github.com/kksat/zals/commit/f9f50fed6b8dd569f570941d6415b01dff58adf9))
+* **variables:** stop binding import_playbook vars in the importing playbook ([18f755d](https://github.com/kksat/zals/commit/18f755d5442d2e206c4e33835cc59ce15787b313))
+* **workspace:** match open documents opened through a symlinked folder ([e88d5a3](https://github.com/kksat/zals/commit/e88d5a335b9cc6b8b8aa63897758ecd0336ec358))
+* **workspace:** rescan once when the root marker changes ([88a6dc0](https://github.com/kksat/zals/commit/88a6dc01c5d7c932c345b4f445fb7179c65fe7d4))
+
 ## [0.2.0](https://github.com/kksat/zals/compare/zals-v0.1.0...zals-v0.2.0) (2026-10-16)
 
 
