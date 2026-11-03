@@ -353,6 +353,73 @@ test "rename reflects unsaved didChange edits across open buffers" {
     try expectLocations(sorted_expected, actual);
 }
 
+test "runtime-supplied and unbound names are not renamable" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const fixture = try std.fs.cwd().realpathAlloc(a, "test/fixtures/e2e-workspace");
+    var home_dir = std.testing.tmpDir(.{});
+    defer home_dir.cleanup();
+    var client = try startIndexed(a, fixture, try home_dir.dir.realpathAlloc(a, "."));
+    defer client.deinit();
+
+    const common_uri = try std.fmt.allocPrint(a, "file://{s}/{s}", .{ fixture, common });
+    const text =
+        \\---
+        \\- name: Report the chosen release
+        \\  vars:
+        \\    ansible_user: deploy
+        \\  ansible.builtin.debug:
+        \\    msg: "{{ item }} {{ lookup('env', 'HOME') }} {{ hostvars[inventory_hostname] }} {{ users | map(attribute='name') }} {{ ansible_user }} {{ range(3) }}"
+        \\  loop: [1]
+        \\
+    ;
+    try open(&client, common_uri, text);
+    // Rewriting these reads would detach them from Ansible's loop item, its
+    // lookup/range globals, magic and connection variables, a filter keyword
+    // argument, or an unsearched (inventory/extra-vars) binding.
+    const names = [_][]const u8{ "item", "lookup", "hostvars", "inventory_hostname", "users", "attribute", "ansible_user", "range" };
+    const line = 5;
+    const source_line = "    msg: \"{{ item }} {{ lookup('env', 'HOME') }} {{ hostvars[inventory_hostname] }} {{ users | map(attribute='name') }} {{ ansible_user }} {{ range(3) }}\"";
+    for (names) |name| {
+        const column: u32 = @intCast(std.mem.indexOf(u8, source_line, name).? + 1);
+        const position = anchor.Position{ .line = line, .character = column };
+        const prep = try client.request("textDocument/prepareRename", .{ .textDocument = .{ .uri = common_uri }, .position = position });
+        if (prep != .null) {
+            std.debug.print("prepareRename accepted {s}\n", .{name});
+            return error.RuntimeNameRenamable;
+        }
+        const ren = try client.request("textDocument/rename", .{ .textDocument = .{ .uri = common_uri }, .position = position, .newName = "renamed_name" });
+        if (ren != .null) {
+            std.debug.print("rename rewrote {s}\n", .{name});
+            return error.RuntimeNameRenamable;
+        }
+    }
+    // The definition key of a supplied name is not renamable either.
+    const key = try client.request("textDocument/prepareRename", .{ .textDocument = .{ .uri = common_uri }, .position = anchor.Position{ .line = 3, .character = 6 } });
+    try std.testing.expect(key == .null);
+}
+
+fn startIndexed(a: Allocator, fixture: []const u8, home: []const u8) !lsp.Client {
+    const deps = try std.fs.cwd().realpathAlloc(a, "test/dependencies");
+    const binary = try std.fs.cwd().realpathAlloc(a, "zig-out/bin/zals");
+    var client = try lsp.Client.start(a, binary, fixture, deps, home);
+    errdefer client.deinit();
+    _ = try client.request("initialize", .{
+        .processId = @as(?i64, null),
+        .rootUri = try std.fmt.allocPrint(a, "file://{s}", .{fixture}),
+        .capabilities = .{},
+        .initializationOptions = .{ .ansible = .{
+            .workspace = .{ .rootMarker = "fixture-workspace-root" },
+            .python = .{ .venvPath = "" },
+            .validation = .{ .enabled = false, .lint = .{ .enabled = false } },
+        } },
+    });
+    try client.notify("initialized", .{});
+    try client.waitForIndex();
+    return client;
+}
+
 fn open(client: *lsp.Client, uri: []const u8, text: []const u8) !void {
     try client.notify("textDocument/didOpen", .{ .textDocument = .{
         .uri = uri,

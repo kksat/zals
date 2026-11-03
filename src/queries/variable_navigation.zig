@@ -117,7 +117,7 @@ pub const Query = struct {
     }
 
     pub fn prepareRename(self: *Query, subject: *Subject) !?types.PrepareRename {
-        const current = (try self.occurrence(subject, .root)) orelse return null;
+        const current = (try self.renameTarget(subject)) orelse return null;
         return .{
             .range = subject.doc.rangeFromOffsets(current.start, current.end),
             .placeholder = try self.context.allocator.dupe(u8, current.name),
@@ -125,8 +125,22 @@ pub const Query = struct {
     }
 
     pub fn renameLocations(self: *Query, subject: *Subject) !?[]const types.Location {
-        const current = (try self.occurrence(subject, .root)) orelse return null;
+        const current = (try self.renameTarget(subject)) orelse return null;
         return try self.namedReferences(subject, current.name, .root, true);
+    }
+
+    /// Rename rewrites every read, so the name must be one zals can see the
+    /// user bind. Reads with no binding in the searched files are runtime
+    /// names (loop items, magic variables, Jinja globals, keyword arguments)
+    /// or bindings zals does not search (inventory, extra-vars).
+    fn renameTarget(self: *Query, subject: *Subject) !?variables.Cursor {
+        const current = (try self.occurrence(subject, .root)) orelse return null;
+        if (variables.supplied.isSupplied(current.name)) return null;
+        const set = try self.context.searchFiles(subject.doc.uri);
+        for (set.files) |file| for (file.facts.var_defs) |def| {
+            if (std.mem.eql(u8, def.name, current.name)) return current;
+        };
+        return null;
     }
 
     fn namedReferences(self: *Query, subject: *Subject, name: []const u8, group: Group, include_declaration: bool) ![]const types.Location {

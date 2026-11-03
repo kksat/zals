@@ -10,6 +10,7 @@ pub const bindings = @import("bindings.zig");
 pub const scope = @import("scope.zig");
 pub const source = @import("source.zig");
 pub const index = @import("index.zig");
+pub const supplied = @import("supplied.zig");
 
 pub const FileSource = source.FileSource;
 pub const DirEntry = source.DirEntry;
