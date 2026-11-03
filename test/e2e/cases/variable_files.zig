@@ -154,17 +154,11 @@ pub const all = [_]m.Case{
         .expected = &.{m.span(play, "{{ <platforms> }}")},
     },
     .{
-        .name = "variable file/unloaded Molecule platforms: prepareRename refuses unbound read",
-        .method = .prepare_rename,
-        .from = m.cursor(play, "{{ <platforms> }}"),
-        .expected = &.{},
-    },
-    .{
-        .name = "variable file/unloaded Molecule platforms: rename refuses unbound read",
+        .name = "variable file/unloaded Molecule platforms: rename edits only the play read, never molecule.yml",
         .method = .rename,
         .from = m.cursor(play, "{{ <platforms> }}"),
         .new_name = "renamed_platforms",
-        .expected = &.{},
+        .expected = &.{m.span(play, "{{ <platforms> }}")},
     },
     .{
         .name = "variable file/inventory group as a field: no definition",

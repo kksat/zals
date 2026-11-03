@@ -353,7 +353,7 @@ test "rename reflects unsaved didChange edits across open buffers" {
     try expectLocations(sorted_expected, actual);
 }
 
-test "runtime-supplied and unbound names are not renamable" {
+test "runtime-supplied names and filter keyword arguments are not renamable, while unbound user variables rename across reads" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
@@ -370,17 +370,24 @@ test "runtime-supplied and unbound names are not renamable" {
         \\  vars:
         \\    ansible_user: deploy
         \\  ansible.builtin.debug:
-        \\    msg: "{{ item }} {{ lookup('env', 'HOME') }} {{ hostvars[inventory_hostname] }} {{ users | map(attribute='name') }} {{ ansible_user }} {{ range(3) }}"
+        \\    msg: "{{ item }} {{ lookup('env', 'HOME') }} {{ hostvars[inventory_hostname] }} {{ hana_version | map(attribute='name') }} {{ ansible_user }} {{ range(3) }}"
         \\  loop: [1]
+        \\- name: Validate hana_version
+        \\  ansible.builtin.assert:
+        \\    that:
+        \\      - >-
+        \\        hana_version is ansible.builtin.regex("^SPS\d{2}$")
+        \\        or
+        \\        hana_version is ansible.builtin.regex("^\d\.\d{2}$")
         \\
     ;
     try open(&client, common_uri, text);
     // Rewriting these reads would detach them from Ansible's loop item, its
-    // lookup/range globals, magic and connection variables, a filter keyword
-    // argument, or an unsearched (inventory/extra-vars) binding.
-    const names = [_][]const u8{ "item", "lookup", "hostvars", "inventory_hostname", "users", "attribute", "ansible_user", "range" };
+    // lookup/range globals, magic and connection variables, or a filter keyword
+    // argument.
+    const names = [_][]const u8{ "item", "lookup", "hostvars", "inventory_hostname", "attribute", "ansible_user", "range" };
     const line = 5;
-    const source_line = "    msg: \"{{ item }} {{ lookup('env', 'HOME') }} {{ hostvars[inventory_hostname] }} {{ users | map(attribute='name') }} {{ ansible_user }} {{ range(3) }}\"";
+    const source_line = "    msg: \"{{ item }} {{ lookup('env', 'HOME') }} {{ hostvars[inventory_hostname] }} {{ hana_version | map(attribute='name') }} {{ ansible_user }} {{ range(3) }}\"";
     for (names) |name| {
         const column: u32 = @intCast(std.mem.indexOf(u8, source_line, name).? + 1);
         const position = anchor.Position{ .line = line, .character = column };
@@ -398,6 +405,23 @@ test "runtime-supplied and unbound names are not renamable" {
     // The definition key of a supplied name is not renamable either.
     const key = try client.request("textDocument/prepareRename", .{ .textDocument = .{ .uri = common_uri }, .position = anchor.Position{ .line = 3, .character = 6 } });
     try std.testing.expect(key == .null);
+
+    // An unbound user variable (such as hana_version read in assert.that and
+    // Jinja expressions) renames across all of its reads.
+    const hana_pos = anchor.Position{ .line = 11, .character = 10 };
+    const prep_hana = try client.request("textDocument/prepareRename", .{ .textDocument = .{ .uri = common_uri }, .position = hana_pos });
+    try std.testing.expectEqualStrings("hana_version", (lsp.field(prep_hana, "placeholder") orelse return error.MissingPlaceholder).string);
+    const hana_edits = try parseWorkspaceEdit(a, try client.request("textDocument/rename", .{
+        .textDocument = .{ .uri = common_uri },
+        .position = hana_pos,
+        .newName = "sap_hana_version",
+    }), "sap_hana_version");
+    std.mem.sort(anchor.Location, hana_edits, {}, lessLocation);
+    try expectLocations(&.{
+        .{ .uri = common_uri, .range = range(5, 87, 5, 99) },
+        .{ .uri = common_uri, .range = range(11, 8, 11, 20) },
+        .{ .uri = common_uri, .range = range(13, 8, 13, 20) },
+    }, hana_edits);
 }
 
 test "rename never returns a partial edit while the Workspace index is scanning" {

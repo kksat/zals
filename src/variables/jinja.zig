@@ -164,6 +164,7 @@ fn scanExpressionNames(allocator: Allocator, text: []const u8, base: usize, name
     // (or capture-filter arguments) contributes field reads; root scanning
     // deliberately retains its existing behavior, without binding-flow inference.
     var assignment_target = false;
+    var call_depth: usize = 0;
     var i: usize = 0;
     while (i < text.len) {
         const c = text[i];
@@ -226,14 +227,22 @@ fn scanExpressionNames(allocator: Allocator, text: []const u8, base: usize, name
             } else if (isKeyword(word)) {
                 prev = .other;
             } else {
-                if (names == .roots) try out.append(.{ .name = word, .start = base + i, .end = base + j });
+                if (names == .roots and !(call_depth > 0 and followedByKeywordArgEquals(text, j))) {
+                    try out.append(.{ .name = word, .start = base + i, .end = base + j });
+                }
                 prev = .other;
             }
             i = j;
             continue;
         }
         i += 1;
-        if (c == '=') assignment_target = false;
+        if (c == '(') {
+            call_depth += 1;
+        } else if (c == ')' and call_depth > 0) {
+            call_depth -= 1;
+        } else if (c == '=') {
+            assignment_target = false;
+        }
         prev = .other;
         can_subscript = c == ']' or c == ')' or c == '}';
     }
@@ -257,6 +266,12 @@ fn closingDelimiter(text: []const u8, delimiter: []const u8) ?usize {
 fn followedByCall(text: []const u8, start: usize) bool {
     const next = skipWhitespace(text, start);
     return next < text.len and text[next] == '(';
+}
+
+fn followedByKeywordArgEquals(text: []const u8, start: usize) bool {
+    const next = skipWhitespace(text, start);
+    if (next >= text.len or text[next] != '=') return false;
+    return next + 1 >= text.len or text[next + 1] != '=';
 }
 
 fn skipWhitespace(text: []const u8, start: usize) usize {

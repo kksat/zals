@@ -131,9 +131,15 @@ pub const Query = struct {
         const a = context.allocator;
         const set = (try context.workspaceOf(subject.doc.uri)) orelse return error.RenameNeedsWorkspace;
         for (set.files) |file| {
-            if (discover.isInstalledCollectionFile(file.path)) continue;
             for (file.facts.var_defs) |def| {
-                if (std.mem.eql(u8, def.name, new_name)) return error.VariableAlreadyExists;
+                if (std.mem.eql(u8, def.name, new_name) and !discover.isInstalledCollectionFile(file.path)) {
+                    return error.VariableAlreadyExists;
+                }
+            }
+            for (file.facts.var_refs) |ref| {
+                if (std.mem.eql(u8, ref.name, new_name) and !discover.isInstalledCollectionFile(file.path)) {
+                    return error.VariableAlreadyExists;
+                }
             }
         }
         var out = std.array_list.Managed(types.Location).init(a);
@@ -144,11 +150,9 @@ pub const Query = struct {
         return try out.toOwnedSlice();
     }
 
-    /// Rename rewrites every read, so the name must be one zals can see the
-    /// user bind. Reads with no binding in the searched files are runtime
-    /// names (loop items, magic variables, Jinja globals, keyword arguments)
-    /// or bindings zals does not search (inventory, extra-vars). Installed
-    /// collections belong to their publisher and are never renamed. Without a
+    /// Rename rewrites every read and binding of a user root variable in the
+    /// owning Workspace. Runtime-supplied names (loop items, magic variables,
+    /// Jinja globals) and Installed collections are never renamed. Without a
     /// session Workspace the Role/Playbook file set misses callers and
     /// callees, so it fails with error.RenameNeedsWorkspace.
     fn renameTarget(self: *Query, subject: *Subject) !?variables.Cursor {
@@ -160,13 +164,16 @@ pub const Query = struct {
         // A document under the Workspace root but outside its discovered
         // files (hidden or virtual-environment directory) is not in the edit set.
         if (view.find(set.files, subject_path) == null) return null;
+        var has_workspace_def = false;
+        var has_installed_def = false;
         for (set.files) |file| {
-            if (discover.isInstalledCollectionFile(file.path)) continue;
             for (file.facts.var_defs) |def| {
-                if (std.mem.eql(u8, def.name, current.name)) return current;
+                if (!std.mem.eql(u8, def.name, current.name)) continue;
+                if (discover.isInstalledCollectionFile(file.path)) has_installed_def = true else has_workspace_def = true;
             }
         }
-        return null;
+        if (has_installed_def and !has_workspace_def) return null;
+        return current;
     }
 
     fn namedReferences(self: *Query, subject: *Subject, name: []const u8, group: Group, include_declaration: bool) ![]const types.Location {
