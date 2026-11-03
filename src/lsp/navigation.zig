@@ -60,7 +60,7 @@ pub fn result(context: *Context, method: Method, params: Value) !Value {
         .prepare_rename => return encode.prepareRename(a, try query.prepareRename(&subject)),
         .rename => {
             const new_name = json_util.string(params, "newName") orelse return Value.null;
-            return encode.workspaceEditChanges(a, try query.rename(&subject), new_name);
+            return encode.workspaceEditChanges(a, try query.rename(&subject, new_name), new_name);
         },
     }
 }

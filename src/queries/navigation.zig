@@ -92,8 +92,8 @@ pub const Query = struct {
         return self.bindings.prepareRename(subject);
     }
 
-    pub fn rename(self: *Query, subject: *Subject) !?[]const types.Location {
-        return self.bindings.renameLocations(subject);
+    pub fn rename(self: *Query, subject: *Subject, new_name: []const u8) !?[]const types.Location {
+        return self.bindings.renameLocations(subject, new_name);
     }
 
     /// Navigation-only hover terminates before contextual module catalog

@@ -14,6 +14,7 @@ const providers = @import("../providers/root.zig");
 const cursor = @import("../cursor.zig");
 const Context = @import("../queries/context.zig").Context;
 const SessionConfig = @import("../workspace/session.zig").Config;
+const variables = @import("../variables/root.zig");
 
 pub fn handleRequest(self: *Server, a: Allocator, id: Value, method: []const u8, params: Value) !void {
     if (std.mem.eql(u8, method, "initialize")) return onInitialize(self, a, id, params);
@@ -53,7 +54,7 @@ pub fn handleRequest(self: *Server, a: Allocator, id: Value, method: []const u8,
     if (std.mem.eql(u8, method, "textDocument/rename")) {
         const new_name = json_util.string(params, "newName") orelse
             return self.sendError(a, id, -32602, "invalid variable name");
-        if (!@import("../variables/jinja.zig").isValidIdentifier(new_name))
+        if (!variables.jinja.isValidIdentifier(new_name) or variables.supplied.isSupplied(new_name))
             return self.sendError(a, id, -32602, "invalid variable name");
         if (self.index.isScanning()) return sendIndexScanning(self, a, id);
         const edit = navigation.result(&context, .rename, params) catch |err|
@@ -111,6 +112,7 @@ fn sendIndexScanning(self: *Server, a: Allocator, id: Value) !void {
 fn renameRefusal(err: anyerror) ?[]const u8 {
     return switch (err) {
         error.RenameNeedsWorkspace => "cannot rename: this file has no Workspace (no root marker such as .git above it), so callers outside its Role or Playbook would be missed",
+        error.VariableAlreadyExists => "cannot rename: a variable with this name already exists in the Workspace",
         else => null,
     };
 }

@@ -628,6 +628,69 @@ test "rename without a session Workspace is refused, not partial" {
     }
 }
 
+test "rename rejects Python keywords, supplied names, existing variables, and non-identifier keys" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const fixture = try std.fs.cwd().realpathAlloc(a, "test/fixtures/e2e-workspace");
+    var home_dir = std.testing.tmpDir(.{});
+    defer home_dir.cleanup();
+    var client = try startIndexed(a, fixture, try home_dir.dir.realpathAlloc(a, "."));
+    defer client.deinit();
+
+    const resolver = anchor.Resolver{ .allocator = a, .fixture = fixture, .deps = try std.fs.cwd().realpathAlloc(a, "test/dependencies") };
+    const valid_source = try resolver.cursor(m.cursor(pf_defaults, "<app_port>: 8080"));
+    try open(&client, valid_source.uri, "---\nrelease_tag: candidate\napp_port: 8080\ndeployment_enabled: true\n\"my-var\": 1\n");
+
+    const invalid_new_names = [_][]const u8{
+        "class",
+        "def",
+        "lambda",
+        "return",
+        "pass",
+        "yield",
+        "async",
+        "await",
+        "item",
+        "hostvars",
+        "inventory_hostname",
+        "ansible_host",
+        "lookup",
+    };
+    for (invalid_new_names) |bad_name| {
+        const err_obj = try client.requestError("textDocument/rename", .{
+            .textDocument = .{ .uri = valid_source.uri },
+            .position = valid_source.position,
+            .newName = bad_name,
+        });
+        const code = lsp.field(err_obj, "code") orelse return error.MissingErrorCode;
+        try std.testing.expectEqual(@as(i64, -32602), code.integer);
+    }
+
+    // Renaming onto an existing variable name (or the current name) is refused.
+    for ([_][]const u8{ "release_tag", "deployment_enabled", "app_port" }) |existing_name| {
+        const err_obj = try client.requestError("textDocument/rename", .{
+            .textDocument = .{ .uri = valid_source.uri },
+            .position = valid_source.position,
+            .newName = existing_name,
+        });
+        const code = lsp.field(err_obj, "code") orelse return error.MissingErrorCode;
+        try std.testing.expectEqual(@as(i64, -32803), code.integer);
+    }
+
+    // A non-identifier YAML key ("my-var") in a Variable file is not renamable.
+    const hyphen_pos = anchor.Position{ .line = 4, .character = 3 };
+    try std.testing.expect(try client.request("textDocument/prepareRename", .{
+        .textDocument = .{ .uri = valid_source.uri },
+        .position = hyphen_pos,
+    }) == .null);
+    try std.testing.expect(try client.request("textDocument/rename", .{
+        .textDocument = .{ .uri = valid_source.uri },
+        .position = hyphen_pos,
+        .newName = "valid_var",
+    }) == .null);
+}
+
 fn startIndexed(a: Allocator, fixture: []const u8, home: []const u8) !lsp.Client {
     const deps = try std.fs.cwd().realpathAlloc(a, "test/dependencies");
     const binary = try std.fs.cwd().realpathAlloc(a, "zig-out/bin/zals");
