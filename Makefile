@@ -18,13 +18,14 @@ SUITE ?=
 FILE ?=
 FILTER ?=
 
-.PHONY: help check lint hooks build test e2e zig-test zig neovim-test run fmt clean parity smoke benchmark-operations performance-ci
+.PHONY: help check lint hooks build test e2e e2e-negative zig-test zig neovim-test run fmt clean parity smoke benchmark-operations performance-ci
 
 help:
 	@echo 'make check                          lint + build + unit tests; run before committing'
 	@echo 'make build [OPTIMIZE=ReleaseFast]   build zig-out/bin/zals'
 	@echo 'make test                           unit tests'
 	@echo 'make e2e [SUITE=navigation-e2e]     all stdio E2E suites, or one (see zig build -l)'
+	@echo 'make e2e-negative                   negative root variable rename E2E suite'
 	@echo 'make zig-test FILE=test/x.zig [FILTER=name]  build, then run one Zig test root'
 	@echo 'make zig ARGS="build -l"            any zig command with the macOS workaround'
 	@echo 'make performance-ci ARGS="run --baseline-tree <path> --output <path>"  optimized CI comparison'
@@ -50,6 +51,9 @@ test:
 
 e2e:
 	zig build $(or $(SUITE),e2e)
+
+e2e-negative:
+	zig build variable-rename-negative-e2e
 
 # Stdio test roots spawn zig-out/bin/zals, so build it first.
 zig-test:

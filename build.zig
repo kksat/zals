@@ -165,6 +165,12 @@ pub fn build(b: *std.Build) void {
             .description = "Run root variable prepareRename and rename tests",
             .inputs = &.{ "test/fixtures/e2e-workspace", "test/dependencies" },
         },
+        .{
+            .name = "variable-rename-negative-e2e",
+            .source = "test/variable_rename_negative_e2e.zig",
+            .description = "Run root variable rename negative and non-collateral-edit tests",
+            .inputs = &.{ "test/fixtures/e2e-workspace", "test/dependencies" },
+        },
     };
     for (suites) |suite| {
         const tests = b.addTest(.{ .root_module = b.createModule(.{
