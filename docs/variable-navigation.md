@@ -45,6 +45,8 @@ navigate them. See [ADR-0045](adr/0045-variable-files.md).
 | Go to definition | Reachable bindings in precedence order, then bindings elsewhere in the Workspace |
 | Go to implementation | The same ordered bindings, excluding schema-only argument-spec declarations |
 | Hover | Active and shadowed reachable bindings, then bindings elsewhere in the Workspace; role parameter keys prefer the called role's option documentation |
+| Prepare rename | Quote-free range and placeholder for a bound user root variable in the owning Workspace |
+| Rename | WorkspaceEdit rewriting every read and binding of that root name in the owning Workspace (excluding Installed collections) |
 
 Go-to-definition accepts binding keys, including keys in defaults, vars, and
 argument specs. The binding under the cursor remains in the result. When it is
@@ -115,6 +117,7 @@ through `vars:` on `include_role`/`import_role` have a called-role context:
 | Go to implementation | Ranked concrete bindings in the resolved callee's role/file set, excluding schemas, caller keys, and unrelated roles |
 | Hover | The matching option documentation, falling back to ordinary variable hover |
 | Find references | Still the complete Workspace-wide root-name result, with or without bindings according to `includeDeclaration` |
+| Prepare rename / Rename | Same complete Workspace-wide root-name edit set as root variables |
 
 `tasks_from: setup.yml` and `setup.yaml` select the `setup` argument-spec entry
 point; absent `tasks_from` selects `main`. Map and key-value role includes use
@@ -224,7 +227,19 @@ directories must overlap (ADR-0034). An ambiguous fallback invocation can find
 sites for several roles; a uniquely resolved site can have a narrower answer.
 Do not assume root-variable name matching applies to roles.
 
-See [ADR-0036](adr/0036-variable-navigation-from-bindings.md),
+Rename (`textDocument/prepareRename` and `textDocument/rename`) applies only to
+root variables with a recognized binding in the owning session Workspace, and
+ preserves surrounding YAML quotes on quoted keys and scalar bindings. Variable
+fields, unbound reads, and runtime-supplied Ansible/Jinja names (`item`,
+`ansible_*`, `hostvars`, `lookup`, etc.) are not renamable (`null`). Installed
+collections (`MANIFEST.json`) are never edited. Rename fails with `RequestFailed`
+while the Workspace index is scanning, when the file has no session Workspace,
+or when `newName` collides with an existing variable in the Workspace; invalid
+identifiers, Jinja/Python keywords, and runtime-supplied target names fail with
+`InvalidParams`.
+
+See [ADR-0046](adr/0046-root-variable-rename.md),
+[ADR-0036](adr/0036-variable-navigation-from-bindings.md),
 [ADR-0032](adr/0032-workspace-wide-navigation.md), and
 [ADR-0024](adr/0024-variable-go-to-definition.md) for definition sites and
 precedence.

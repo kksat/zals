@@ -39,14 +39,15 @@ remain outside the Workspace symbol set. See
 [collection member scope guide](docs/workspace-collection-members.md)
 ([ADR-0038](docs/adr/0038-workspace-collection-members.md)).
 
-Variable navigation (find-references, definition, and implementation) is a
-post-parity extension; upstream has no counterpart. Reads and binding keys are
-both entry points. Structured-value fields have a separate Workspace-wide
+Variable navigation (find-references, definition, implementation, and root
+variable rename) is a post-parity extension; upstream has no counterpart. Reads
+and binding keys are both entry points. Structured-value fields have a separate Workspace-wide
 leaf-name group, parsed key targets, and nested argument-spec descriptions
 ([ADR-0041](docs/adr/0041-field-name-navigation.md)). See the [variable navigation scope guide](docs/variable-navigation.md),
 [ADR-0024](docs/adr/0024-variable-go-to-definition.md),
-[ADR-0025](docs/adr/0025-variable-references.md), and
-[ADR-0036](docs/adr/0036-variable-navigation-from-bindings.md).
+[ADR-0025](docs/adr/0025-variable-references.md),
+[ADR-0036](docs/adr/0036-variable-navigation-from-bindings.md), and
+[ADR-0046](docs/adr/0046-root-variable-rename.md).
 
 Document symbols (`textDocument/documentSymbol`) are a second post-parity
 extension: a semantic outline for playbooks, task and handler files, variable
