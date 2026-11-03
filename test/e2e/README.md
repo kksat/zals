@@ -58,6 +58,8 @@ files on disk.
 | `field-parameter-edits-e2e` | `test/field_parameter_edits_e2e.zig` | Changed full-path contracts/values, complete Workspace references, and callee vars-load overlays |
 | `role-parameter-edits-e2e` | `test/role_parameter_edits_e2e.zig` | Unsaved argument-spec ranges and hover |
 | `variable-file-edits-e2e` | `test/variable_file_edits_e2e.zig` | Unsaved vars loads added or removed, and callee loads from the index or a buffer, decide which files bind (ADR-0045) |
+| `variable-rename-e2e` | `test/variable_rename_e2e.zig` | Root variable `prepareRename` and `rename` across quote styles, unsaved overlays, and completeness/name guards (ADR-0046) |
+| `variable-rename-negative-e2e` | `test/variable_rename_negative_e2e.zig` | Negative root variable rename scenarios ensuring metadata, schemas, fields, literals, directives, and excluded scopes are never modified |
 | `collection-symbols-e2e` | `test/collection_symbols_e2e.zig` | Collection layouts, member symbols, open buffers, and watcher boundaries |
 | `navigation-uris-e2e` | `test/navigation_uris_e2e.zig` | Absolute and escaped targets from relative/absolute search paths |
 | `selected-venv-e2e` | `test/selected_venv_e2e.zig` | Selected installations, per-file module docs, discovery, and cache isolation |
