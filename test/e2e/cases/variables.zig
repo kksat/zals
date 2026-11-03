@@ -1157,12 +1157,19 @@ pub const all = [_]m.Case{
             m.span("negative/roles.yml", "<dynamic_role>: example.rollout.deploy"),
         },
     },
+    // `with_items` still binds `item`; rewriting the read would break the task.
     .{
-        .name = "variable/rename: unbound Jinja item renames its read",
+        .name = "variable/rename non-match: implicit loop item is not renamable",
         .method = .rename,
         .from = m.cursor(verify, "msg: \"{{ <item> }}\""),
         .new_name = "loop_element",
-        .expected = &.{m.span(verify, "msg: \"{{ <item> }}\"")},
+        .expected = &.{},
+    },
+    .{
+        .name = "variable/prepareRename non-match: implicit loop item is not renamable",
+        .method = .prepare_rename,
+        .from = m.cursor(verify, "msg: \"{{ <item> }}\""),
+        .expected = &.{},
     },
     .{
         .name = "variable/rename non-match: field member is not a root variable",
