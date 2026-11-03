@@ -577,6 +577,57 @@ test "rename from documents outside the Workspace files returns null" {
     try std.testing.expect(try client.request("textDocument/rename", .{ .textDocument = .{ .uri = hidden_uri }, .position = hidden_position, .newName = "web_port" }) == .null);
 }
 
+test "rename without a session Workspace is refused, not partial" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var workspace_dir = std.testing.tmpDir(.{});
+    defer workspace_dir.cleanup();
+    var home_dir = std.testing.tmpDir(.{});
+    defer home_dir.cleanup();
+
+    // No root marker: the Role and the Playbook that passes its parameter are
+    // separate fallback file sets, so neither rename could see the other side.
+    const files = [_]struct { path: []const u8, text: []const u8 }{
+        .{ .path = "roles/web/defaults/main.yml", .text = "---\nweb_port: 80\n" },
+        .{ .path = "roles/web/tasks/main.yml", .text = "---\n- ansible.builtin.debug:\n    msg: \"{{ web_port }}\"\n" },
+        .{ .path = "site.yml", .text = "---\n- hosts: all\n  roles:\n    - role: web\n      web_port: 8080\n" },
+    };
+    for (files) |file| {
+        if (std.fs.path.dirname(file.path)) |dir| try workspace_dir.dir.makePath(dir);
+        try workspace_dir.dir.writeFile(.{ .sub_path = file.path, .data = file.text });
+    }
+    const root = try workspace_dir.dir.realpathAlloc(a, ".");
+    const deps = try std.fs.cwd().realpathAlloc(a, "test/dependencies");
+    const binary = try std.fs.cwd().realpathAlloc(a, "zig-out/bin/zals");
+    var client = try lsp.Client.startWithOptions(a, binary, root, deps, try home_dir.dir.realpathAlloc(a, "."), .{ .collections_path = "", .use_fixture_config = false });
+    defer client.deinit();
+    _ = try client.request("initialize", .{
+        .processId = @as(?i64, null),
+        .rootUri = try std.fmt.allocPrint(a, "file://{s}", .{root}),
+        .capabilities = .{},
+        .initializationOptions = .{ .ansible = .{
+            .workspace = .{ .rootMarker = "absent-rename-root", .missingGitWarning = false },
+            .python = .{ .venvPath = "" },
+            .validation = .{ .enabled = false, .lint = .{ .enabled = false } },
+        } },
+    });
+    try client.notify("initialized", .{});
+
+    const cursors = [_]struct { path: []const u8, at: anchor.Position }{
+        .{ .path = files[0].path, .at = .{ .line = 1, .character = 2 } },
+        .{ .path = files[2].path, .at = .{ .line = 4, .character = 8 } },
+    };
+    for (cursors) |c| {
+        const uri = try std.fmt.allocPrint(a, "file://{s}/{s}", .{ root, c.path });
+        for (files) |file| if (std.mem.eql(u8, file.path, c.path)) try open(&client, uri, file.text);
+        const prep = try client.requestError("textDocument/prepareRename", .{ .textDocument = .{ .uri = uri }, .position = c.at });
+        try std.testing.expectEqual(@as(i64, -32803), (lsp.field(prep, "code") orelse return error.MissingErrorCode).integer);
+        const ren = try client.requestError("textDocument/rename", .{ .textDocument = .{ .uri = uri }, .position = c.at, .newName = "http_port" });
+        try std.testing.expectEqual(@as(i64, -32803), (lsp.field(ren, "code") orelse return error.MissingErrorCode).integer);
+    }
+}
+
 fn startIndexed(a: Allocator, fixture: []const u8, home: []const u8) !lsp.Client {
     const deps = try std.fs.cwd().realpathAlloc(a, "test/dependencies");
     const binary = try std.fs.cwd().realpathAlloc(a, "zig-out/bin/zals");

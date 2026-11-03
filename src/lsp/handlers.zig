@@ -46,7 +46,9 @@ pub fn handleRequest(self: *Server, a: Allocator, id: Value, method: []const u8,
         return self.sendResult(a, id, try navigation.result(&context, .references, params));
     if (std.mem.eql(u8, method, "textDocument/prepareRename")) {
         if (self.index.isScanning()) return sendIndexScanning(self, a, id);
-        return self.sendResult(a, id, try navigation.result(&context, .prepare_rename, params));
+        const result = navigation.result(&context, .prepare_rename, params) catch |err|
+            return self.sendError(a, id, -32803, renameRefusal(err) orelse return err);
+        return self.sendResult(a, id, result);
     }
     if (std.mem.eql(u8, method, "textDocument/rename")) {
         const new_name = json_util.string(params, "newName") orelse
@@ -54,7 +56,9 @@ pub fn handleRequest(self: *Server, a: Allocator, id: Value, method: []const u8,
         if (!@import("../variables/jinja.zig").isValidIdentifier(new_name))
             return self.sendError(a, id, -32602, "invalid variable name");
         if (self.index.isScanning()) return sendIndexScanning(self, a, id);
-        return self.sendResult(a, id, try navigation.result(&context, .rename, params));
+        const edit = navigation.result(&context, .rename, params) catch |err|
+            return self.sendError(a, id, -32803, renameRefusal(err) orelse return err);
+        return self.sendResult(a, id, edit);
     }
     if (std.mem.eql(u8, method, "textDocument/semanticTokens/full"))
         return self.sendResult(a, id, try semanticResult(&context, params));
@@ -101,6 +105,14 @@ pub fn handleNotification(self: *Server, a: Allocator, method: []const u8, param
 /// an edit that misses unindexed reads breaks them (LSP RequestFailed).
 fn sendIndexScanning(self: *Server, a: Allocator, id: Value) !void {
     return self.sendError(a, id, -32803, "Workspace index is still loading; retry rename when it is ready");
+}
+
+/// Rename refusals the user can act on, reported as LSP RequestFailed.
+fn renameRefusal(err: anyerror) ?[]const u8 {
+    return switch (err) {
+        error.RenameNeedsWorkspace => "cannot rename: this file has no Workspace (no root marker such as .git above it), so callers outside its Role or Playbook would be missed",
+        else => null,
+    };
 }
 
 fn documentByUri(context: *const Context, params: Value) ?*Document {
