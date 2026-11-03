@@ -86,6 +86,11 @@ pub const Client = struct {
     }
 
     pub fn requestError(self: *Client, method: []const u8, params: anytype) !Value {
+        return field(try self.response(method, params), "error") orelse error.ExpectedJsonRpcError;
+    }
+
+    /// The complete response message, whether it carries `result` or `error`.
+    pub fn response(self: *Client, method: []const u8, params: anytype) !Value {
         const id = self.next_id;
         self.next_id += 1;
         try self.send(.{ .jsonrpc = "2.0", .id = id, .method = method, .params = params });
@@ -99,7 +104,7 @@ pub const Client = struct {
             }
             const response_id = (field(msg, "id") orelse return error.InvalidResponse);
             if (response_id != .integer or response_id.integer != id) return error.UnexpectedResponseId;
-            return field(msg, "error") orelse error.ExpectedJsonRpcError;
+            return msg;
         }
     }
 

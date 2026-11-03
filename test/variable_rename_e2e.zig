@@ -400,6 +400,70 @@ test "runtime-supplied and unbound names are not renamable" {
     try std.testing.expect(key == .null);
 }
 
+test "rename never returns a partial edit while the Workspace index is scanning" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var workspace_dir = std.testing.tmpDir(.{});
+    defer workspace_dir.cleanup();
+    var home_dir = std.testing.tmpDir(.{});
+    defer home_dir.cleanup();
+
+    // Enough Role files that the initial scan is still running when the first
+    // request arrives; every Role reads the one binding being renamed.
+    const roles = 2000;
+    try workspace_dir.dir.writeFile(.{ .sub_path = "rename-scan-root", .data = "" });
+    try workspace_dir.dir.makePath("roles/r0/defaults");
+    const defaults_text = "---\nscan_var: 1\n";
+    try workspace_dir.dir.writeFile(.{ .sub_path = "roles/r0/defaults/main.yml", .data = defaults_text });
+    for (0..roles) |i| {
+        const dir = try std.fmt.allocPrint(a, "roles/r{d}/tasks", .{i});
+        try workspace_dir.dir.makePath(dir);
+        try workspace_dir.dir.writeFile(.{
+            .sub_path = try std.fmt.allocPrint(a, "{s}/main.yml", .{dir}),
+            .data = "---\n- ansible.builtin.debug:\n    msg: \"{{ scan_var }}\"\n",
+        });
+    }
+    const root = try workspace_dir.dir.realpathAlloc(a, ".");
+    const deps = try std.fs.cwd().realpathAlloc(a, "test/dependencies");
+    const binary = try std.fs.cwd().realpathAlloc(a, "zig-out/bin/zals");
+    var client = try lsp.Client.startWithOptions(a, binary, root, deps, try home_dir.dir.realpathAlloc(a, "."), .{ .collections_path = "", .use_fixture_config = false });
+    defer client.deinit();
+    _ = try client.request("initialize", .{
+        .processId = @as(?i64, null),
+        .rootUri = try std.fmt.allocPrint(a, "file://{s}", .{root}),
+        .capabilities = .{},
+        .initializationOptions = .{ .ansible = .{
+            .workspace = .{ .rootMarker = "rename-scan-root" },
+            .python = .{ .venvPath = "" },
+            .validation = .{ .enabled = false, .lint = .{ .enabled = false } },
+        } },
+    });
+    try client.notify("initialized", .{});
+    const defaults_uri = try std.fmt.allocPrint(a, "file://{s}/roles/r0/defaults/main.yml", .{root});
+    try open(&client, defaults_uri, defaults_text);
+    const params = .{ .textDocument = .{ .uri = defaults_uri }, .position = anchor.Position{ .line = 1, .character = 2 }, .newName = "renamed_scan_var" };
+
+    // Before the index is ready: refuse, or answer completely. Never partially.
+    const early_prep = try client.response("textDocument/prepareRename", .{ .textDocument = params.textDocument, .position = params.position });
+    if (lsp.field(early_prep, "error")) |failure| {
+        const code = lsp.field(failure, "code") orelse return error.MissingErrorCode;
+        try std.testing.expectEqual(@as(i64, -32803), code.integer);
+    }
+    const early = try client.response("textDocument/rename", params);
+    if (lsp.field(early, "error")) |failure| {
+        const code = lsp.field(failure, "code") orelse return error.MissingErrorCode;
+        try std.testing.expectEqual(@as(i64, -32803), code.integer);
+    } else {
+        const edits = try parseWorkspaceEdit(a, lsp.field(early, "result") orelse return error.MissingResult, "renamed_scan_var");
+        try std.testing.expectEqual(@as(usize, roles + 1), edits.len);
+    }
+
+    try client.waitForIndex();
+    const complete = try parseWorkspaceEdit(a, try client.request("textDocument/rename", params), "renamed_scan_var");
+    try std.testing.expectEqual(@as(usize, roles + 1), complete.len);
+}
+
 fn startIndexed(a: Allocator, fixture: []const u8, home: []const u8) !lsp.Client {
     const deps = try std.fs.cwd().realpathAlloc(a, "test/dependencies");
     const binary = try std.fs.cwd().realpathAlloc(a, "zig-out/bin/zals");

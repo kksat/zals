@@ -44,13 +44,16 @@ pub fn handleRequest(self: *Server, a: Allocator, id: Value, method: []const u8,
         return self.sendResult(a, id, try navigation.result(&context, .implementation, params));
     if (std.mem.eql(u8, method, "textDocument/references"))
         return self.sendResult(a, id, try navigation.result(&context, .references, params));
-    if (std.mem.eql(u8, method, "textDocument/prepareRename"))
+    if (std.mem.eql(u8, method, "textDocument/prepareRename")) {
+        if (self.index.isScanning()) return sendIndexScanning(self, a, id);
         return self.sendResult(a, id, try navigation.result(&context, .prepare_rename, params));
+    }
     if (std.mem.eql(u8, method, "textDocument/rename")) {
         const new_name = json_util.string(params, "newName") orelse
             return self.sendError(a, id, -32602, "invalid variable name");
         if (!@import("../variables/jinja.zig").isValidIdentifier(new_name))
             return self.sendError(a, id, -32602, "invalid variable name");
+        if (self.index.isScanning()) return sendIndexScanning(self, a, id);
         return self.sendResult(a, id, try navigation.result(&context, .rename, params));
     }
     if (std.mem.eql(u8, method, "textDocument/semanticTokens/full"))
@@ -92,6 +95,12 @@ pub fn handleNotification(self: *Server, a: Allocator, method: []const u8, param
         return sync.didChangeWatchedFiles(self, a, params);
     }
     // Unknown notifications are ignored, per the LSP spec.
+}
+
+/// Partial Workspace results are acceptable for navigation, not for rename:
+/// an edit that misses unindexed reads breaks them (LSP RequestFailed).
+fn sendIndexScanning(self: *Server, a: Allocator, id: Value) !void {
+    return self.sendError(a, id, -32803, "Workspace index is still loading; retry rename when it is ready");
 }
 
 fn documentByUri(context: *const Context, params: Value) ?*Document {
