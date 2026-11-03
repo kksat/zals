@@ -464,6 +464,72 @@ test "rename never returns a partial edit while the Workspace index is scanning"
     try std.testing.expectEqual(@as(usize, roles + 1), complete.len);
 }
 
+test "rename leaves Installed collections untouched" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var workspace_dir = std.testing.tmpDir(.{});
+    defer workspace_dir.cleanup();
+    var home_dir = std.testing.tmpDir(.{});
+    defer home_dir.cleanup();
+
+    const installed = "collections/ansible_collections/acme/installed/";
+    const files = [_]struct { path: []const u8, text: []const u8 }{
+        .{ .path = "rename-installed-root", .text = "" },
+        .{ .path = "roles/web/defaults/main.yml", .text = "---\nshared_port: 80\nweb_only_port: 81\n" },
+        .{ .path = "roles/web/tasks/main.yml", .text = "---\n- ansible.builtin.debug:\n    msg: \"{{ shared_port }} {{ web_only_port }} {{ installed_only_port }}\"\n" },
+        .{ .path = installed ++ "MANIFEST.json", .text = "{}\n" },
+        .{ .path = installed ++ "roles/r/defaults/main.yml", .text = "---\nshared_port: 22\ninstalled_only_port: 2222\n" },
+        .{ .path = installed ++ "roles/r/tasks/main.yml", .text = "---\n- ansible.builtin.debug:\n    msg: \"{{ shared_port }}\"\n" },
+    };
+    for (files) |file| {
+        if (std.fs.path.dirname(file.path)) |dir| try workspace_dir.dir.makePath(dir);
+        try workspace_dir.dir.writeFile(.{ .sub_path = file.path, .data = file.text });
+    }
+    const root = try workspace_dir.dir.realpathAlloc(a, ".");
+    const deps = try std.fs.cwd().realpathAlloc(a, "test/dependencies");
+    const binary = try std.fs.cwd().realpathAlloc(a, "zig-out/bin/zals");
+    var client = try lsp.Client.startWithOptions(a, binary, root, deps, try home_dir.dir.realpathAlloc(a, "."), .{ .collections_path = "", .use_fixture_config = false });
+    defer client.deinit();
+    _ = try client.request("initialize", .{
+        .processId = @as(?i64, null),
+        .rootUri = try std.fmt.allocPrint(a, "file://{s}", .{root}),
+        .capabilities = .{},
+        .initializationOptions = .{ .ansible = .{
+            .workspace = .{ .rootMarker = "rename-installed-root" },
+            .python = .{ .venvPath = "" },
+            .validation = .{ .enabled = false, .lint = .{ .enabled = false } },
+        } },
+    });
+    try client.notify("initialized", .{});
+    try client.waitForIndex();
+
+    const defaults_uri = try std.fmt.allocPrint(a, "file://{s}/roles/web/defaults/main.yml", .{root});
+    const tasks_uri = try std.fmt.allocPrint(a, "file://{s}/roles/web/tasks/main.yml", .{root});
+    const installed_defaults_uri = try std.fmt.allocPrint(a, "file://{s}/{s}roles/r/defaults/main.yml", .{ root, installed });
+    try open(&client, defaults_uri, files[1].text);
+    try open(&client, tasks_uri, files[2].text);
+    try open(&client, installed_defaults_uri, files[4].text);
+
+    // Renaming a variable in the Workspace edits only the Workspace files,
+    // even when an Installed collection uses the same variable name.
+    const shared = try parseWorkspaceEdit(a, try client.request("textDocument/rename", .{ .textDocument = .{ .uri = defaults_uri }, .position = anchor.Position{ .line = 1, .character = 2 }, .newName = "http_port" }), "http_port");
+    std.mem.sort(anchor.Location, shared, {}, lessLocation);
+    try expectLocations(&.{
+        .{ .uri = defaults_uri, .range = range(1, 0, 1, 11) },
+        .{ .uri = tasks_uri, .range = range(2, 13, 2, 24) },
+    }, shared);
+
+    // Cursors inside an Installed collection, and variables bound only in an
+    // Installed collection, are not renamable.
+    const installed_pos = anchor.Position{ .line = 1, .character = 2 };
+    try std.testing.expect(try client.request("textDocument/prepareRename", .{ .textDocument = .{ .uri = installed_defaults_uri }, .position = installed_pos }) == .null);
+    try std.testing.expect(try client.request("textDocument/rename", .{ .textDocument = .{ .uri = installed_defaults_uri }, .position = installed_pos, .newName = "http_port" }) == .null);
+    const installed_only_read = anchor.Position{ .line = 2, .character = 52 };
+    try std.testing.expect(try client.request("textDocument/prepareRename", .{ .textDocument = .{ .uri = tasks_uri }, .position = installed_only_read }) == .null);
+    try std.testing.expect(try client.request("textDocument/rename", .{ .textDocument = .{ .uri = tasks_uri }, .position = installed_only_read, .newName = "ssh_port" }) == .null);
+}
+
 fn startIndexed(a: Allocator, fixture: []const u8, home: []const u8) !lsp.Client {
     const deps = try std.fs.cwd().realpathAlloc(a, "test/dependencies");
     const binary = try std.fs.cwd().realpathAlloc(a, "zig-out/bin/zals");

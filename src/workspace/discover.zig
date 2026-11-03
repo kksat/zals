@@ -71,6 +71,27 @@ pub fn belongsToWorkspace(root: []const u8, path: []const u8, marker: []const u8
     return true;
 }
 
+/// Whether `path` lies inside an Installed collection: an
+/// `ansible_collections/<namespace>/<collection>/` directory that ships
+/// `MANIFEST.json`, as `ansible-galaxy collection install` writes it.
+/// Installed content belongs to its publisher, even inside a Workspace.
+pub fn isInstalledCollectionFile(path: []const u8) bool {
+    const marker = std.fs.path.sep_str ++ "ansible_collections" ++ std.fs.path.sep_str;
+    var from: usize = 0;
+    while (std.mem.indexOfPos(u8, path, from, marker)) |at| {
+        from = at + 1;
+        var parts = std.mem.splitScalar(u8, path[at + marker.len ..], std.fs.path.sep);
+        const namespace = parts.next() orelse continue;
+        const collection = parts.next() orelse continue;
+        if (namespace.len == 0 or collection.len == 0 or parts.peek() == null) continue;
+        const root_len = at + marker.len + namespace.len + 1 + collection.len;
+        var dir = std.fs.cwd().openDir(path[0..root_len], .{}) catch continue;
+        defer dir.close();
+        if (exists(dir, "MANIFEST.json")) return true;
+    }
+    return false;
+}
+
 /// YAML/Jinja navigation files and Python/PowerShell source candidates.
 /// Providers decide which candidates are public members of a metadata root.
 pub fn isWorkspaceFile(path: []const u8) bool {
@@ -246,6 +267,22 @@ test "a custom root marker also bounds nested workspaces" {
     const d = try discover(a, tree.root, "ansible.cfg");
     try testing.expectEqual(@as(usize, 1), d.files.len);
     try testing.expect(hasSuffix(d.files, "/site.yml"));
+}
+
+test "installed collection files are recognized by their manifest" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.makePath("collections/ansible_collections/acme/installed/roles/r/tasks");
+    try tmp.dir.makePath("collections/ansible_collections/acme/source/roles/r/tasks");
+    try tmp.dir.writeFile(.{ .sub_path = "collections/ansible_collections/acme/installed/MANIFEST.json", .data = "{}" });
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const root = try tmp.dir.realpathAlloc(arena.allocator(), ".");
+    const installed = try std.fs.path.join(arena.allocator(), &.{ root, "collections/ansible_collections/acme/installed/roles/r/tasks/main.yml" });
+    const source = try std.fs.path.join(arena.allocator(), &.{ root, "collections/ansible_collections/acme/source/roles/r/tasks/main.yml" });
+    try testing.expect(isInstalledCollectionFile(installed));
+    try testing.expect(!isInstalledCollectionFile(source));
+    try testing.expect(!isInstalledCollectionFile(try std.fs.path.join(arena.allocator(), &.{ root, "roles/r/tasks/main.yml" })));
 }
 
 test "excluded directory names" {
