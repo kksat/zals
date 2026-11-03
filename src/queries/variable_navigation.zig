@@ -8,6 +8,7 @@ const view = @import("../workspace/view.zig");
 const presentation = @import("variable_hover.zig");
 const descriptions = @import("binding_descriptions.zig");
 const parameters = @import("passed_parameters.zig");
+const discover = @import("../workspace/discover.zig");
 const context_mod = @import("context.zig");
 const Context = context_mod.Context;
 pub const Subject = @import("navigation_subject.zig").Subject;
@@ -126,20 +127,33 @@ pub const Query = struct {
 
     pub fn renameLocations(self: *Query, subject: *Subject) !?[]const types.Location {
         const current = (try self.renameTarget(subject)) orelse return null;
-        return try self.namedReferences(subject, current.name, .root, true);
+        const context = self.context;
+        const a = context.allocator;
+        const set = try context.searchFiles(subject.doc.uri);
+        var out = std.array_list.Managed(types.Location).init(a);
+        for (try view.occurrences(a, set.files, current.name)) |candidate| {
+            if (discover.isInstalledCollectionFile(candidate.path)) continue;
+            try out.append(try context.location(candidate.uri, candidate.start, candidate.end));
+        }
+        return try out.toOwnedSlice();
     }
 
     /// Rename rewrites every read, so the name must be one zals can see the
     /// user bind. Reads with no binding in the searched files are runtime
     /// names (loop items, magic variables, Jinja globals, keyword arguments)
-    /// or bindings zals does not search (inventory, extra-vars).
+    /// or bindings zals does not search (inventory, extra-vars). Installed
+    /// collections belong to their publisher and are never renamed.
     fn renameTarget(self: *Query, subject: *Subject) !?variables.Cursor {
         const current = (try self.occurrence(subject, .root)) orelse return null;
         if (variables.supplied.isSupplied(current.name)) return null;
+        if (discover.isInstalledCollectionFile(try self.context.pathOf(subject.doc.uri))) return null;
         const set = try self.context.searchFiles(subject.doc.uri);
-        for (set.files) |file| for (file.facts.var_defs) |def| {
-            if (std.mem.eql(u8, def.name, current.name)) return current;
-        };
+        for (set.files) |file| {
+            if (discover.isInstalledCollectionFile(file.path)) continue;
+            for (file.facts.var_defs) |def| {
+                if (std.mem.eql(u8, def.name, current.name)) return current;
+            }
+        }
         return null;
     }
 
