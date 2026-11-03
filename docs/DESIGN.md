@@ -35,7 +35,8 @@ navigation ([ADR-0029](adr/0029-role-navigation.md)), extract-tasks code
 actions ([ADR-0030](adr/0030-extract-tasks-code-actions.md)), and workspace-wide
 navigation over a persistent Workspace index
 ([ADR-0031](adr/0031-workspace-index.md),
-[ADR-0032](adr/0032-workspace-wide-navigation.md)).
+[ADR-0032](adr/0032-workspace-wide-navigation.md)), and root variable rename
+([ADR-0046](adr/0046-root-variable-rename.md)).
 
 Parity is behavioral, not byte-for-byte. Intentional differences are tracked in
 [`docs/deviations.md`](deviations.md).
@@ -73,7 +74,7 @@ it in this list.
 
 | Layer | Responsibility |
 | --- | --- |
-| `src/lsp/` | JSON-RPC framing, message types, capability negotiation, dispatch, and the navigation protocol adapter (definition, implementation, references, hover) |
+| `src/lsp/` | JSON-RPC framing, message types, capability negotiation, dispatch, and the navigation protocol adapter (definition, implementation, references, hover, rename) |
 | `src/providers/` | One module per remaining LSP feature (semantic tokens, completion, document symbols, Workspace symbols, code actions, validation) |
 | `src/queries/` | Typed semantic navigation over the request-scoped navigation context (`context.zig`): Workspace files with open documents winning, text, locations, role resolution |
 | `src/variables/` | Jinja scanning, definition-site detection, role/playbook scope, per-document occurrences |

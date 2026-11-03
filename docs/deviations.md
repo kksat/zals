@@ -46,6 +46,7 @@ on top of parity, not deviations from it.
 | 18 | Debug code actions (`textDocument/codeAction`): add a `debug` task for the variable under the cursor, or remove the debug task the cursor is inside. | Post-parity feature; upstream has no code-action handler. See [ADR-0028](adr/0028-debug-code-actions.md). |
 | 19 | Role go-to-definition and go-to-implementation (`textDocument/implementation`). | Post-parity feature; upstream resolves only modules and never reads `DEFAULT_ROLES_PATH`. See [ADR-0029](adr/0029-role-navigation.md). |
 | 20 | Extract-tasks code actions (`textDocument/codeAction`, kind `refactor.extract`): move the task(s) under the cursor or selection into a new sibling `taskN.yml` and replace them with `include_tasks`/`import_tasks`. | Post-parity feature; upstream has no code-action handler. See [ADR-0030](adr/0030-extract-tasks-code-actions.md). |
+| 22 | Root variable rename (`textDocument/prepareRename` and `textDocument/rename`) across the owning Workspace. | Post-parity feature; upstream has no rename provider. See [ADR-0046](adr/0046-root-variable-rename.md). |
 
 ## Adding an entry
 
