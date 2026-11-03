@@ -68,6 +68,7 @@ pub const DocsLibrary = struct {
     /// All module FQCNs discovered on disk (builtin + collections + redirects).
     /// Used for completion; keys are owned by `arena`.
     module_fqcns: std.StringHashMap(void),
+    attempted: std.StringHashMap(void),
     arena: std.heap.ArenaAllocator,
     ready: bool = false,
     /// Guards all maps, arena allocation, readiness, and version. Never held
@@ -84,6 +85,7 @@ pub const DocsLibrary = struct {
             .catalog = std.StringHashMap(CatalogEntry).init(allocator),
             .modules = std.StringHashMap(Module).init(allocator),
             .module_fqcns = std.StringHashMap(void).init(allocator),
+            .attempted = std.StringHashMap(void).init(allocator),
             .arena = std.heap.ArenaAllocator.init(allocator),
         };
     }
@@ -92,7 +94,23 @@ pub const DocsLibrary = struct {
         self.catalog.deinit();
         self.modules.deinit();
         self.module_fqcns.deinit();
+        self.attempted.deinit();
         self.arena.deinit();
+    }
+
+    /// Seed `ansible.builtin.*` modules from `base` (which loads the on-disk
+    /// docs cache), since built-in modules do not vary with collection paths.
+    pub fn copyBuiltinsFrom(self: *DocsLibrary, base: *DocsLibrary) void {
+        base.mutex.lock();
+        defer base.mutex.unlock();
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        var it = base.modules.iterator();
+        while (it.next()) |e| {
+            if (!std.mem.startsWith(u8, e.key_ptr.*, "ansible.builtin.")) continue;
+            if (self.modules.contains(e.key_ptr.*)) continue;
+            self.modules.put(e.key_ptr.*, e.value_ptr.*) catch {};
+        }
     }
 
     /// Scan installed collections and redirect routes for module FQCNs.
@@ -150,6 +168,17 @@ pub const DocsLibrary = struct {
             self.mutex.unlock();
             return m;
         }
+        if (self.attempted.contains(name)) {
+            self.mutex.unlock();
+            return null;
+        }
+        if (self.ready and !self.catalog.contains(name) and !self.module_fqcns.contains(name)) {
+            self.mutex.unlock();
+            return null;
+        }
+        if (self.arena.allocator().dupe(u8, name)) |owned| {
+            self.attempted.put(owned, {}) catch {};
+        } else |_| {}
         self.mutex.unlock();
         self.fetchOne(name) catch {};
         self.mutex.lock();
@@ -196,6 +225,39 @@ pub const DocsLibrary = struct {
         self.mutex.unlock();
         if (present) return;
         self.fetchOne(name) catch {};
+    }
+
+    /// Batch-fetch any uncached candidate module names in one `ansible-doc`
+    /// subprocess so whole-document passes (such as semantic tokens) never
+    /// shell out once per task.
+    pub fn prefetchCandidates(self: *DocsLibrary, a: Allocator, raw_names: []const []const u8) void {
+        var batch = std.ArrayList([]const u8).empty;
+        defer batch.deinit(a);
+        {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            for (raw_names) |raw| {
+                const candidates = [_]?[]const u8{
+                    raw,
+                    if (std.mem.indexOfScalar(u8, raw, '.') == null)
+                        std.fmt.allocPrint(a, "ansible.builtin.{s}", .{raw}) catch null
+                    else
+                        null,
+                };
+                for (candidates) |maybe_name| {
+                    const name = maybe_name orelse continue;
+                    if (self.modules.contains(name) or self.attempted.contains(name)) continue;
+                    if (self.ready and !self.catalog.contains(name) and !self.module_fqcns.contains(name)) continue;
+                    if (self.arena.allocator().dupe(u8, name)) |owned| {
+                        self.attempted.put(owned, {}) catch continue;
+                        batch.append(a, owned) catch {};
+                    } else |_| {}
+                }
+            }
+        }
+        if (batch.items.len > 0) {
+            self.fetchMany(batch.items) catch {};
+        }
     }
 
     pub fn catalogCount(self: *DocsLibrary) usize {
