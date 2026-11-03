@@ -34,12 +34,14 @@ Variables** only.
   binding values (`register`, `loop_var`, `vars_prompt`) report their inner
   identifier span (`scalarRange`), so edits preserve surrounding single or
   double quotes.
-- **Bound user variables only.** The target name must be a valid identifier,
-  must not be an `ansible_*` or runtime-supplied Ansible/Jinja name (`item`,
-  `hostvars`, `inventory_hostname`, `lookup`, `range`, etc.), and must have at
-  least one recognized definition in the Workspace outside Installed
-  collections. Unbound reads (such as implicit loop items, filter keyword
-  arguments, or inventory-only variables) return `null`.
+- **User variables only.** The target name must be a valid identifier, must
+  not be an `ansible_*` or runtime-supplied Ansible/Jinja name (`item`,
+  `hostvars`, `inventory_hostname`, `lookup`, `range`, etc.), and must not be
+  bound exclusively in an Installed collection. Call keyword arguments (such as
+  `map(attribute='name')`) are not variable references and return `null`.
+  Unbound user variable reads (for example variables supplied via
+  `import_playbook`, `validate_argument_spec`, inventory, or extra-vars) rename
+  across all of their Workspace occurrences, matching `textDocument/references`.
 - **Workspace completeness guards.**
   - Requests while the Workspace index is scanning fail with `-32803
     RequestFailed` rather than returning a partial `WorkspaceEdit`.

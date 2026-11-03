@@ -45,7 +45,7 @@ navigate them. See [ADR-0045](adr/0045-variable-files.md).
 | Go to definition | Reachable bindings in precedence order, then bindings elsewhere in the Workspace |
 | Go to implementation | The same ordered bindings, excluding schema-only argument-spec declarations |
 | Hover | Active and shadowed reachable bindings, then bindings elsewhere in the Workspace; role parameter keys prefer the called role's option documentation |
-| Prepare rename | Quote-free range and placeholder for a bound user root variable in the owning Workspace |
+| Prepare rename | Quote-free range and placeholder for a user root variable in the owning Workspace |
 | Rename | WorkspaceEdit rewriting every read and binding of that root name in the owning Workspace (excluding Installed collections) |
 
 Go-to-definition accepts binding keys, including keys in defaults, vars, and
@@ -228,10 +228,10 @@ sites for several roles; a uniquely resolved site can have a narrower answer.
 Do not assume root-variable name matching applies to roles.
 
 Rename (`textDocument/prepareRename` and `textDocument/rename`) applies only to
-root variables with a recognized binding in the owning session Workspace, and
- preserves surrounding YAML quotes on quoted keys and scalar bindings. Variable
-fields, unbound reads, and runtime-supplied Ansible/Jinja names (`item`,
-`ansible_*`, `hostvars`, `lookup`, etc.) are not renamable (`null`). Installed
+root variables in the owning session Workspace, and preserves surrounding YAML
+quotes on quoted keys and scalar bindings. Variable fields, call keyword
+arguments (`map(attribute=...)`), and runtime-supplied Ansible/Jinja names
+(`item`, `ansible_*`, `hostvars`, `lookup`, etc.) are not renamable (`null`). Installed
 collections (`MANIFEST.json`) are never edited. Rename fails with `RequestFailed`
 while the Workspace index is scanning, when the file has no session Workspace,
 or when `newName` collides with an existing variable in the Workspace; invalid
