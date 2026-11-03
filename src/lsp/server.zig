@@ -22,6 +22,7 @@ const docs_service = @import("../services/docs_service.zig");
 const DocsService = docs_service.DocsService;
 const Writer = @import("writer.zig").Writer;
 const navigation_context = @import("../queries/context.zig");
+const validation_provider = @import("../providers/validation.zig");
 
 pub const Server = struct {
     allocator: Allocator,
@@ -35,6 +36,7 @@ pub const Server = struct {
     ansible_config: AnsibleConfig,
     pool: *concurrency.ThreadPool,
     docs_service: DocsService,
+    validation: validation_provider.Queue,
     contextual_docs: docs_service.ContextLibraries,
     encoding: PositionEncoding = .utf16,
     initialized: bool = false,
@@ -75,6 +77,7 @@ pub const Server = struct {
             .ansible_config = AnsibleConfig.init(allocator, runner),
             .pool = pool,
             .docs_service = DocsService.init(allocator),
+            .validation = validation_provider.Queue.init(allocator),
             .contextual_docs = docs_service.ContextLibraries.init(allocator, runner),
             .session = try workspace_session.Session.init(allocator, venv_override),
             .index = index,
@@ -86,7 +89,9 @@ pub const Server = struct {
         // docs library afterwards.
         self.docs_service.shutdown.store(true, .release);
         self.index.shutdown.store(true, .release);
+        self.validation.shutdown.store(true, .release);
         self.pool.deinit();
+        self.validation.deinit();
         self.index.destroy();
         self.documents.deinit();
         self.settings.deinit();
@@ -109,7 +114,7 @@ pub const Server = struct {
             // While bootstrap/scanning is active, wake periodically to apply
             // results and publish readiness even if the client sends nothing.
             // Once ready, return to a blocking read (no idle polling).
-            if (self.index.isScanning() or self.docs_service.hasPendingBootstrap()) {
+            if (self.index.isScanning() or self.docs_service.hasPendingBootstrap() or self.validation.hasPending()) {
                 if (!try self.transport.waitForInput(25)) continue;
             }
             const body = (try self.transport.readMessage(self.allocator)) orelse break;
@@ -150,6 +155,7 @@ pub const Server = struct {
             try ready.put("modulesCount", json_util.num(self.docs.catalogCount()));
             try self.notify(a, "ansible/docsLibraryReady", .{ .object = ready });
         }
+        try validation_provider.drain(self, a);
     }
 
     pub fn sendResult(self: *Server, a: Allocator, id: Value, result: Value) !void {

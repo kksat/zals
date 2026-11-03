@@ -57,6 +57,10 @@ def main():
 
     proc.stdin.write(frame({"jsonrpc": "2.0", "method": "initialized", "params": {}}))
     proc.stdin.flush()
+    while True:
+        msg = read_message(proc)
+        if msg is None or msg.get("method") == "ansible/workspaceIndexReady":
+            break
 
     tasks = os.path.join(ROOT, "test/fixtures/roles/demo/tasks/main.yml")
     with open(tasks) as f:
