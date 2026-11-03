@@ -28,6 +28,8 @@ root = Path({str(root)!r})
 command = Path(sys.argv[0]).name
 if command == "ansible-config":
     stage = "config"
+elif command == "ansible-lint":
+    stage = "lint"
 elif command == "ansible":
     stage = "module-version"
 elif "--version" in sys.argv:
@@ -56,7 +58,7 @@ elif stage == "module-version":
 else:
     print("{{}}")
 '''
-        for command in ("ansible-doc", "ansible-config", "ansible"):
+        for command in ("ansible-doc", "ansible-config", "ansible", "ansible-lint"):
             tool = root / "bin" / command
             tool.write_text(script)
             tool.chmod(0o755)
@@ -69,6 +71,11 @@ else:
             client.request("initialize", {"processId": None, "rootUri": root.as_uri(),
                                           "capabilities": {}})
             client.notify("initialized", {})
+            if stage == "lint":
+                site = root / "site.yml"
+                site.write_text("---\n- hosts: all\n")
+                client.notify("textDocument/didOpen", {"textDocument": {
+                    "uri": site.as_uri(), "languageId": "ansible", "version": 1, "text": "---\n- hosts: all\n"}})
             deadline = time.monotonic() + 3
             while not (root / "started").exists() and time.monotonic() < deadline:
                 time.sleep(.01)
@@ -110,7 +117,7 @@ def main():
     parser.add_argument("--binary", default=smoke_cold_start.BIN)
     args = parser.parse_args()
     binary = str(Path(args.binary).resolve())
-    for stage in ("fingerprint", "catalog", "config", "module-version", "prefetch"):
+    for stage in ("fingerprint", "catalog", "config", "module-version", "prefetch", "lint"):
         check_shutdown(binary, stage)
     check_shutdown(binary, "fingerprint", close_output=True)
 

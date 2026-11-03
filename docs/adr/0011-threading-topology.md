@@ -33,9 +33,10 @@ Implemented in `concurrency/pool.zig` (worker pool), `services/docs_service.zig`
 `workspace/session.zig` owns Workspace lifecycle state on the main thread;
 `lsp/server.zig` applies its returned index and warning effects there.
 The docs library guards its maps with a mutex held only during ingestion, never
-across an `ansible-doc` subprocess. Parsing, linting, and schema validation
-remain on the main thread for now; the self-pipe is not needed until those move
-to workers.
+across an `ansible-doc` subprocess. Document validation (`ansible-lint`,
+`ansible-playbook --syntax-check`, and schema validation) also runs on the
+worker pool over immutable document snapshots, with the main thread draining
+completed diagnostics.
 
 ## Consequences
 
