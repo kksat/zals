@@ -530,6 +530,53 @@ test "rename leaves Installed collections untouched" {
     try std.testing.expect(try client.request("textDocument/rename", .{ .textDocument = .{ .uri = tasks_uri }, .position = installed_only_read, .newName = "ssh_port" }) == .null);
 }
 
+test "rename from documents outside the Workspace files returns null" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var workspace_dir = std.testing.tmpDir(.{});
+    defer workspace_dir.cleanup();
+    var home_dir = std.testing.tmpDir(.{});
+    defer home_dir.cleanup();
+
+    const hidden = ".venv/lib/ansible_collections/acme/env/roles/probe/tasks/main.yml";
+    const files = [_]struct { path: []const u8, text: []const u8 }{
+        .{ .path = "rename-undiscovered-root", .text = "" },
+        .{ .path = "roles/web/defaults/main.yml", .text = "---\nweb_only_port: 81\n" },
+        .{ .path = "roles/web/tasks/main.yml", .text = "---\n- ansible.builtin.debug:\n    msg: \"{{ web_only_port }}\"\n" },
+        .{ .path = hidden, .text = "---\n- ansible.builtin.debug:\n    msg: \"{{ web_only_port }}\"\n" },
+    };
+    for (files) |file| {
+        if (std.fs.path.dirname(file.path)) |dir| try workspace_dir.dir.makePath(dir);
+        try workspace_dir.dir.writeFile(.{ .sub_path = file.path, .data = file.text });
+    }
+    const root = try workspace_dir.dir.realpathAlloc(a, ".");
+    const deps = try std.fs.cwd().realpathAlloc(a, "test/dependencies");
+    const binary = try std.fs.cwd().realpathAlloc(a, "zig-out/bin/zals");
+    var client = try lsp.Client.startWithOptions(a, binary, root, deps, try home_dir.dir.realpathAlloc(a, "."), .{ .collections_path = "", .use_fixture_config = false });
+    defer client.deinit();
+    _ = try client.request("initialize", .{
+        .processId = @as(?i64, null),
+        .rootUri = try std.fmt.allocPrint(a, "file://{s}", .{root}),
+        .capabilities = .{},
+        .initializationOptions = .{ .ansible = .{
+            .workspace = .{ .rootMarker = "rename-undiscovered-root" },
+            .python = .{ .venvPath = "" },
+            .validation = .{ .enabled = false, .lint = .{ .enabled = false } },
+        } },
+    });
+    try client.notify("initialized", .{});
+    try client.waitForIndex();
+
+    // A hidden or virtual-environment document under the root is outside the
+    // discovered edit set, so a rename from it could never rewrite its own read.
+    const hidden_uri = try std.fmt.allocPrint(a, "file://{s}/{s}", .{ root, hidden });
+    try open(&client, hidden_uri, files[3].text);
+    const hidden_position = anchor.Position{ .line = 2, .character = 14 };
+    try std.testing.expect(try client.request("textDocument/prepareRename", .{ .textDocument = .{ .uri = hidden_uri }, .position = hidden_position }) == .null);
+    try std.testing.expect(try client.request("textDocument/rename", .{ .textDocument = .{ .uri = hidden_uri }, .position = hidden_position, .newName = "web_port" }) == .null);
+}
+
 fn startIndexed(a: Allocator, fixture: []const u8, home: []const u8) !lsp.Client {
     const deps = try std.fs.cwd().realpathAlloc(a, "test/dependencies");
     const binary = try std.fs.cwd().realpathAlloc(a, "zig-out/bin/zals");
