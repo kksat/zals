@@ -169,6 +169,7 @@ pub const ContextLibraries = struct {
 
     allocator: Allocator,
     runner: exec.Runner,
+    base: ?*DocsLibrary = null,
     libraries: std.StringHashMap(*ContextLibrary),
 
     pub fn init(a: Allocator, runner: exec.Runner) ContextLibraries {
@@ -195,6 +196,7 @@ pub const ContextLibraries = struct {
         errdefer a.free(key);
         if (self.libraries.get(key)) |context| {
             a.free(key);
+            if (self.base) |base| context.lib.copyBuiltinsFrom(base);
             return &context.lib;
         }
         const context = try a.create(ContextLibrary);
@@ -214,6 +216,7 @@ pub const ContextLibraries = struct {
         context.lib.execution = .{ .env_map = &context.env };
         context.lib.loadCatalog() catch {};
         context.lib.scanModulePaths(paths);
+        if (self.base) |base| context.lib.copyBuiltinsFrom(base);
         try self.libraries.put(key, context);
         return &context.lib;
     }

@@ -265,6 +265,7 @@ fn moduleForTrace(arena: Allocator, traced: yaml.options.TaskParamTrace, lookup:
         }
         return null;
     }
+    if (yaml.keywords.isTaskKeyword(module_key)) return null;
     return lookup.findInContext(arena, module_key, collections);
 }
 

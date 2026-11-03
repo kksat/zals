@@ -95,8 +95,8 @@ pub const Server = struct {
         self.index.destroy();
         self.documents.deinit();
         self.settings.deinit();
-        self.docs.deinit();
         self.contextual_docs.deinit();
+        self.docs.deinit();
         self.schemas.deinit();
         self.ansible_config.deinit();
         self.docs_service.deinit();

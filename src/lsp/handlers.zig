@@ -75,6 +75,7 @@ pub fn handleRequest(self: *Server, a: Allocator, id: Value, method: []const u8,
 pub fn handleNotification(self: *Server, a: Allocator, method: []const u8, params: Value) !void {
     if (std.mem.eql(u8, method, "initialized")) {
         self.initialized = true;
+        self.contextual_docs.base = &self.docs;
         self.docs_service.start(&self.docs, self.pool);
         try self.registerFileWatchers(a);
         try self.applySession(a, .ready);
@@ -167,9 +168,55 @@ fn resolveResult(self: *Server, context: *Context, params: Value) !Value {
 fn semanticResult(context: *Context, params: Value) !Value {
     const a = context.allocator;
     const doc = documentByUri(context, params) orelse return encode.semanticTokens(a, &.{});
+    const names = documentTaskKeys(a, doc);
+    if (names.len == 0) {
+        const tokens = try providers.semantic_tokens.collect(a, doc, cursor.emptyDocs());
+        return encode.semanticTokens(a, tokens);
+    }
     const lib = try context.docsFor(doc.uri);
+    lib.prefetchCandidates(a, names);
     const tokens = try providers.semantic_tokens.collect(a, doc, cursor.fromLibrary(lib));
     return encode.semanticTokens(a, tokens);
+}
+
+fn documentTaskKeys(a: Allocator, doc: *const Document) []const []const u8 {
+    const yaml = @import("../yaml/root.zig");
+    var forest = yaml.parse(a, doc.bytes()) catch return &.{};
+    defer forest.deinit();
+    var names = std.array_list.Managed([]const u8).init(a);
+    for (forest.roots) |root| {
+        if (!root.isSeq()) continue;
+        collectTaskKeys(root, &names);
+    }
+    if (names.items.len == 0) return &.{};
+    var out = std.array_list.Managed([]const u8).init(a);
+    for (names.items) |name| {
+        if (a.dupe(u8, name)) |copy| out.append(copy) catch {} else |_| {}
+    }
+    return out.items;
+}
+
+fn collectTaskKeys(node: *const @import("../yaml/root.zig").Node, out: *std.array_list.Managed([]const u8)) void {
+    const keywords = @import("../yaml/keywords.zig");
+    switch (node.kind) {
+        .seq => for (node.items) |item| collectTaskKeys(item, out),
+        .map => for (node.items) |pair| {
+            const key = (pair.key orelse continue).stringValue() orelse continue;
+            if (!keywords.isPlayKeyword(key) and !keywords.isBlockKeyword(key) and !keywords.isRoleKeyword(key) and !keywords.isTaskKeyword(key)) {
+                out.append(key) catch {};
+            }
+            if (pair.val) |v| {
+                if (std.mem.eql(u8, key, "tasks") or std.mem.eql(u8, key, "pre_tasks") or
+                    std.mem.eql(u8, key, "post_tasks") or std.mem.eql(u8, key, "handlers") or
+                    std.mem.eql(u8, key, "block") or std.mem.eql(u8, key, "rescue") or
+                    std.mem.eql(u8, key, "always"))
+                {
+                    collectTaskKeys(v, out);
+                }
+            }
+        },
+        else => {},
+    }
 }
 
 fn onInitialize(self: *Server, a: Allocator, id: Value, params: Value) !void {
