@@ -146,8 +146,12 @@ pub const Query = struct {
     fn renameTarget(self: *Query, subject: *Subject) !?variables.Cursor {
         const current = (try self.occurrence(subject, .root)) orelse return null;
         if (variables.supplied.isSupplied(current.name)) return null;
-        if (discover.isInstalledCollectionFile(try self.context.pathOf(subject.doc.uri))) return null;
+        const subject_path = try self.context.pathOf(subject.doc.uri);
+        if (discover.isInstalledCollectionFile(subject_path)) return null;
         const set = try self.context.searchFiles(subject.doc.uri);
+        // A document under the Workspace root but outside its discovered
+        // files (hidden or virtual-environment directory) is not in the edit set.
+        if (view.find(set.files, subject_path) == null) return null;
         for (set.files) |file| {
             if (discover.isInstalledCollectionFile(file.path)) continue;
             for (file.facts.var_defs) |def| {
