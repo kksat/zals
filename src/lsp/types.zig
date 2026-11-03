@@ -169,11 +169,6 @@ pub const PrepareRename = struct {
     placeholder: []const u8,
 };
 
-pub const WorkspaceEdit = struct {
-    changes: ?std.json.Value = null,
-    documentChanges: ?std.json.Value = null,
-};
-
 /// LSP `SymbolKind`. Values are fixed by the protocol.
 pub const SymbolKind = enum(u8) {
     file = 1,

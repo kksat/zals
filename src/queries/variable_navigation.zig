@@ -125,11 +125,17 @@ pub const Query = struct {
         };
     }
 
-    pub fn renameLocations(self: *Query, subject: *Subject) !?[]const types.Location {
+    pub fn renameLocations(self: *Query, subject: *Subject, new_name: []const u8) !?[]const types.Location {
         const current = (try self.renameTarget(subject)) orelse return null;
         const context = self.context;
         const a = context.allocator;
-        const set = try context.searchFiles(subject.doc.uri);
+        const set = (try context.workspaceOf(subject.doc.uri)) orelse return error.RenameNeedsWorkspace;
+        for (set.files) |file| {
+            if (discover.isInstalledCollectionFile(file.path)) continue;
+            for (file.facts.var_defs) |def| {
+                if (std.mem.eql(u8, def.name, new_name)) return error.VariableAlreadyExists;
+            }
+        }
         var out = std.array_list.Managed(types.Location).init(a);
         for (try view.occurrences(a, set.files, current.name)) |candidate| {
             if (discover.isInstalledCollectionFile(candidate.path)) continue;
@@ -147,7 +153,7 @@ pub const Query = struct {
     /// callees, so it fails with error.RenameNeedsWorkspace.
     fn renameTarget(self: *Query, subject: *Subject) !?variables.Cursor {
         const current = (try self.occurrence(subject, .root)) orelse return null;
-        if (variables.supplied.isSupplied(current.name)) return null;
+        if (!variables.jinja.isValidIdentifier(current.name) or variables.supplied.isSupplied(current.name)) return null;
         const subject_path = try self.context.pathOf(subject.doc.uri);
         if (discover.isInstalledCollectionFile(subject_path)) return null;
         const set = (try self.context.workspaceOf(subject.doc.uri)) orelse return error.RenameNeedsWorkspace;

@@ -33,8 +33,21 @@ const keywords = [_][]const u8{
     "None",
 };
 
+const python_keywords = [_][]const u8{
+    "as",       "assert",   "async",  "await",  "break",
+    "class",    "continue", "def",    "del",    "except",
+    "finally",  "from",     "global", "import", "lambda",
+    "nonlocal", "pass",     "raise",  "return", "try",
+    "while",    "with",     "yield",
+};
+
 fn isKeyword(word: []const u8) bool {
     for (keywords) |k| if (std.mem.eql(u8, k, word)) return true;
+    return false;
+}
+
+fn isPythonKeyword(word: []const u8) bool {
+    for (python_keywords) |k| if (std.mem.eql(u8, k, word)) return true;
     return false;
 }
 
@@ -47,7 +60,7 @@ fn isIdentChar(c: u8) bool {
 }
 
 pub fn isValidIdentifier(word: []const u8) bool {
-    if (word.len == 0 or !isIdentStart(word[0]) or isKeyword(word)) return false;
+    if (word.len == 0 or !isIdentStart(word[0]) or isKeyword(word) or isPythonKeyword(word)) return false;
     for (word[1..]) |c| if (!isIdentChar(c)) return false;
     return true;
 }
@@ -351,4 +364,13 @@ test "offsets are absolute" {
     try testing.expectEqual(@as(usize, 1), ids.len);
     try testing.expectEqual(@as(usize, 6), ids[0].start);
     try testing.expectEqual(@as(usize, 9), ids[0].end);
+}
+
+test "isValidIdentifier rejects Jinja and Python keywords" {
+    for ([_][]const u8{ "app_port", "_private", "var2" }) |valid| {
+        try testing.expect(isValidIdentifier(valid));
+    }
+    for ([_][]const u8{ "", "1port", "a-b", "true", "None", "class", "def", "lambda", "return", "pass", "yield", "async", "await" }) |invalid| {
+        try testing.expect(!isValidIdentifier(invalid));
+    }
 }
