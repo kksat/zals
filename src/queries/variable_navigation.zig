@@ -142,13 +142,15 @@ pub const Query = struct {
     /// user bind. Reads with no binding in the searched files are runtime
     /// names (loop items, magic variables, Jinja globals, keyword arguments)
     /// or bindings zals does not search (inventory, extra-vars). Installed
-    /// collections belong to their publisher and are never renamed.
+    /// collections belong to their publisher and are never renamed. Without a
+    /// session Workspace the Role/Playbook file set misses callers and
+    /// callees, so it fails with error.RenameNeedsWorkspace.
     fn renameTarget(self: *Query, subject: *Subject) !?variables.Cursor {
         const current = (try self.occurrence(subject, .root)) orelse return null;
         if (variables.supplied.isSupplied(current.name)) return null;
         const subject_path = try self.context.pathOf(subject.doc.uri);
         if (discover.isInstalledCollectionFile(subject_path)) return null;
-        const set = try self.context.searchFiles(subject.doc.uri);
+        const set = (try self.context.workspaceOf(subject.doc.uri)) orelse return error.RenameNeedsWorkspace;
         // A document under the Workspace root but outside its discovered
         // files (hidden or virtual-environment directory) is not in the edit set.
         if (view.find(set.files, subject_path) == null) return null;
