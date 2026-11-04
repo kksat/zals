@@ -277,6 +277,16 @@ class GitHub:
         except URLError as error:
             raise NotesError(f"GitHub approval lookup failed: {error.reason}") from error
 
+    def find_release(self, tag):
+        # The tag endpoint only finds published releases. Authenticated release
+        # listing also exposes drafts, including their pending tag names.
+        try:
+            return self.get(f"/releases/tags/{tag}")
+        except GitHubNotFound:
+            matches = [item for item in self.pages("/releases") if item.get("tag_name") == tag]
+            require(len(matches) <= 1, "Multiple releases have the target tag")
+            return matches[0] if matches else None
+
     def pages(self, path):
         result = []
         for page in range(1, 32):
@@ -288,20 +298,21 @@ class GitHub:
         raise NotesError("GitHub response exceeds safe pagination limit")
 
 
-def publication_state(github, version, body):
-    """Existing prose is immutable, even during asset rebuild/recovery runs."""
+def publication_state(github, version, body, *, allow_draft=False):
+    """Return absent, draft, or published without allowing existing prose edits."""
     version_tuple(version)
     tag = f"v{version}"
-    try:
-        release = github.get(f"/releases/tags/{tag}")
-    except GitHubNotFound:
-        return False
+    release = github.find_release(tag)
+    if release is None:
+        return "absent"
     require(release.get("tag_name") == tag, "Target release identity is inconsistent")
-    require(release.get("draft") is False and release.get("published_at"),
+    draft = release.get("draft") is True and not release.get("published_at")
+    published = release.get("draft") is False and bool(release.get("published_at"))
+    require(published or (allow_draft and draft),
             "Resolve the existing draft/unpublished release before publishing assets")
     require((release.get("body") or "").strip() == body.strip(),
             "Existing release prose differs from approved notes; corrections belong in the next release")
-    return True
+    return "draft" if draft else "published"
 
 
 def api_time(value):
@@ -341,7 +352,7 @@ def owner_approved(github, pr, version, head, merged_at):
     return created is not None and updated is not None and created <= updated <= merged_at
 
 
-def verify_approval(repo, ref, version, github):
+def verify_approval(repo, ref, version, github, *, allow_draft=False):
     body, metadata = check(repo, ref, version)
     path = metadata_path(metadata["version"])
     # First-parent history finds the merge on main, not an unmerged side-branch
@@ -405,7 +416,7 @@ def verify_approval(repo, ref, version, github):
     previous = github.get(f"/releases/tags/{metadata['previous_tag']}")
     require(previous.get("tag_name") == metadata["previous_tag"] and not previous.get("draft")
             and previous.get("published_at"), "Previous tag is not a published GitHub release")
-    publication_state(github, metadata["version"], body)
+    publication_state(github, metadata["version"], body, allow_draft=allow_draft)
     return body
 
 
@@ -461,7 +472,9 @@ def main():
         command.add_argument("--version")
         if name == "verify":
             command.add_argument("--github-repository", required=True)
-            command.add_argument("--github-output", help="Append release_exists for asset-only/create-only CI routing")
+            command.add_argument("--allow-draft", action="store_true",
+                                 help="Accept a draft only with the same approved notes and release identity")
+            command.add_argument("--github-output", help="Append release_exists and release_draft for CI routing")
     command = commands.add_parser("retry", help="Validate an immutable existing-release retry")
     command.add_argument("--tag", required=True)
     command.add_argument("--github-repository", required=True)
@@ -478,12 +491,13 @@ def main():
             print("Release notes match the candidate", file=sys.stderr)
         elif args.command == "verify":
             github = GitHub(args.github_repository)
-            body = verify_approval(repo, args.ref, args.version, github)
+            body = verify_approval(repo, args.ref, args.version, github, allow_draft=args.allow_draft)
             if args.github_output:
                 version = args.version or repo.read(args.ref, "version.txt").decode().strip()
-                exists = publication_state(github, version, body)
+                state = publication_state(github, version, body, allow_draft=args.allow_draft)
                 with open(args.github_output, "a", encoding="utf-8") as output:
-                    output.write(f"release_exists={str(exists).lower()}\n")
+                    output.write(f"release_exists={str(state != 'absent').lower()}\n")
+                    output.write(f"release_draft={str(state == 'draft').lower()}\n")
             print(body, end="")
         elif args.command == "body":
             version = args.version or repo.read(args.ref, "version.txt").decode().strip()

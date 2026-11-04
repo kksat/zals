@@ -89,7 +89,7 @@ test('initial create receives exact notes/options and candidate; gate owns atomi
   const created = mutations.find(([kind]) => kind === 'release');
   assert.equal(created[1].notes, approved);
   assert.deepEqual({ ...created[1], notes: release.notes }, release);
-  assert.deepEqual(created[2], { draft: false, prerelease: false, forceTag: false });
+  assert.deepEqual(created[2], { draft: true, prerelease: false, forceTag: false });
   assert.equal(mutations.filter(([kind]) => kind === 'tag').length, 1);
   assert.equal(release.notes, 'technical commit list');
   assert.equal(result[0].notes, approved);
@@ -203,6 +203,16 @@ async function upstreamTagFixture({ target = null, annotated = false, race, forc
   installReleaseNotesGate(github, manifest, async () => approved);
   return { github, manifest, calls, setTarget: value => { object = { type: 'commit', sha: value }; } };
 }
+
+test('real upstream creates a draft, leaving asset upload possible before immutable publication', async () => {
+  const { manifest, calls } = await upstreamTagFixture();
+  const releases = await manifest.createReleases();
+  const request = calls.find(([kind]) => kind === 'release')[1];
+  assert.equal(request.draft, true, 'publishing here locks an empty release before packaging');
+  assert.equal(request.body, approved);
+  assert.equal(request.actualTagTarget, sha);
+  assert.deepEqual(releaseOutputs(releases), { release_created: 'true', tag_name: 'v0.2.0' });
+});
 
 for (const forceTag of [false, true]) {
   for (const annotated of [false, true]) {

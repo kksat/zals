@@ -338,12 +338,28 @@ The release tag must resolve to the approved candidate commit: an existing tag
 pointing elsewhere is an error, never permission to move that tag or publish a
 different product with the approved prose.
 
+Release Please creates a **draft** with the approved initial body and a verified
+tag. The asset workflow uploads all 15 packages and `SHA256SUMS`, then compares
+the remote asset names and byte digests against the verified local files before
+publishing the draft. Publication can make the release immutable, so it must not
+happen before asset verification. A failed build or upload leaves the draft
+unpublished; rerun the packaging workflow for the same tag to complete it.
+
+The packaging workflow uses `verify --allow-draft` to accept an existing draft
+only when its body matches the approved notes and all candidate, provenance, and
+final-head approval checks pass. Draft discovery uses authenticated release
+listing because the REST tag endpoint only returns published releases. Without
+that explicit flag, `verify` rejects drafts. `retry` still requires a published
+release; `publish_existing=true` is not a way to finish a draft.
+
 Asset recovery uploads files without editing existing release prose. If a
-published target's body differs from its approved notes, publication stops;
-corrections belong in a later release. An absent target can be created with the
+target's body differs from its approved notes, publication stops; corrections
+belong in a later release. An absent target is created as a draft with the
 approved body and an already-verified tag; an intervening release creation fails
-rather than turning into a prose update. Existing draft/unpublished targets must
-be resolved explicitly before this workflow can distribute their assets.
+rather than turning into a prose update. Final publication changes only the
+draft status, not the body or tag, and rechecks published notes and assets before
+distributing packages to external registries. An immutable release with missing
+assets cannot be repaired; publish a later version instead.
 
 Require the commit-status context **`approved curated release notes`** through
 GitHub branch protection/rulesets. The automatic release runner refreshes the
