@@ -2,7 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const zals = @import("zals");
 
-const version = "0.2.0"; // x-release-please-version
+const version = "0.3.0"; // x-release-please-version
 
 const usage =
     \\Usage: zals [options]
