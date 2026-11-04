@@ -1,5 +1,81 @@
 # Changelog
 
+## [0.3.0](https://github.com/kksat/zals/compare/v0.2.0...v0.3.0) (2026-11-04)
+
+### Added
+
+- **Rename a root variable across its Workspace.** Use your editor's Rename
+  action on a variable read or binding, such as `{{ app_port }}` or
+  `app_port: 8080`, to update same-named reads and bindings in playbooks, roles,
+  templates, loaded variable files, and argument specs. Unsaved buffers are
+  included, and quoted YAML bindings retain their surrounding quotes. Rename
+  matches by name across the owning Workspace, not by Ansible runtime scope:
+  review the edits when unrelated roles reuse a name. Reads without a known
+  definition can also be renamed, but definitions supplied outside the searched
+  files, such as inventory or extra vars, need a separate update.
+- **Rename with explicit boundaries.** Rename requires a Workspace root marker
+  (by default, `.git`) and a completed index; wait for indexing and retry if the
+  server reports that it is still loading. Installed collections and excluded
+  files are not edited. Field names such as `service.port`, runtime-supplied
+  names such as `item` and `ansible_user`, and role or file references are not
+  rename targets. Invalid identifiers, reserved names, and names already used
+  by another variable are rejected. See the
+  [variable navigation scope guide](https://github.com/kksat/zals/blob/main/docs/variable-navigation.md).
+
+### Changed
+
+- **Keep editor requests available during validation.** Lint, syntax-check
+  fallback, and schema validation run in the background instead of blocking
+  request handling. Diagnostics are published when validation completes.
+- **Read the same release notes in VS Code and on GitHub.** The extension now
+  includes a changelog, and GitHub releases use the matching user-facing notes.
+  Detailed commit history remains available in
+  [TECHNICAL_CHANGELOG.md](https://github.com/kksat/zals/blob/main/TECHNICAL_CHANGELOG.md).
+
+### Fixed
+
+- **Keep metadata out of variable navigation.** Keys in `galaxy.yml`,
+  `requirements.yml`, Molecule configuration, YAML inventories, and other
+  unrelated YAML maps no longer appear as variable definitions or structured
+  fields unless the file is in a recognized variable directory or statically
+  loaded as variable data. Role defaults and vars, `group_vars/`, `host_vars/`,
+  `vars/`, and statically loaded variable files remain navigable. For files used
+  only through dynamic loads, `include_vars: dir:`, or `-e @file`, put them under
+  `vars/` and update the Ansible load paths if you need key-based navigation;
+  those load forms are not resolved.
+- **Keep standalone playbook variables local.** Without an owning Workspace,
+  playbooks in a role's `molecule/` or `tests/` directories use their own bindings
+  and direct variable-file loads instead of the enclosing role's file set. Open
+  the owning Workspace if you need project-wide navigation.
+- **Recognize fully qualified playbook imports.**
+  `ansible.builtin.import_playbook` and `ansible.legacy.import_playbook` are
+  treated as playbook entries rather than module tasks in hover, completion,
+  and outlines; task-only debug and extract actions are not offered there.
+  Variables passed on playbook imports no longer appear as definitions
+  belonging to the importing playbook. Navigation does not yet trace those
+  values into the imported plays.
+- **Identify handlers in outlines and Workspace symbols.** Tasks nested inside
+  handler `block`, `rescue`, and `always` sections retain handler labels. Handler
+  files below `roles/NAME/handlers/` are recognized in subdirectories, without
+  mistaking unrelated ancestor folders named `handlers` for handler files.
+- **Use unsaved edits through symlinked folders.** Workspace queries match open
+  documents to indexed files when the editor opens the project through a
+  symlink, rather than falling back to stale disk content. Saves and watched
+  deletions through the symlink also update the resolved Workspace index.
+- **Refresh the Workspace after a root-marker change.** Changing
+  `ansible.workspace.rootMarker` schedules one rescan instead of duplicate
+  scans, even when the resolved root directory stays the same, so nested
+  Workspace boundaries use the selected marker.
+- **Ignore Jinja call keyword names.** A keyword such as `attribute` in
+  `map(attribute='name')` is no longer treated as a variable read or rename
+  target.
+
+### Known limitations
+
+- Standalone roles outside a `roles/NAME/` directory report handler files as
+  ordinary tasks in document outlines. Workspace symbol search still labels
+  these entries as handlers.
+
 ## [0.2.0](https://github.com/kksat/zals/compare/zals-v0.1.0...zals-v0.2.0) (2026-10-16)
 
 
