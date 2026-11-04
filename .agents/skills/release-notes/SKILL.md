@@ -172,13 +172,17 @@ version files, `TECHNICAL_CHANGELOG.md`, and released history are untouched.
    update the existing open notes-only PR, or create the first/follow-up PR when
    none is open. Read its latest body immediately before updating; preserve human
    edits and checklist content. Report the URL
-   and request review by a human other than the PR author on the **final head**.
-   Any subsequent content/head change requires reapproval. Do not merge it.
+   and request approval of the **final head** under the contract: independent
+   human review, or explicit personal-owner authorization when eligible. An
+   assistant records owner authorization only with the owner's explicit
+   delegation, disclosed in the comment; ordinary skill invocation does not
+   authorize it. Any subsequent content/head change requires reapproval. Do not
+   merge it.
 
 Offline `check` proves tree consistency, not editorial approval. Online
 `verify --ref REF --version X.Y.Z --github-repository OWNER/REPO` is the later
-release gate: it requires the notes PR to have been merged with nonauthor
-human approval of its final head, plus current coverage/history checks. It checks
+release gate: it requires the notes PR to have been merged after valid final-head
+approval under the contract, plus current coverage/history checks. It checks
 root/editor blobs against the approved final-head snapshot even when those paths
 are unchanged in a metadata-only PR. Do not expect it to pass for this open draft,
 fabricate approval, or weaken the gate. Leave

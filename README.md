@@ -199,12 +199,13 @@ separate notes-only PR. Invocation prepares locally; pushing and PR creation
 require explicit permission. No mandatory per-change fragments are needed.
 
 Root [`CHANGELOG.md`](CHANGELOG.md) is authoritative user-facing prose; its exact
-copy ships in the extension. A merged notes-only PR with nonauthor human approval of
-its final head and current candidate coverage is required before the release
+copy ships in the extension. A merged notes-only PR with final-head approval
+before merge and current candidate coverage is required before the release
 runner creates the `vX.Y.Z` tag and GitHub release with that same prose at initial
 creation. Late product changes require refreshed coverage and approval. Published
 history stays unchanged; corrections go in the next release. See the
-[release-notes workflow and required-status setup](docs/release-notes.md),
+[release-notes workflow, independent review or personal-owner authorization,
+and required-status setup](docs/release-notes.md),
 [ADR-0044](docs/adr/0044-user-facing-release-notes.md), and
 [ADR-0026](docs/adr/0026-release-process.md).
 

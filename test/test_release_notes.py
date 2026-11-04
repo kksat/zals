@@ -37,6 +37,8 @@ class FakeGitHub:
         self.release = {"tag_name": "v0.1.0", "draft": False,
                         "published_at": "2026-10-01T00:00:00Z", "body": "Legacy notes"}
         self.target_release = None
+        self.owner = {"login": "example", "type": "User"}
+        self.comments = []
         self.calls = []
 
     def pages(self, path):
@@ -47,10 +49,14 @@ class FakeGitHub:
             return self.files
         if path == "/pulls/7/reviews":
             return self.reviews
+        if path == "/issues/7/comments":
+            return self.comments
         raise AssertionError(path)
 
     def get(self, path):
         self.calls.append(path)
+        if path == "":
+            return {"owner": self.owner}
         if path == "/pulls/7":
             return self.pr
         if path.startswith("/contents/"):
@@ -272,6 +278,114 @@ class ReleaseNotesTest(unittest.TestCase):
         self.github.reviews[0]["submitted_at"] = "2026-10-02T11:00:00Z"
         self.github.pr["merged_at"] = None
         with self.assertRaisesRegex(NOTES.NotesError, "merge timestamp"):
+            self.verify()
+
+    def use_owner_approval(self):
+        self.github.reviews = []
+        self.github.pr["user"] = {"login": "example", "type": "User"}
+        self.github.comments = [{
+            "user": {"login": "EXAMPLE", "type": "User"}, "author_association": "OWNER",
+            "body": f"/approve-release-notes 0.2.0 {self.notes_commit}\n\nExplicit owner authorization.",
+            "created_at": "2026-10-02T11:00:00Z", "updated_at": "2026-10-02T11:00:00Z"}]
+        return self.github.comments[0]
+
+    def test_personal_repository_owner_can_explicitly_approve_own_final_head(self):
+        self.use_owner_approval()
+        self.assertEqual(self.verify(), self.body)
+        self.assertIn("/issues/7/comments", self.github.calls)
+
+    def test_owner_approval_requires_exact_unquoted_command_version_and_head(self):
+        bodies = ("", "I approve", f"> /approve-release-notes 0.2.0 {self.notes_commit}",
+                  f" /approve-release-notes 0.2.0 {self.notes_commit}",
+                  f"Text\n/approve-release-notes 0.2.0 {self.notes_commit}",
+                  f"/approve-release-notes 0.3.0 {self.notes_commit}",
+                  f"/approve-release-notes 0.2.0 {'0' * 40}")
+        for body in bodies:
+            with self.subTest(body=body):
+                comment = self.use_owner_approval()
+                comment["body"] = body
+                with self.assertRaisesRegex(NOTES.NotesError, "final head"):
+                    self.verify()
+
+    def test_owner_approval_requires_personal_owner_author_and_authenticated_owner_comment(self):
+        scenarios = [lambda: self.github.owner.update(type="Organization"),
+                     lambda: self.github.owner.update(login="other"),
+                     lambda: self.github.pr["user"].update(login="other"),
+                     lambda: self.github.pr["user"].update(type="Bot"),
+                     lambda: self.github.comments[0]["user"].update(login="collaborator"),
+                     lambda: self.github.comments[0]["user"].update(type="Bot"),
+                     lambda: self.github.comments[0].update(author_association="MEMBER"),
+                     lambda: self.github.comments.clear()]
+        for scenario in scenarios:
+            with self.subTest(scenario=scenario):
+                self.github = FakeGitHub(self)
+                self.use_owner_approval()
+                scenario()
+                with self.assertRaisesRegex(NOTES.NotesError, "final head"):
+                    self.verify()
+
+    def test_owner_approval_creation_and_last_edit_must_precede_merge(self):
+        for field in ("created_at", "updated_at"):
+            for timestamp in (None, "invalid", "2026-10-02T11:00:00", "2026-10-02T13:00:00Z"):
+                with self.subTest(field=field, timestamp=timestamp):
+                    comment = self.use_owner_approval()
+                    comment[field] = timestamp
+                    with self.assertRaisesRegex(NOTES.NotesError, "before merge"):
+                        self.verify()
+        comment = self.use_owner_approval()
+        comment["updated_at"] = "2026-10-02T10:00:00Z"
+        with self.assertRaisesRegex(NOTES.NotesError, "before merge"):
+            self.verify()
+
+    def test_latest_owner_decision_can_revoke_and_reapprove_same_head(self):
+        approval = copy.deepcopy(self.use_owner_approval())
+        revocation = dict(approval, body=f"/revoke-release-notes 0.2.0 {self.notes_commit}")
+        self.github.comments.append(revocation)
+        with self.assertRaisesRegex(NOTES.NotesError, "final head"):
+            self.verify()
+        self.github.comments.append(approval)
+        self.assertEqual(self.verify(), self.body)
+        self.github.comments[-1]["updated_at"] = "2026-10-02T13:00:00Z"
+        with self.assertRaisesRegex(NOTES.NotesError, "before merge"):
+            self.verify()
+
+    def test_owner_approval_does_not_override_change_requests_or_api_errors(self):
+        self.use_owner_approval()
+        self.github.reviews = [{"user": {"login": "concerned"}, "state": "CHANGES_REQUESTED"}]
+        with self.assertRaisesRegex(NOTES.NotesError, "change request"):
+            self.verify()
+        self.github.reviews = []
+        original_pages = self.github.pages
+        def unavailable(path):
+            if path == "/issues/7/comments":
+                raise NOTES.NotesError("GitHub approval lookup failed")
+            return original_pages(path)
+        self.github.pages = unavailable
+        with self.assertRaisesRegex(NOTES.NotesError, "lookup failed"):
+            self.verify()
+
+    def test_independent_review_does_not_require_owner_comment(self):
+        self.assertEqual(self.verify(), self.body)
+        self.assertNotIn("/issues/7/comments", self.github.calls)
+
+    def test_owner_approved_metadata_only_followup_still_binds_unchanged_prose(self):
+        self.write("internal.py", "# Internal maintenance\n")
+        candidate = self.commit("refactor: internal maintenance")
+        NOTES.prepare(self.repo, "0.2.0", "v0.1.0", candidate)
+        self.notes_commit = self.commit("docs(release): refresh coverage")
+        self.github = FakeGitHub(self)
+        self.github.files = [item for item in self.github.files if item["filename"].endswith(".json")]
+        self.github.pr["changed_files"] = 1
+        self.use_owner_approval()
+        self.assertEqual(self.verify(), self.body)
+        self.github.comments[0]["body"] = f"/approve-release-notes 0.2.0 {candidate}"
+        with self.assertRaisesRegex(NOTES.NotesError, "final head"):
+            self.verify()
+        self.use_owner_approval()
+        original_get = self.github.get
+        self.github.get = lambda path: ({"sha": "0" * 40} if path.startswith("/contents/")
+                                        else original_get(path))
+        with self.assertRaisesRegex(NOTES.NotesError, "differ"):
             self.verify()
 
     def test_coverage_only_followup_approves_existing_prose_at_exact_head(self):

@@ -314,6 +314,33 @@ def api_time(value):
         return None
 
 
+def owner_approved(github, pr, version, head, merged_at):
+    """Personal repository owners can explicitly authorize their own final notes."""
+    owner = github.get("").get("owner", {})
+    login = owner.get("login", "").lower()
+    author = pr.get("user", {})
+    if (owner.get("type") != "User" or login != github.repository.split("/")[0].lower()
+            or author.get("type") != "User" or author.get("login", "").lower() != login):
+        return False
+    approval = f"/approve-release-notes {version} {head}"
+    revocation = f"/revoke-release-notes {version} {head}"
+    latest = None
+    # The issues API returns comments in ascending ID (creation) order. Edits
+    # cannot move an older authorization past a later revocation.
+    for comment in github.pages(f"/issues/{int(pr['number'])}/comments"):
+        user = comment.get("user", {})
+        command = (comment.get("body") or "").partition("\n")[0]
+        if (user.get("type") == "User" and user.get("login", "").lower() == login
+                and comment.get("author_association") == "OWNER"
+                and command in {approval, revocation}):
+            latest = comment
+    if latest is None or latest["body"].partition("\n")[0] != approval:
+        return False
+    created = api_time(latest.get("created_at"))
+    updated = api_time(latest.get("updated_at"))
+    return created is not None and updated is not None and created <= updated <= merged_at
+
+
 def verify_approval(repo, ref, version, github):
     body, metadata = check(repo, ref, version)
     path = metadata_path(metadata["version"])
@@ -366,13 +393,15 @@ def verify_approval(repo, ref, version, github):
     author = pr.get("user", {}).get("login", "").lower()
     merged_at = api_time(pr.get("merged_at"))
     require(merged_at, "Notes PR has no valid merge timestamp")
-    require(any(login != author and review["state"] == "APPROVED"
-                and review.get("user", {}).get("type") == "User"
-                and review.get("commit_id") == head
-                and api_time(review.get("submitted_at")) is not None
-                and api_time(review["submitted_at"]) <= merged_at
-                for login, review in latest.items()),
-            "Notes PR requires another reviewer's approval of its final head before merge")
+    reviewed = any(login != author and review["state"] == "APPROVED"
+                   and review.get("user", {}).get("type") == "User"
+                   and review.get("commit_id") == head
+                   and api_time(review.get("submitted_at")) is not None
+                   and api_time(review["submitted_at"]) <= merged_at
+                   for login, review in latest.items())
+    require(reviewed or owner_approved(github, pr, metadata["version"], head, merged_at),
+            "Notes PR requires an independent review or explicit personal-owner approval "
+            "of its final head before merge")
     previous = github.get(f"/releases/tags/{metadata['previous_tag']}")
     require(previous.get("tag_name") == metadata["previous_tag"] and not previous.get("draft")
             and previous.get("published_at"), "Previous tag is not a published GitHub release")

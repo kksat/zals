@@ -20,14 +20,14 @@
     {
       "id": 2,
       "prompt": "Evaluate a rerun of explicit /skill:release-notes in a disposable fixture. Mock an existing open notes-only PR for release-please's unchanged 0.2.0 proposal. A human has edited a capability sentence in both synchronized changelogs, added an exclusion rationale in the PR description, and approved the previous head. The default branch now contains a late user-visible hover regression fix with a test, so the previous candidate metadata is stale. Include a second human edit in a separate fixture variant that conflicts with the old generated sentence. I authorize fetching and local updates to the existing draft branch, but no pushes, PR writes, merges, tags, or releases. Inspect and propose the smallest update; record how coverage and approval change. Use only mocked read-only remote evidence and disposable files.",
-      "expected_output": "The existing draft/PR is reused, human wording and checklist additions survive, the late fix receives evidence-backed coverage and a refreshed candidate/metadata, and the final head requires fresh nonauthor human approval. In the conflict variant the agent presents the conflict instead of regenerating the section or body. No duplicate PR or network write occurs.",
+      "expected_output": "The existing draft/PR is reused, human wording and checklist additions survive, the late fix receives evidence-backed coverage and a refreshed candidate/metadata, and the final head requires fresh approval under the documented independent-review or eligible personal-owner path. In the conflict variant the agent presents the conflict instead of regenerating the section or body. No duplicate PR or network write occurs.",
       "files": [],
       "expectations": [
         "The same open notes-only PR and branch are identified; no duplicate PR is proposed as the default rerun strategy.",
         "Human wording and the existing exclusion rationale are preserved in the nonconflicting variant.",
         "The conflicting variant stops for explicit resolution before overwriting either human edit.",
         "The late product fix causes candidate, coverage checklist, metadata, and checks to be refreshed despite an unchanged proposed version.",
-        "The agent explicitly rejects carrying forward the old approval and requests nonauthor human approval of the final head; bot approval is insufficient.",
+        "The agent explicitly rejects carrying forward the old approval and requests final-head approval under the contract; bot approval is insufficient and owner authorization requires eligibility and explicit delegation.",
         "The agent distinguishes offline draft validation from online verify, which cannot succeed until the notes PR is merged.",
         "No push, PR write, force update, merge, tag, or release operation occurs."
       ]
@@ -49,13 +49,13 @@
     {
       "id": 4,
       "prompt": "Evaluate an explicit /skill:release-notes follow-up in a disposable fixture with mocked read-only GitHub evidence. The original approved notes-only PR for release-please's unchanged 0.2.0 proposal is already merged; its root and editor changelog blobs match exactly. A late internal allocation change with regression tests changes the product digest but has no additional user-facing impact and no supported performance claim. The existing prose is still accurate, and no notes PR is open. I authorize a new local follow-up branch and checked commit, but no push or PR writes. Refresh coverage without inventing prose changes. The proposed follow-up must still be approved by another human on its final head and merged. In a negative variant, the release tree's root/editor prose differs from the unchanged blobs available through mocked GitHub contents at the approved follow-up's final head. Record the allowed path set and expected gate result; do not contact real write endpoints or publish anything.",
-      "expected_output": "A metadata-only follow-up on a new local branch, with unchanged root/editor blobs, refreshed full-range checklist including an evidence-backed exclusion for the internal change, and freshly checked metadata. The proposed PR requests nonauthor human approval of its final head instead of reusing the merged PR's approval. The negative prose-drift variant is expected to fail online verification against the approved final-head snapshot even though the PR itself changed only metadata.",
+      "expected_output": "A metadata-only follow-up on a new local branch, with unchanged root/editor blobs, refreshed full-range checklist including an evidence-backed exclusion for the internal change, and freshly checked metadata. The proposed PR requests approval of its final head under the contract instead of reusing the merged PR's approval. The negative prose-drift variant is expected to fail online verification against the approved final-head snapshot even though the PR itself changed only metadata.",
       "files": [],
       "expectations": [
         "The merged original PR is not treated as an open rerun target; a new follow-up is prepared only after confirming no notes PR is open.",
         "The tracked follow-up changes only the target version's generated metadata; root and editor changelog blobs are byte-for-byte unchanged.",
         "The full-range PR-description checklist includes the late internal commit with exclusion evidence and rationale; no unsupported user-facing or performance claim is invented.",
-        "The follow-up requires its own nonauthor human approval of the final head and must merge before online verify succeeds.",
+        "The follow-up requires its own final-head approval under the independent-review or eligible personal-owner path and must merge before online verify succeeds.",
         "The agent explains that verification compares root/editor blobs with GitHub contents at the approved final PR head, including unchanged paths, and rejects the negative prose-drift variant.",
         "make check and explicit-version offline validation are reported truthfully, and no push, PR write, tag, release, or publishing action occurs."
       ]
@@ -71,6 +71,20 @@
         "The missing v0.2.0/current-main ancestry in the working branch is a blocking condition, not a reason to fall back to v0.1.0.",
         "No version-bound notes or coverage metadata is generated from the stale checkout.",
         "The agent asks for explicit synchronization or isolated-checkout permission and performs no merge, rebase, history rewrite, push, PR write, or publication."
+      ]
+    },
+    {
+      "id": 6,
+      "prompt": "Evaluate an explicit /skill:release-notes approval handoff in disposable fixtures with mocked GitHub evidence, never the live repository. The unchanged proposed version is 0.2.0 and the notes-only PR has passed local checks at a known full final-head SHA. In Variant A, a personal repository owner authored the PR and explicitly delegates recording their approval to the assistant. In Variant B the same user has not delegated approval. In Variant C the repository belongs to an organization, or the PR author differs from the personal owner. Record the permitted approval procedure and expected verification result. Mock any authorized write; do not perform real writes, merges, tagging, or publication.",
+      "expected_output": "Variant A uses the documented exact-version/full-head owner comment and discloses the delegation without pretending to submit an independent review. Variant B requests explicit authorization rather than inferring it from skill invocation or authorship. Variant C retains independent human review. Every variant distinguishes an approved open PR from a merged, release-eligible one.",
+      "files": [],
+      "expectations": [
+        "The owner path is restricted to a personal User repository owner who also authored the PR; organization accounts and other PR authors are ineligible.",
+        "An authorized approval comment starts exactly with /approve-release-notes 0.2.0 followed by the full final-head SHA and discloses that the assistant records the owner's explicit delegation.",
+        "No authorization is inferred from invocation, authorship, CI success, merge permission, quoted commands, or chat alone without an authorized GitHub comment.",
+        "The agent explains that comment creation and last edit must precede merge and that a changed head or metadata refresh requires renewed approval.",
+        "Outstanding change requests, revocation, stale coverage, changed prose blobs, or unavailable evidence remain blockers; no independent review is fabricated.",
+        "No real GitHub write, merge, tag, release, publication, or policy bypass occurs."
       ]
     }
   ]

@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-19
 - **Supersedes:** [ADR-0026](0026-release-process.md) (changelog ownership and release-body selection only)
-- **Superseded by:** —
+- **Superseded by:** [ADR-0047](0047-personal-owner-release-approval.md) (personal-owner approval alternative only)
 
 ## Context
 
