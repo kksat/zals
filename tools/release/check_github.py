@@ -2,7 +2,8 @@
 
 Run after local asset verification and checksum generation. New/draft or mutable
 releases still use the normal uploader; immutable releases with missing or changed
-assets cannot be repaired. This check never mutates a GitHub release.
+assets cannot be repaired. With --require-complete, compare even draft assets and
+reject any difference before publication. This check never mutates a GitHub release.
 """
 
 from __future__ import annotations
@@ -24,23 +25,46 @@ def digest(path: Path) -> str:
         return "sha256:" + hashlib.file_digest(source, "sha256").hexdigest()
 
 
-def already_published(repository: str, tag: str, directory: Path) -> bool:
-    expected = asset_names(tag_version(tag)) | {"SHA256SUMS"}
-    local = {path.name: path for path in directory.iterdir() if path.is_file()}
-    require(set(local) == expected, "Expected all 15 verified assets and SHA256SUMS")
-    result = subprocess.run(
-        ["gh", "api", f"repos/{repository}/releases/tags/{tag}"],
-        capture_output=True, text=True, timeout=60,
-    )
+def github_json(path: str, *, missing_ok: bool = False):
+    result = subprocess.run(["gh", "api", path], capture_output=True, text=True, timeout=60)
     try:
         metadata = json.loads(result.stdout)
     except json.JSONDecodeError:
         raise RuntimeError(f"Cannot inspect GitHub release: {result.stderr or result.stdout}")
     if result.returncode:
-        if metadata.get("status") == "404":
-            return False
+        if missing_ok and isinstance(metadata, dict) and str(metadata.get("status")) == "404":
+            return None
         raise RuntimeError(f"Cannot inspect GitHub release: {result.stderr or result.stdout}")
-    if metadata["draft"]:
+    return metadata
+
+
+def find_release(repository: str, tag: str):
+    metadata = github_json(f"repos/{repository}/releases/tags/{tag}", missing_ok=True)
+    if metadata is not None:
+        return metadata
+    # REST's tag endpoint hides drafts. List authenticated releases so a draft
+    # is never confused with an absent release, including on interrupted retries.
+    matches = []
+    for page in range(1, 32):
+        releases = github_json(f"repos/{repository}/releases?per_page=100&page={page}")
+        require(isinstance(releases, list), "Expected a GitHub release list")
+        matches.extend(item for item in releases if item.get("tag_name") == tag)
+        if len(releases) < 100:
+            require(len(matches) <= 1, "Multiple releases have the target tag")
+            return matches[0] if matches else None
+    raise RuntimeError("GitHub releases exceed safe pagination limit")
+
+
+def already_published(repository: str, tag: str, directory: Path, *, require_complete: bool = False) -> bool:
+    expected = asset_names(tag_version(tag)) | {"SHA256SUMS"}
+    local = {path.name: path for path in directory.iterdir() if path.is_file()}
+    require(set(local) == expected, "Expected all 15 verified assets and SHA256SUMS")
+    metadata = find_release(repository, tag)
+    if metadata is None:
+        require(not require_complete, "Target release is missing; cannot publish")
+        return False
+    require(metadata.get("tag_name") == tag, "Target release identity is inconsistent")
+    if metadata["draft"] and not require_complete:
         return False  # Identical draft assets still need final publication.
 
     remote = {asset["name"]: asset for asset in metadata["assets"]}
@@ -69,12 +93,15 @@ def already_published(repository: str, tag: str, directory: Path) -> bool:
             if published_digest != digest(local[name]):
                 changed.add(name)
     if not (missing or extra or changed):
-        return True
-    if metadata.get("immutable", False):
+        return not metadata["draft"]
+    if require_complete or metadata.get("immutable", False):
+        immutable = metadata.get("immutable", False)
+        reason = "release is immutable" if immutable else "uploaded assets differ"
+        recovery = "Publish a new release instead" if immutable else "Complete the draft uploads before publishing"
         raise ValueError(
-            f"Cannot publish {tag}: release is immutable; missing={sorted(missing)}, "
+            f"Cannot publish {tag}: {reason}; missing={sorted(missing)}, "
             f"changed={sorted(changed)}, extra={sorted(extra)}. "
-            "Publish a new release instead; no assets were modified."
+            f"{recovery}; no assets were modified."
         )
     return False
 
@@ -84,8 +111,10 @@ def main() -> None:
     parser.add_argument("--repository", required=True)
     parser.add_argument("--tag", required=True)
     parser.add_argument("--directory", type=Path, default=Path("dist"))
+    parser.add_argument("--require-complete", action="store_true",
+                        help="Fail unless uploaded assets, including draft assets, exactly match local verified files")
     args = parser.parse_args()
-    identical = already_published(args.repository, args.tag, args.directory)
+    identical = already_published(args.repository, args.tag, args.directory, require_complete=args.require_complete)
     if identical:
         print(f"{args.tag}: all published assets are identical; skipping upload")
     else:

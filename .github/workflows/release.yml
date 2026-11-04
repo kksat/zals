@@ -1,6 +1,7 @@
 name: release
 
-# Called only after release-please creates a release, or manually dispatched.
+# Called after release-please creates a draft, or manually dispatched.
+# Publish only after the uploaded asset set is complete; publication locks it.
 # Manual packaging defaults to GitHub only; the caller selects external registries.
 # Tagged sources/assets are used even when manually dispatched from main.
 on:
@@ -123,7 +124,8 @@ jobs:
               --tag "$TAG" --github-repository "$GITHUB_REPOSITORY"
           else
             python3 release-tools/tools/release/notes.py --repo release-source verify \
-              --ref "$TAG" --version "${TAG#v}" --github-repository "$GITHUB_REPOSITORY" > /dev/null
+              --ref "$TAG" --version "${TAG#v}" --allow-draft \
+              --github-repository "$GITHUB_REPOSITORY" > /dev/null
           fi
 
   build:
@@ -345,7 +347,8 @@ jobs:
         run: |
           set -euo pipefail
           python3 release-tools/tools/release/notes.py --repo "$GITHUB_WORKSPACE" verify \
-            --ref "$TAG" --version "${TAG#v}" --github-repository "$GITHUB_REPOSITORY" \
+            --ref "$TAG" --version "${TAG#v}" --allow-draft \
+            --github-repository "$GITHUB_REPOSITORY" \
             --github-output "$GITHUB_OUTPUT" > "$RUNNER_TEMP/release-notes.md"
           test -s "$RUNNER_TEMP/release-notes.md"
       - name: Require a fail-closed target release decision
@@ -366,14 +369,40 @@ jobs:
         shell: bash
         run: |
           gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
-      - name: Create a GitHub release with the approved initial body and assets
+      - name: Create a draft with the approved initial body and assets
         if: steps.github_assets.outputs.already_published != 'true' && steps.notes.outputs.release_exists == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          gh release create "$TAG" --verify-tag --title "$TAG" \
+          gh release create "$TAG" --draft --verify-tag --title "$TAG" \
             --notes-file "$RUNNER_TEMP/release-notes.md" --repo "$GITHUB_REPOSITORY" dist/*
+      - name: Verify uploaded assets before final publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python release-tools/tools/release/check_github.py --tag "$TAG"
+          --repository "$GITHUB_REPOSITORY" --directory dist --require-complete
+      - name: Publish the verified draft without editing approved prose
+        if: steps.notes.outputs.release_draft == 'true' || steps.notes.outputs.release_exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 release-tools/tools/release/notes.py --repo "$GITHUB_WORKSPACE" verify \
+            --ref "$TAG" --version "${TAG#v}" --allow-draft \
+            --github-repository "$GITHUB_REPOSITORY" > /dev/null
+          gh release edit "$TAG" --draft=false --verify-tag --repo "$GITHUB_REPOSITORY"
+      - name: Verify the published release and approved notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 release-tools/tools/release/notes.py --repo "$GITHUB_WORKSPACE" verify \
+            --ref "$TAG" --version "${TAG#v}" \
+            --github-repository "$GITHUB_REPOSITORY" > /dev/null
+          python release-tools/tools/release/check_github.py --tag "$TAG" \
+            --repository "$GITHUB_REPOSITORY" --directory dist --require-complete
 
   publication_assets:
     name: verify assets for external publication

@@ -22,6 +22,7 @@ SPEC.loader.exec_module(NOTES)
 
 class FakeGitHub:
     repository = "example/zals"
+    find_release = NOTES.GitHub.find_release
 
     def __init__(self, fixture):
         self.fixture = fixture
@@ -43,6 +44,8 @@ class FakeGitHub:
 
     def pages(self, path):
         self.calls.append(path)
+        if path == "/releases":
+            return [self.release] + ([self.target_release] if self.target_release else [])
         if path.startswith("/commits/") and path.endswith("/pulls"):
             return [{"number": 7}]
         if path == "/pulls/7/files":
@@ -66,7 +69,7 @@ class FakeGitHub:
             tag = path[len("/releases/tags/"):]
             if tag == self.release["tag_name"]:
                 return self.release
-            if self.target_release and tag == self.target_release["tag_name"]:
+            if self.target_release and tag == self.target_release["tag_name"] and not self.target_release["draft"]:
                 return self.target_release
             raise NOTES.GitHubNotFound(f"No fixture release {tag}")
         raise AssertionError(path)
@@ -133,8 +136,8 @@ class ReleaseNotesTest(unittest.TestCase):
     def check(self):
         return NOTES.check(self.repo, "HEAD", "0.2.0")
 
-    def verify(self):
-        return NOTES.verify_approval(self.repo, "HEAD", "0.2.0", self.github)
+    def verify(self, **options):
+        return NOTES.verify_approval(self.repo, "HEAD", "0.2.0", self.github, **options)
 
     def test_prepared_notes_cover_exact_candidate(self):
         body, metadata = self.check()
@@ -457,6 +460,36 @@ class ReleaseNotesTest(unittest.TestCase):
         with self.assertRaisesRegex(NOTES.NotesError, "draft/unpublished"):
             self.verify()
 
+    def test_draft_requires_explicit_opt_in_matching_prose_and_final_head_approval(self):
+        self.github.target_release = {"tag_name": "v0.2.0", "draft": True,
+                                      "published_at": None, "body": self.body}
+        with self.assertRaisesRegex(NOTES.NotesError, "draft/unpublished"):
+            self.verify()
+        self.assertEqual(self.verify(allow_draft=True), self.body)
+        self.assertIn("/releases", self.github.calls, "drafts are invisible to the tag endpoint")
+        self.github.target_release["body"] = "Unapproved draft prose"
+        with self.assertRaisesRegex(NOTES.NotesError, "differs from approved"):
+            self.verify(allow_draft=True)
+        self.github.target_release["body"] = self.body
+        self.github.reviews = []
+        with self.assertRaisesRegex(NOTES.NotesError, "approval"):
+            self.verify(allow_draft=True)
+
+    def test_draft_lookup_rejects_ambiguity_and_api_failures(self):
+        draft = {"tag_name": "v0.2.0", "draft": True, "published_at": None, "body": self.body}
+        with patch.object(self.github, "pages", return_value=[draft, draft]):
+            with self.assertRaisesRegex(NOTES.NotesError, "Multiple releases"):
+                NOTES.publication_state(self.github, "0.2.0", self.body, allow_draft=True)
+        with patch.object(self.github, "pages", side_effect=NOTES.NotesError("API denied")):
+            with self.assertRaisesRegex(NOTES.NotesError, "API denied"):
+                NOTES.publication_state(self.github, "0.2.0", self.body, allow_draft=True)
+
+    def test_publication_retry_never_accepts_a_draft(self):
+        self.git("tag", "v0.2.0")
+        self.github.release.update(tag_name="v0.2.0", body=self.body, draft=True, published_at=None)
+        with self.assertRaisesRegex(NOTES.NotesError, "already-published"):
+            NOTES.retry(self.repo, "v0.2.0", self.github)
+
     def test_cli_publication_state_is_explicit_without_polluting_the_body(self):
         output = self.root / "github-output"
         arguments = ["notes.py", "--repo", str(self.root), "verify", "--version", "0.2.0",
@@ -469,7 +502,15 @@ class ReleaseNotesTest(unittest.TestCase):
                     patch("sys.stdout", new_callable=io.StringIO) as stdout:
                 self.assertEqual(NOTES.main(), 0)
                 self.assertEqual(stdout.getvalue(), self.body)
-        self.assertEqual(output.read_text(), "release_exists=false\nrelease_exists=true\n")
+        self.github.target_release.update(draft=True, published_at=None)
+        with patch.object(NOTES, "GitHub", return_value=self.github), \
+                patch("sys.argv", arguments + ["--allow-draft"]), \
+                patch("sys.stdout", new_callable=io.StringIO) as stdout:
+            self.assertEqual(NOTES.main(), 0)
+            self.assertEqual(stdout.getvalue(), self.body)
+        self.assertEqual(output.read_text(), "release_exists=false\nrelease_draft=false\n"
+                         "release_exists=true\nrelease_draft=false\n"
+                         "release_exists=true\nrelease_draft=true\n")
 
     def test_previous_tag_must_actually_be_a_published_release(self):
         self.github.release["draft"] = True
@@ -611,7 +652,13 @@ class GitHubReadOnlyTest(unittest.TestCase):
             error = NOTES.HTTPError("https://api.github.com/test", code, "test", {}, None)
             with self.subTest(code=code), patch.object(NOTES, "urlopen", side_effect=error):
                 if code == 404:
-                    self.assertFalse(NOTES.publication_state(github, "0.2.0", "approved"))
+                    with patch.object(github, "pages", return_value=[]) as pages:
+                        self.assertEqual(NOTES.publication_state(github, "0.2.0", "approved"), "absent")
+                        pages.assert_called_once_with("/releases")
+                    # A second 404 during draft discovery is an API failure,
+                    # not evidence that the target release is absent.
+                    with self.assertRaisesRegex(NOTES.NotesError, "404"):
+                        NOTES.publication_state(github, "0.2.0", "approved")
                 else:
                     with self.assertRaisesRegex(NOTES.NotesError, str(code)):
                         NOTES.publication_state(github, "0.2.0", "approved")

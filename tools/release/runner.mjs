@@ -102,7 +102,9 @@ export function installReleaseNotesGate(github, manifest, validate) {
     await assertReleaseTag(github, release, { required: true });
     // 17.3.0's forceTag catches every createRef 422 and continues. Our atomic
     // claim already established the tag; do not re-enter that unsafe fallback.
-    return createRelease.call(this, { ...release, notes }, { ...options, forceTag: false });
+    // Publishing now would make an empty release immutable before packaging.
+    // The asset workflow alone publishes the draft after verifying uploads.
+    return createRelease.call(this, { ...release, notes }, { ...options, draft: true, forceTag: false });
   };
   return () => {
     github.createRelease = createRelease;

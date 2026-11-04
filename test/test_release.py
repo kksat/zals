@@ -291,7 +291,15 @@ class ReleaseTests(unittest.TestCase):
         self.assertIn("id: notes", publish)
         self.assertIn('--github-output "$GITHUB_OUTPUT"', publish)
         self.assertIn('gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"', publish)
-        self.assertIn('gh release create "$TAG" --verify-tag --title "$TAG"', publish)
+        self.assertIn('gh release create "$TAG" --draft --verify-tag --title "$TAG"', publish)
+        self.assertIn('--allow-draft', validate)
+        self.assertIn('--allow-draft', publish)
+        self.assertIn('gh release edit "$TAG" --draft=false --verify-tag', publish)
+        self.assertIn("steps.notes.outputs.release_draft == 'true'", publish)
+        self.assertLess(publish.index('Create a draft'), publish.index('Verify uploaded assets'))
+        self.assertLess(publish.index('Verify uploaded assets'), publish.index('Publish the verified draft'))
+        self.assertLess(publish.index('Publish the verified draft'), publish.index('Verify the published release'))
+        self.assertIn('--require-complete', publish)
         self.assertIn('--notes-file "$RUNNER_TEMP/release-notes.md"', publish)
         self.assertIn("steps.notes.outputs.release_exists == 'true'", publish)
         self.assertIn("steps.notes.outputs.release_exists == 'false'", publish)
@@ -332,6 +340,44 @@ class ReleaseTests(unittest.TestCase):
                                         env={**env, "HELPER_EXIT": "42"}, capture_output=True, text=True)
                 self.assertEqual(failed.returncode, 42)
 
+    def test_final_draft_publication_rechecks_notes_and_never_rewrites_prose_or_tag(self):
+        workflow = self.workflow_job("release")
+        match = re.search(r"      - name: Publish the verified draft without editing approved prose\n"
+                          r"(.*?)        run: \|\n((?:          [^\n]*\n)+)", workflow, re.DOTALL)
+        self.assertIsNotNone(match)
+        script = textwrap.dedent(match[2])
+        helper = self.directory / "release-tools/tools/release/notes.py"
+        helper.parent.mkdir(parents=True)
+        captured_notes = self.directory / "notes-arguments.json"
+        captured_gh = self.directory / "gh-arguments.json"
+        helper.write_text("import json, os, sys\nfrom pathlib import Path\n"
+                          "Path(os.environ['NOTES_CAPTURE']).write_text(json.dumps(sys.argv[1:]))\n"
+                          "sys.exit(int(os.environ.get('HELPER_EXIT', '0')))\n")
+        bin_dir = self.directory / "bin"
+        bin_dir.mkdir()
+        gh = bin_dir / "gh"
+        gh.write_text(f"#!{sys.executable}\nimport json, os, sys\nfrom pathlib import Path\n"
+                      "Path(os.environ['GH_CAPTURE']).write_text(json.dumps(sys.argv[1:]))\n"
+                      "sys.exit(int(os.environ.get('GH_EXIT', '0')))\n")
+        gh.chmod(0o755)
+        env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "TAG": self.tag,
+               "GITHUB_REPOSITORY": "kksat/zals", "GITHUB_WORKSPACE": str(self.directory),
+               "NOTES_CAPTURE": str(captured_notes), "GH_CAPTURE": str(captured_gh)}
+        result = subprocess.run(["bash", "-c", script], cwd=self.directory,
+                                env=env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(json.loads(captured_gh.read_text()),
+                         ["release", "edit", self.tag, "--draft=false", "--verify-tag", "--repo", "kksat/zals"])
+        self.assertIn("--allow-draft", json.loads(captured_notes.read_text()))
+        captured_gh.unlink()
+        failed = subprocess.run(["bash", "-c", script], cwd=self.directory,
+                                env={**env, "HELPER_EXIT": "42"}, capture_output=True, text=True)
+        self.assertEqual(failed.returncode, 42)
+        self.assertFalse(captured_gh.exists(), "failed notes validation must prevent publication")
+        failed = subprocess.run(["bash", "-c", script], cwd=self.directory,
+                                env={**env, "GH_EXIT": "13"}, capture_output=True, text=True)
+        self.assertEqual(failed.returncode, 13)
+
     def test_github_asset_commands_never_rewrite_existing_release_prose(self):
         workflow = self.workflow_job("release")
         bin_dir = self.directory / "bin"
@@ -351,7 +397,7 @@ class ReleaseTests(unittest.TestCase):
         env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "CAPTURE": str(captured),
                "TAG": self.tag, "GITHUB_REPOSITORY": "kksat/zals", "RUNNER_TEMP": str(self.directory)}
         for name, exists, command in (("Upload verified assets to an existing GitHub release", "true", "upload"),
-                                      ("Create a GitHub release with the approved initial body and assets", "false", "create")):
+                                      ("Create a draft with the approved initial body and assets", "false", "create")):
             with self.subTest(command=command):
                 match = re.search(rf"      - name: {name}\n(.*?)        run: \|\n((?:          [^\n]*\n)+)",
                                   workflow, re.DOTALL)
@@ -371,6 +417,7 @@ class ReleaseTests(unittest.TestCase):
                     self.assertNotIn("--notes-file", args)
                     self.assertNotIn("create", args)
                 else:
+                    self.assertIn("--draft", args)
                     self.assertIn("--verify-tag", args)
                     self.assertEqual(args[args.index("--notes-file") + 1], str(notes))
                     self.assertNotIn("--clobber", args)
@@ -638,6 +685,7 @@ class GithubPublicationTests(unittest.TestCase):
         self.status = 200
         self.no_digest = False
         self.download_error = False
+        self.list_status = 200
         # Exercise the actual CLI at its gh process seam, never a live release.
         gh = self.bin / "gh"
         gh.write_text(f"#!{sys.executable}\n" + textwrap.dedent('''\
@@ -653,7 +701,15 @@ class GithubPublicationTests(unittest.TestCase):
                     print(json.dumps({"status": str(fixture["status"]), "message": "API rejected request"}))
                     print("API rejected request", file=sys.stderr)
                     sys.exit(1)
+                if fixture["release"]["draft"]:
+                    print(json.dumps({"status": "404"}))
+                    sys.exit(1)
                 print(json.dumps(fixture["release"]))
+            elif args == ["api", "repos/test/repo/releases?per_page=100&page=1"]:
+                if fixture["list_status"] != 200:
+                    print(json.dumps({"status": str(fixture["list_status"])}))
+                    sys.exit("Release listing denied")
+                print(json.dumps([fixture["release"]] if fixture["status"] == 200 else []))
             elif args[:3] == ["release", "download", "v0.2.0"]:
                 if fixture["download_error"]:
                     sys.exit("Download denied")
@@ -665,9 +721,9 @@ class GithubPublicationTests(unittest.TestCase):
             '''))
         gh.chmod(0o755)
 
-    def run_check(self):
+    def run_check(self, *options):
         metadata = {
-            "id": 123, "immutable": self.immutable, "draft": self.draft,
+            "id": 123, "tag_name": "v0.2.0", "immutable": self.immutable, "draft": self.draft,
             "assets": [{"name": path.name, "size": path.stat().st_size,
                         "digest": None if self.no_digest else
                         "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()}
@@ -675,11 +731,12 @@ class GithubPublicationTests(unittest.TestCase):
         }
         (self.directory / "fixture.json").write_text(json.dumps({
             "release": metadata, "status": self.status, "download_error": self.download_error,
+            "list_status": self.list_status,
         }))
         self.output.unlink(missing_ok=True)
         return subprocess.run(
             [sys.executable, str(ROOT / "tools/release/check_github.py"),
-             "--tag", "v0.2.0", "--repository", "test/repo", "--directory", str(self.local)],
+             "--tag", "v0.2.0", "--repository", "test/repo", "--directory", str(self.local), *options],
             env={"PATH": f"{self.bin}:{os.environ['PATH']}", "HOME": str(self.directory),
                  "PUBLISH_FIXTURE": str(self.directory), "GITHUB_OUTPUT": str(self.output)},
             capture_output=True, text=True, timeout=10,
@@ -709,6 +766,47 @@ class GithubPublicationTests(unittest.TestCase):
         self.draft = True
         self.immutable = False
         self.assert_decision(False)
+
+    def test_complete_draft_is_verified_without_claiming_it_is_published(self):
+        self.draft = True
+        self.immutable = False
+        result = self.run_check("--require-complete")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.output.read_text(), "already_published=false\n")
+        calls = [json.loads(line) for line in (self.directory / "calls").read_text().splitlines()]
+        self.assertIn(["api", "repos/test/repo/releases?per_page=100&page=1"], calls)
+
+    def test_final_verification_rejects_incomplete_drafts_and_mutable_releases(self):
+        self.immutable = False
+        asset = next(self.remote.glob("*.vsix"))
+        original = asset.read_bytes()
+        for draft in (True, False):
+            self.draft = draft
+            for change in ("missing", "changed", "extra"):
+                with self.subTest(draft=draft, change=change):
+                    asset.write_bytes(original)
+                    extra = self.remote / "unexpected.zip"
+                    extra.unlink(missing_ok=True)
+                    if change == "missing":
+                        asset.unlink()
+                    elif change == "changed":
+                        asset.write_bytes(b"X" * len(original))
+                    else:
+                        extra.write_bytes(b"extra")
+                    result = self.run_check("--require-complete")
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("Cannot publish", result.stderr)
+                    self.assertFalse(self.output.exists())
+
+    def test_final_verification_rejects_absent_releases_and_failed_draft_discovery(self):
+        self.status = 404
+        result = self.run_check("--require-complete")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Target release is missing", result.stderr)
+        self.list_status = 403
+        result = self.run_check()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Release listing denied", result.stderr)
 
     def test_mutable_release_can_upload_missing_or_changed_assets(self):
         self.immutable = False
