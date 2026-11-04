@@ -191,12 +191,57 @@ notes-only PR rather than trying to update the merged one. If the prose remains 
 metadata and explains the new commits' exclusions in its coverage checklist.
 If prose changes, update both changelogs as well.
 
-Any new content/head needs renewed approval of the **final head** by a human
-other than the notes PR author; bot approval does not qualify. Metadata-only
-refreshes require this approval too; approval of an earlier PR/head is
-insufficient. Merge the approved notes-only PR before the release gate can
-succeed. An open or merely approved-but-unmerged notes PR is not publication
-authorization.
+Any new content/head needs renewed approval of the **final head** before merge.
+Normally, a human other than the notes PR author submits an approving GitHub
+review of that head; bot approval does not qualify. Personal repository owners
+who author their own notes PR can instead use the explicit owner authorization
+described next. Metadata-only refreshes require approval too; approval of an
+earlier PR/head is insufficient. Merge the approved notes-only PR before the
+release gate can succeed. An open or merely approved-but-unmerged notes PR is
+not publication authorization.
+
+### Approve notes as a sole maintainer
+
+GitHub does not let authors approve their own PRs. For a repository owned by a
+personal GitHub account, the owner can explicitly authorize their own notes PR
+without pretending to obtain independent review. Organization-owned repositories
+and PRs authored by anyone other than the personal owner still require an
+independent human review. [ADR-0047](adr/0047-personal-owner-release-approval.md)
+records this trade-off.
+
+1. Finish the notes, coverage checklist, metadata, and checks. Identify the exact
+   proposed version and final PR head SHA.
+2. Using the repository owner's GitHub account, post a new PR comment whose
+   **first line** is exactly:
+
+   ```text
+   /approve-release-notes X.Y.Z FULL_HEAD_SHA
+   ```
+
+   Replace `X.Y.Z` with the verified proposed version and `FULL_HEAD_SHA` with the
+   full 40-character final head SHA. Explanatory text can follow on later lines.
+   An assistant may record this comment only when the owner explicitly
+   authorizes approval on their behalf; identify that delegation in the comment.
+   Chat approval alone, PR-description text, quoted commands, and bot comments
+   are not machine approval evidence.
+3. Leave the approval comment unchanged and merge the notes PR. The release gate
+   verifies that both its creation and last-edit timestamps precede the merge,
+   its account is the personal repository owner and PR author, and GitHub marks
+   its author association as `OWNER`.
+
+To withdraw owner authorization, post a new comment starting with
+`/revoke-release-notes X.Y.Z FULL_HEAD_SHA`. The latest owner decision for that
+version/head, in comment creation order, controls the owner-authorization path.
+Reapprove with a new comment after resolving concerns. Editing an older comment
+cannot move it past a later revocation, and editing or adding approval after
+merge cannot retroactively authorize that merge. Any outstanding change request
+still blocks release, including with owner authorization.
+
+This path records the owner's decision, not an independent review. It retains
+the separate notes-only PR, exact-head prose binding, full candidate coverage,
+immutable history, and pre-tag verification. If policy/tool changes invalidate
+coverage, merge them separately, refresh the notes metadata and checklist, and
+record approval of that new final head before merging it.
 
 ## Deterministic helper contract
 
@@ -232,7 +277,7 @@ not merge/approval evidence. It is usable before opening a PR.
 
 The online release gate and body extraction are separate. Online `verify` and
 `retry` require `GH_TOKEN` (or `GITHUB_TOKEN`) with repository read access to PRs,
-reviews, and releases; they perform read-only API requests. No registry or
+reviews, issue comments, and releases; they perform read-only API requests. No registry or
 release-write credentials are needed for these checks.
 
 ```sh
@@ -242,8 +287,9 @@ python3 tools/release/notes.py body --ref "$ref" --version "$version"
 ```
 
 `verify` requires a merged notes-only PR with the allowed path combination,
-nonauthor human approval of its final head, matching candidate product coverage,
-intact history, and synchronized notes. It also compares the release's root and
+final-head approval before merge (independent human review or eligible personal
+owner authorization), matching candidate product coverage, intact history, and
+synchronized notes. It also compares the release's root and
 editor changelog blob IDs against GitHub contents at the approved final PR head,
 even when those paths were unchanged in a metadata-only refresh. The approved
 snapshot binds all prose; an unchanged-files list alone cannot prove it.
