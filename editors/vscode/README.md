@@ -1,5 +1,20 @@
 # Ansible Language Server (zals) for VS Code
 
+This is what community says about this plugin.
+
+```
+This is really cool.
+```
+
+Bradley A. Thornton aka @cidrblock on [forum.ansible.com](https://forum.ansible.com/t/ansible-deserves-proper-language-server/46483/3)
+
+```
+The speed of response once, the variable hover is amazing and can really help with some of those more complex setups that i’ve seen (and created).
+The insert debug and creating a separate task files (all with the ability to undo & redo ) are brilliant.
+```
+
+Mark Bolwell (one of the contributors of [Ansible-Lockdown](https://github.com/ansible-lockdown)) on [forum.ansible.com](https://forum.ansible.com/t/ansible-deserves-proper-language-server/46483/2)
+
 **Spend less time searching YAML. Spend more time writing Ansible.**
 
 Find where a variable is defined and used, jump from a role call to its contract
