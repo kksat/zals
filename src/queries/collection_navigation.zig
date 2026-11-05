@@ -6,6 +6,7 @@ const types = @import("../lsp/types.zig");
 const collection_refs = @import("../workspace/collection_refs.zig");
 const context_mod = @import("context.zig");
 const Context = context_mod.Context;
+const paths = @import("../paths.zig");
 const Subject = @import("navigation_subject.zig").Subject;
 
 pub const At = struct {
@@ -36,7 +37,7 @@ pub fn resolve(context: *Context, name: []const u8, file_path: []const u8) !?[]c
     const dot = std.mem.indexOfScalar(u8, name, '.') orelse return null;
     for (try context.collectionsPaths(file_path)) |cp| {
         const dir = try std.fs.path.join(a, &.{ cp, "ansible_collections", name[0..dot], name[dot + 1 ..] });
-        if (isDir(dir)) return dir;
+        if (paths.isDir(dir)) return dir;
     }
     if (context.workspaceRoot(file_path)) |root| {
         for (try context.workspaceCollections(try context.files(.{ .workspace = root }))) |c| {
@@ -57,7 +58,7 @@ pub fn definition(context: *Context, subject: *Subject) !Definition {
     const dir = (try resolve(context, at.name, at.path)) orelse return .none;
     for ([_][]const u8{ "galaxy.yml", "galaxy.yaml", "MANIFEST.json", "README.md" }) |f| {
         const p = try std.fs.path.join(a, &.{ dir, f });
-        if (isFile(p)) return .{ .location = try context_mod.fileLocation(a, p) };
+        if (paths.isFile(p)) return .{ .location = try context_mod.fileLocation(a, p) };
     }
     return .none;
 }
@@ -75,15 +76,18 @@ pub fn hover(context: *Context, subject: *Subject) !?types.Hover {
 
 pub fn card(a: Allocator, name: []const u8, dir: []const u8) ![]const u8 {
     for ([_][]const u8{ "README.md", "readme.md" }) |f| {
-        if (readFile(a, &.{ dir, f })) |t| return t;
+        const p = try std.fs.path.join(a, &.{ dir, f });
+        if (paths.readFile(a, p)) |t| return t;
     }
     for ([_][]const u8{ "galaxy.yml", "galaxy.yaml" }) |f| {
-        if (readFile(a, &.{ dir, f })) |t| {
-            return std.fmt.allocPrint(a, "**Collection** `{s}` — `{s}`\n\n```yaml\n{s}\n```", .{ name, f, trimEnd(t) });
+        const p = try std.fs.path.join(a, &.{ dir, f });
+        if (paths.readFile(a, p)) |t| {
+            return std.fmt.allocPrint(a, "**Collection** `{s}` — `{s}`\n\n```yaml\n{s}\n```", .{ name, f, paths.trimEnd(t) });
         }
     }
-    if (readFile(a, &.{ dir, "MANIFEST.json" })) |t| {
-        return std.fmt.allocPrint(a, "**Collection** `{s}` — `MANIFEST.json`\n\n```json\n{s}\n```", .{ name, trimEnd(t) });
+    const manifest = try std.fs.path.join(a, &.{ dir, "MANIFEST.json" });
+    if (paths.readFile(a, manifest)) |t| {
+        return std.fmt.allocPrint(a, "**Collection** `{s}` — `MANIFEST.json`\n\n```json\n{s}\n```", .{ name, paths.trimEnd(t) });
     }
     return std.fmt.allocPrint(a, "**Collection** `{s}`\n\n`{s}`", .{ name, dir });
 }
@@ -104,27 +108,4 @@ pub fn references(context: *Context, subject: *Subject) !?[]const types.Location
         }
     }
     return try locs.toOwnedSlice();
-}
-
-fn readFile(a: Allocator, parts: []const []const u8) ?[]const u8 {
-    const p = std.fs.path.join(a, parts) catch return null;
-    const f = std.fs.cwd().openFile(p, .{}) catch return null;
-    defer f.close();
-    return f.readToEndAlloc(a, 256 * 1024) catch null;
-}
-
-fn trimEnd(s: []const u8) []const u8 {
-    return std.mem.trimRight(u8, s, " \t\r\n");
-}
-
-fn isDir(path: []const u8) bool {
-    var d = std.fs.cwd().openDir(path, .{}) catch return false;
-    d.close();
-    return true;
-}
-
-fn isFile(path: []const u8) bool {
-    const f = std.fs.cwd().openFile(path, .{}) catch return false;
-    f.close();
-    return true;
 }

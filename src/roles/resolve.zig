@@ -15,6 +15,7 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const paths = @import("../paths.zig");
 
 /// Conventional role subdirectories.
 pub const role_subdirs = [_][]const u8{ "tasks", "handlers", "defaults", "vars", "meta", "templates", "files", "library" };
@@ -141,7 +142,7 @@ pub const Resolver = struct {
 
     fn tryDir(self: Resolver, parts: []const []const u8) ?[]const u8 {
         const path = std.fs.path.join(self.allocator, parts) catch return null;
-        if (!isDir(path)) {
+        if (!paths.isDir(path)) {
             self.allocator.free(path);
             return null;
         }
@@ -203,12 +204,6 @@ fn commonPrefix(x: []const u8, y: []const u8) usize {
     var i: usize = 0;
     while (i < n and x[i] == y[i]) : (i += 1) {}
     return i;
-}
-
-fn isDir(path: []const u8) bool {
-    var dir = std.fs.cwd().openDir(path, .{}) catch return false;
-    dir.close();
-    return true;
 }
 
 const testing = std.testing;

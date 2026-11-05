@@ -12,6 +12,7 @@ const Allocator = std.mem.Allocator;
 const facts_mod = @import("facts.zig");
 const discover_mod = @import("discover.zig");
 const concurrency = @import("../concurrency/root.zig");
+const paths = @import("../paths.zig");
 
 pub const Facts = facts_mod.Facts;
 
@@ -42,7 +43,7 @@ pub const Entry = struct {
         // Source candidates contribute path-only symbols, so never read their
         // Python/PowerShell bodies. YAML text and parser storage are temporary,
         // not backed by the entry arena which survives for the whole session.
-        const body = if (text == null and discover_mod.isAnsibleFile(std.fs.path.basename(path))) readFile(temporary, path) else null;
+        const body = if (text == null and discover_mod.isAnsibleFile(std.fs.path.basename(path))) paths.readFile(temporary, path) else null;
         self.facts = try facts_mod.extractInWithParser(a, temporary, self.root, path, text orelse body orelse "");
         return self;
     }
@@ -524,12 +525,6 @@ fn contains(list: []const []const u8, item: []const u8) bool {
 
 fn lessEntry(_: void, x: *const Entry, y: *const Entry) bool {
     return std.mem.order(u8, x.path, y.path) == .lt;
-}
-
-fn readFile(a: Allocator, path: []const u8) ?[]const u8 {
-    const f = std.fs.cwd().openFile(path, .{}) catch return null;
-    defer f.close();
-    return f.readToEndAlloc(a, 16 * 1024 * 1024) catch null;
 }
 
 const testing = std.testing;

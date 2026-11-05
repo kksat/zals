@@ -9,6 +9,7 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const paths = @import("../paths.zig");
 
 /// Ansible's default role search paths, appended after `roles_path`.
 pub const default_roles_paths = [_][]const u8{ "~/.ansible/roles", "/usr/share/ansible/roles", "/etc/ansible/roles" };
@@ -48,12 +49,12 @@ pub const Values = struct {
 /// Workspace root.
 pub fn nearestConfig(a: Allocator, ctx: Context, file_path: []const u8) !?[]const u8 {
     if (ctx.env(a, "ANSIBLE_CONFIG")) |p| {
-        if (p.len > 0 and isFile(p)) return p;
+        if (p.len > 0 and paths.isFile(p)) return p;
     }
     var dir = std.fs.path.dirname(file_path) orelse return null;
     while (true) {
         const candidate = try std.fs.path.join(a, &.{ dir, "ansible.cfg" });
-        if (isFile(candidate)) return candidate;
+        if (paths.isFile(candidate)) return candidate;
         if (ctx.workspace_root) |root| {
             if (std.mem.eql(u8, dir, root)) return null;
         }
@@ -93,7 +94,7 @@ pub fn parseConfig(a: Allocator, text: []const u8, cfg_dir: []const u8, env: Env
 /// Values from the `ansible.cfg` that applies to `file_path`.
 pub fn configValues(a: Allocator, ctx: Context, file_path: []const u8) !Values {
     const cfg = (try nearestConfig(a, ctx, file_path)) orelse return .{};
-    const text = readFile(a, cfg) orelse return .{};
+    const text = paths.readFile(a, cfg) orelse return .{};
     return parseConfig(a, text, std.fs.path.dirname(cfg) orelse ".", ctx.env);
 }
 
@@ -124,7 +125,7 @@ pub fn collectionsPaths(a: Allocator, ctx: Context, file_path: []const u8) ![]co
     defer out.deinit();
     if (std.fs.path.dirname(file_path)) |dir| {
         const adjacent = try std.fs.path.join(a, &.{ dir, "collections" });
-        if (isDir(adjacent)) try appendUnique(&out, adjacent);
+        if (paths.isDir(adjacent)) try appendUnique(&out, adjacent);
     }
     if (try envPaths(a, ctx, "ANSIBLE_COLLECTIONS_PATH")) |p| {
         try appendAll(&out, p);
@@ -174,8 +175,8 @@ fn venvRoot(a: Allocator, ctx: Context) !?[]const u8 {
 /// `site-packages` of the selected virtual environment when it contains
 /// `ansible_collections/`, or null.
 pub fn venvSitePackages(a: Allocator, ctx: Context) !?[]const u8 {
-    const paths = try venvSitePackagesPaths(a, ctx);
-    return if (paths.len > 0) paths[0] else null;
+    const site_packages = try venvSitePackagesPaths(a, ctx);
+    return if (site_packages.len > 0) site_packages[0] else null;
 }
 
 fn venvSitePackagesPaths(a: Allocator, ctx: Context) ![]const []const u8 {
@@ -257,26 +258,7 @@ fn appendUnique(out: *std.array_list.Managed([]const u8), path: []const u8) !voi
 
 fn hasCollections(a: Allocator, dir: []const u8) bool {
     const p = std.fs.path.join(a, &.{ dir, "ansible_collections" }) catch return false;
-    return isDir(p);
-}
-
-fn isDir(path: []const u8) bool {
-    var d = std.fs.cwd().openDir(path, .{}) catch return false;
-    d.close();
-    return true;
-}
-
-fn isFile(path: []const u8) bool {
-    const f = std.fs.cwd().openFile(path, .{}) catch return false;
-    defer f.close();
-    const st = f.stat() catch return false;
-    return st.kind == .file;
-}
-
-fn readFile(a: Allocator, path: []const u8) ?[]const u8 {
-    const f = std.fs.cwd().openFile(path, .{}) catch return null;
-    defer f.close();
-    return f.readToEndAlloc(a, 1 << 20) catch null;
+    return paths.isDir(p);
 }
 
 fn lessString(_: void, x: []const u8, y: []const u8) bool {
@@ -379,9 +361,9 @@ test "environment overrides ansible.cfg" {
 
     try tree.write("ansible.cfg", "[defaults]\nroles_path = root_roles\n");
     const ctx = Context{ .workspace_root = tree.root, .env = fakeEnv };
-    const paths = try rolesPaths(a, ctx, try tree.path(a, "site.yml"));
-    try testing.expectEqualStrings("/env/roles", paths[0]);
-    try testing.expectEqualStrings("/home/u/more", paths[1]);
+    const role_paths = try rolesPaths(a, ctx, try tree.path(a, "site.yml"));
+    try testing.expectEqualStrings("/env/roles", role_paths[0]);
+    try testing.expectEqualStrings("/home/u/more", role_paths[1]);
 }
 
 test "config dump is lazy behind environment and file paths, then cached" {
@@ -429,8 +411,8 @@ test "dump values apply without config or environment" {
     defer arena.deinit();
     const a = arena.allocator();
     const ctx = Context{ .workspace_root = "/nowhere", .dump_roles = &.{"/dumped/roles"}, .env = noEnv };
-    const paths = try rolesPaths(a, ctx, "/nowhere/site.yml");
-    try testing.expectEqualStrings("/dumped/roles", paths[0]);
+    const role_paths = try rolesPaths(a, ctx, "/nowhere/site.yml");
+    try testing.expectEqualStrings("/dumped/roles", role_paths[0]);
 }
 
 test "collections paths include adjacent, venv, and workspace collections" {
@@ -453,12 +435,12 @@ test "collections paths include adjacent, venv, and workspace collections" {
         .workspace_collections = &.{ws},
         .env = noEnv,
     };
-    const paths = try collectionsPaths(a, ctx, try tree.path(a, "playbooks/site.yml"));
-    try testing.expectEqual(@as(usize, 4), paths.len);
-    try testing.expectEqualStrings(try tree.path(a, "playbooks/collections"), paths[0]);
-    try testing.expectEqualStrings("/dumped", paths[1]);
-    try testing.expectEqualStrings(try tree.path(a, ".venv-216/lib/python3.12/site-packages"), paths[2]);
-    try testing.expectEqualStrings(ws, paths[3]);
+    const collection_paths = try collectionsPaths(a, ctx, try tree.path(a, "playbooks/site.yml"));
+    try testing.expectEqual(@as(usize, 4), collection_paths.len);
+    try testing.expectEqualStrings(try tree.path(a, "playbooks/collections"), collection_paths[0]);
+    try testing.expectEqualStrings("/dumped", collection_paths[1]);
+    try testing.expectEqualStrings(try tree.path(a, ".venv-216/lib/python3.12/site-packages"), collection_paths[2]);
+    try testing.expectEqualStrings(ws, collection_paths[3]);
 }
 
 test "only the selected venv is used" {

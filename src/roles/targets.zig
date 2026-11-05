@@ -5,6 +5,7 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const paths = @import("../paths.zig");
 
 /// Definition target: `meta/argument_specs.*`, then `meta/main.*`, then
 /// `tasks/main.*`. Null when none exists.
@@ -27,17 +28,11 @@ pub fn implementationTarget(a: Allocator, role_dir: []const u8) ?[]const u8 {
 
 fn joinFile(a: Allocator, role_dir: []const u8, sub: []const u8, name: []const u8) ?[]const u8 {
     const path = std.fs.path.join(a, &.{ role_dir, sub, name }) catch return null;
-    if (!isFile(path)) {
+    if (!paths.isFile(path)) {
         a.free(path);
         return null;
     }
     return path;
-}
-
-fn isFile(path: []const u8) bool {
-    const f = std.fs.cwd().openFile(path, .{}) catch return false;
-    f.close();
-    return true;
 }
 
 const testing = std.testing;
