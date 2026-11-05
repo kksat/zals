@@ -11,6 +11,9 @@ const paths = @import("../paths.zig");
 const Subject = @import("navigation_subject.zig").Subject;
 const RoleRef = @import("../workspace/facts.zig").RoleRef;
 
+/// Largest file a role hover card reads from disk (README, meta).
+const max_read_bytes = 256 * 1024;
+
 /// Every Role reference in the Workspace that can resolve to the same role
 /// directory as the cursor. Null when the cursor is not on a role reference.
 pub fn references(context: *Context, subject: *Subject) !?[]const types.Location {
@@ -80,11 +83,11 @@ pub fn hover(context: *Context, subject: *Subject) !?types.Hover {
 pub fn roleCard(a: Allocator, name: []const u8, dir: []const u8) ![]const u8 {
     for ([_][]const u8{ "README.md", "readme.md", "Readme.md" }) |readme| {
         const p = try std.fs.path.join(a, &.{ dir, readme });
-        if (paths.readFile(a, p)) |text| return text;
+        if (paths.readFile(a, p, max_read_bytes)) |text| return text;
     }
     for ([_][]const u8{ "argument_specs.yml", "argument_specs.yaml", "main.yml", "main.yaml" }) |meta| {
         const p = try std.fs.path.join(a, &.{ dir, "meta", meta });
-        if (paths.readFile(a, p)) |text| {
+        if (paths.readFile(a, p, max_read_bytes)) |text| {
             return std.fmt.allocPrint(a, "**Role** `{s}` — `meta/{s}`\n\n```yaml\n{s}\n```", .{ name, meta, paths.trimEnd(text) });
         }
     }

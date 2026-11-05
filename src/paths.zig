@@ -45,16 +45,14 @@ pub fn isDir(path: []const u8) bool {
     return true;
 }
 
-/// Largest file `readFile` returns; larger files read as null.
-const max_file_bytes = 16 * 1024 * 1024;
-
 /// Bytes of the file at `path`, or null when it is missing, larger than
-/// `max_file_bytes`, or unreadable for any other reason. The caller owns the
-/// result.
-pub fn readFile(a: Allocator, path: []const u8) ?[]const u8 {
+/// `max_bytes`, or unreadable for any other reason. The caller owns the
+/// result. `max_bytes` is the caller's memory invariant: each call site
+/// passes the cap its own read budget allows, not a module-wide default.
+pub fn readFile(a: Allocator, path: []const u8, max_bytes: usize) ?[]const u8 {
     const f = std.fs.cwd().openFile(path, .{}) catch return null;
     defer f.close();
-    return f.readToEndAlloc(a, max_file_bytes) catch null;
+    return f.readToEndAlloc(a, max_bytes) catch null;
 }
 
 /// `s` without trailing spaces, tabs, and newlines.
@@ -86,6 +84,19 @@ test "uri decodes spaces" {
     try testing.expectEqualStrings("/tmp/a b.yml", path);
 }
 
+test "readFile honours the caller's size cap" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(.{ .sub_path = "f.yml", .data = "0123456789" });
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const root = try tmp.dir.realpathAlloc(a, ".");
+    const file_path = try std.fs.path.join(a, &.{ root, "f.yml" });
+    try testing.expectEqualStrings("0123456789", readFile(a, file_path, 256 * 1024).?);
+    try testing.expect(readFile(a, file_path, 4) == null);
+}
+
 test "isFile, isDir, readFile, trimEnd" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -102,9 +113,9 @@ test "isFile, isDir, readFile, trimEnd" {
     try testing.expect(!isFile("no such file"));
     try testing.expect(isDir(dir_path));
     try testing.expect(!isDir(file_path));
-    try testing.expectEqualStrings("x\n", readFile(a, file_path).?);
-    try testing.expect(readFile(a, dir_path) == null);
-    try testing.expect(readFile(a, "no such file") == null);
+    try testing.expectEqualStrings("x\n", readFile(a, file_path, 16 * 1024 * 1024).?);
+    try testing.expect(readFile(a, dir_path, 16 * 1024 * 1024) == null);
+    try testing.expect(readFile(a, "no such file", 16 * 1024 * 1024) == null);
     try testing.expectEqualStrings("x", trimEnd("x \t\r\n"));
     try testing.expectEqualStrings(" x", trimEnd(" x"));
 }

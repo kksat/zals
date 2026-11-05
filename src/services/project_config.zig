@@ -11,6 +11,9 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const paths = @import("../paths.zig");
 
+/// Largest `ansible.cfg` read from disk.
+const max_read_bytes = 1 << 20;
+
 /// Ansible's default role search paths, appended after `roles_path`.
 pub const default_roles_paths = [_][]const u8{ "~/.ansible/roles", "/usr/share/ansible/roles", "/etc/ansible/roles" };
 
@@ -94,7 +97,7 @@ pub fn parseConfig(a: Allocator, text: []const u8, cfg_dir: []const u8, env: Env
 /// Values from the `ansible.cfg` that applies to `file_path`.
 pub fn configValues(a: Allocator, ctx: Context, file_path: []const u8) !Values {
     const cfg = (try nearestConfig(a, ctx, file_path)) orelse return .{};
-    const text = paths.readFile(a, cfg) orelse return .{};
+    const text = paths.readFile(a, cfg, max_read_bytes) orelse return .{};
     return parseConfig(a, text, std.fs.path.dirname(cfg) orelse ".", ctx.env);
 }
 
