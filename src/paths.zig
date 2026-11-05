@@ -84,6 +84,23 @@ test "uri decodes spaces" {
     try testing.expectEqualStrings("/tmp/a b.yml", path);
 }
 
+test "isFile requires a regular file" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.makePath("d");
+    try tmp.dir.writeFile(.{ .sub_path = "f.yml", .data = "x" });
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const root = try tmp.dir.realpathAlloc(a, ".");
+    const file_path = try std.fs.path.join(a, &.{ root, "f.yml" });
+    const dir_path = try std.fs.path.join(a, &.{ root, "d" });
+    // A directory must answer false even where openFile on it succeeds
+    // (Linux); only an existing regular file answers true.
+    try testing.expect(isFile(file_path));
+    try testing.expect(!isFile(dir_path));
+}
+
 test "readFile honours the caller's size cap" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
