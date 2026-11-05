@@ -209,13 +209,16 @@ and required-status setup](docs/release-notes.md),
 [ADR-0044](docs/adr/0044-user-facing-release-notes.md), and
 [ADR-0026](docs/adr/0026-release-process.md).
 
-When release-please creates a release after its release PR is merged, it calls
-the **release** workflow with the new tag and publishes to Visual Studio
-Marketplace and Open VSX using `VSCE_PAT` and `OVSX_PAT`. Ordinary commits,
-unrelated GitHub release events, and tag pushes do not start publishing. Manual
-dispatch remains available and defaults to **GitHub-only** packaging. The workflow
-builds five native archives, five Python wheels, five platform-specific VSIXs,
-and `SHA256SUMS`. PyPI and Homebrew remain explicit manual opt-ins.
+When release-please creates a draft after its release PR is merged, it calls
+the **release** workflow with the new tag. After verifying and publishing the
+GitHub assets, the workflow automatically publishes every release to **PyPI,
+Homebrew (`kksat/tap`), Visual Studio Marketplace, and Open VSX**. PyPI uses trusted
+publishing; Homebrew uses `HOMEBREW_TAP_TOKEN`; the extension registries use
+`VSCE_PAT` and `OVSX_PAT`. Ordinary commits, unrelated GitHub release events, and
+tag pushes do not start publishing. Manual dispatch remains available and
+defaults to **GitHub-only** packaging unless you select registry flags. The
+workflow builds five native archives, five Python wheels, five platform-specific
+VSIXs, and `SHA256SUMS`.
 
 Release-note authoring checks the live published release and fetched main/PR
 references first; a stale checkout must be synchronized explicitly, not used to

@@ -237,8 +237,11 @@ class ReleaseTests(unittest.TestCase):
         self.assertIn("publish_vscode: true", publish)
         self.assertIn("vscode_auth: pat", publish)
         self.assertIn("publish_openvsx: true", publish)
-        self.assertNotIn("publish_pypi: true", publish)
-        self.assertNotIn("publish_homebrew: true", publish)
+        self.assertIn("publish_pypi: true", publish)
+        self.assertIn("publish_homebrew: true", publish)
+        self.assertIn("id-token: write", publish)
+        self.assertIn("HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}", publish)
+        self.assertNotIn("HOMEBREW_TAP_TOKEN", self.workflow_job("release-please", release_please_path))
         callers = [p.name for p in (ROOT / ".github/workflows").glob("*.yml")
                    if "uses: ./.github/workflows/release.yml" in p.read_text()]
         self.assertEqual(callers, ["release-please.yml"])
