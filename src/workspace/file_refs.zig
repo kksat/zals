@@ -10,6 +10,7 @@ const Allocator = std.mem.Allocator;
 const yaml = @import("../yaml/root.zig");
 const Node = yaml.Node;
 const resolve = @import("../roles/resolve.zig");
+const paths = @import("../paths.zig");
 
 pub const Kind = enum { task_file, vars_file };
 
@@ -39,15 +40,15 @@ pub fn resolveTarget(a: Allocator, kind: Kind, raw: []const u8, path: []const u8
     if (std.fs.path.isAbsolute(raw)) return a.dupe(u8, raw);
     const dir = std.fs.path.dirname(path) orelse ".";
     const first = try std.fs.path.resolve(a, &.{ dir, raw });
-    if (isFile(first)) return first;
+    if (paths.isFile(first)) return first;
     if (resolve.enclosingRole(path)) |role_dir| {
         const sub = if (kind == .task_file) "tasks" else "vars";
         const in_role = try std.fs.path.resolve(a, &.{ role_dir, sub, raw });
-        if (isFile(in_role)) return in_role;
+        if (paths.isFile(in_role)) return in_role;
     }
     if (root) |r| {
         const at_root = try std.fs.path.resolve(a, &.{ r, raw });
-        if (isFile(at_root)) return at_root;
+        if (paths.isFile(at_root)) return at_root;
     }
     return first;
 }
@@ -120,12 +121,6 @@ const Ctx = struct {
 
 fn isJinja(s: []const u8) bool {
     return std.mem.indexOf(u8, s, "{{") != null or std.mem.indexOf(u8, s, "{%") != null;
-}
-
-fn isFile(path: []const u8) bool {
-    const f = std.fs.cwd().openFile(path, .{}) catch return false;
-    f.close();
-    return true;
 }
 
 const testing = std.testing;
