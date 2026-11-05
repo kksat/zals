@@ -19,8 +19,8 @@ selects PAT authentication until Azure federation is configured.
 `release-please.yml` runs on pushes to `main`, but calls `release.yml` **only**
 when its release action outputs `release_created == 'true'`. This normally
 happens after merging the release PR. The caller passes the action's exact
-`tag_name` and explicitly enables Marketplace and Open VSX publication. PyPI
-and Homebrew remain manual opt-ins.
+`tag_name` and explicitly enables PyPI, Homebrew, Marketplace, and Open VSX
+publication for every release, after GitHub assets have passed verification.
 
 `release.yml` supports only `workflow_call` and `workflow_dispatch`; it has no
 push, pull-request, tag, or GitHub release event trigger. Ordinary commits,
@@ -148,8 +148,8 @@ gh workflow run release.yml --ref main -f tag=v0.1.0 \
 
 Omit `publish_existing` to build and publish in one run. A manual dispatch with
 no registry flags packages only to GitHub. The automatic release-please caller
-explicitly enables the two extension registries; credentials alone never select
-a registry.
+explicitly enables all four external publishing destinations; credentials alone
+never select a registry.
 
 Both clients are locked npm dependencies installed from the workflow revision,
 so publishing an older tag can use updated tooling without altering its VSIXs.

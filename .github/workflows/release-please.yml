@@ -57,9 +57,12 @@ jobs:
       id-token: write
     with:
       tag: ${{ needs.release-please.outputs.tag_name }}
+      publish_pypi: true
+      publish_homebrew: true
       publish_vscode: true
       vscode_auth: pat
       publish_openvsx: true
     secrets:
       VSCE_PAT: ${{ secrets.VSCE_PAT }}
       OVSX_PAT: ${{ secrets.OVSX_PAT }}
+      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}

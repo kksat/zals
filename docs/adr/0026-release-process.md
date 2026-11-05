@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-09-19
+- **Amended:** 2026-11-05 (automatic PyPI and Homebrew publication)
 - **Supersedes:** —
 - **Superseded by:** [ADR-0044](0044-user-facing-release-notes.md) (changelog ownership and release-body selection only)
 
@@ -32,8 +33,9 @@ Use **Google release-please** to drive releases from
   the approved matching root changelog section, not the generated technical log.
   The release runner exposes `release_created` and `tag_name` as job outputs. A dependent
   job calls the reusable release workflow only when `release_created == 'true'`,
-  passing the exact tag and explicitly enabling Marketplace and Open VSX using
-  the configured PAT secrets. Ordinary pushes that only update a release PR do
+  passing the exact tag and explicitly enabling PyPI, Homebrew, Marketplace,
+  and Open VSX. PyPI uses OIDC; the caller passes the configured Homebrew and
+  extension registry secrets. Ordinary pushes that only update a release PR do
   not invoke packaging or publishing.
 - `.github/workflows/release.yml` runs only via that `workflow_call` or manual
   `workflow_dispatch`, not arbitrary GitHub release events or tag pushes. Calling
@@ -69,8 +71,9 @@ Use **Google release-please** to drive releases from
 - Manual packaging defaults to **GitHub only**. Dispatch/call inputs
   `publish_pypi`, `publish_homebrew`, `publish_vscode`, and `publish_openvsx`
   select external publishing; credentials alone never enable it. The
-  release-please caller explicitly enables the two extension registries; PyPI
-  and Homebrew remain manual opt-ins.
+  release-please caller explicitly enables all four external publishing
+  destinations for every release and passes `HOMEBREW_TAP_TOKEN` to the reusable
+  workflow. Manual calls retain independent, default-false registry inputs.
 - `publish_existing` skips rebuilding and reuses the existing GitHub release.
   Publication checks all 15 assets and `SHA256SUMS` before distributing them.
   PyPI uses OIDC trusted publishing configured for `release.yml`, uploading all
@@ -116,9 +119,9 @@ metadata and current references when selecting a new notes boundary.
   directory portable (`std.fs.File` instead of raw POSIX fds,
   `std.process.getEnvVarOwned` instead of `std.posix.getenv`).
 - Registries are independently selected by explicit inputs. Release PR merges
-  automatically publish to both extension registries; manual runs can select any
-  registry. Existing verified GitHub assets can be published without moving a
-  tag or replacing assets. VSIXs can still be installed locally.
+  automatically publish to PyPI, Homebrew, Marketplace, and Open VSX; manual runs
+  can select any destination. Existing verified GitHub assets can be published
+  without moving a tag or replacing assets. VSIXs can still be installed locally.
 - Publishing is idempotent for each version/platform pair: existing packages
   succeed without replacement, missing targets are uploaded, and genuine
   authentication, permission, or upload errors still fail. Local HTTP fixtures
