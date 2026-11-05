@@ -1,4 +1,5 @@
-//! Shared filesystem-path helpers: `file://` URI conversion.
+//! Shared filesystem-path helpers: `file://` URI conversion, path
+//! predicates, and small whole-file reads.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -28,6 +29,39 @@ pub fn pathToUri(allocator: Allocator, path: []const u8) ![]const u8 {
     return absolutePathToUri(allocator, absolute);
 }
 
+/// True when `path` names an existing regular file. Relative paths open
+/// against the process working directory.
+pub fn isFile(path: []const u8) bool {
+    const f = std.fs.cwd().openFile(path, .{}) catch return false;
+    defer f.close();
+    const st = f.stat() catch return false;
+    return st.kind == .file;
+}
+
+/// True when `path` names an existing directory.
+pub fn isDir(path: []const u8) bool {
+    var d = std.fs.cwd().openDir(path, .{}) catch return false;
+    d.close();
+    return true;
+}
+
+/// Largest file `readFile` returns; larger files read as null.
+const max_file_bytes = 16 * 1024 * 1024;
+
+/// Bytes of the file at `path`, or null when it is missing, larger than
+/// `max_file_bytes`, or unreadable for any other reason. The caller owns the
+/// result.
+pub fn readFile(a: Allocator, path: []const u8) ?[]const u8 {
+    const f = std.fs.cwd().openFile(path, .{}) catch return null;
+    defer f.close();
+    return f.readToEndAlloc(a, max_file_bytes) catch null;
+}
+
+/// `s` without trailing spaces, tabs, and newlines.
+pub fn trimEnd(s: []const u8) []const u8 {
+    return std.mem.trimRight(u8, s, " \t\r\n");
+}
+
 fn absolutePathToUri(allocator: Allocator, path: []const u8) ![]const u8 {
     const uri: std.Uri = .{ .scheme = "file", .host = .{ .raw = "" }, .path = .{ .raw = path } };
     return std.fmt.allocPrint(allocator, "{f}", .{uri});
@@ -50,4 +84,27 @@ test "uri decodes spaces" {
     const path = try uriToPath(a, "file:///tmp/a%20b.yml");
     defer a.free(path);
     try testing.expectEqualStrings("/tmp/a b.yml", path);
+}
+
+test "isFile, isDir, readFile, trimEnd" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.makePath("d");
+    try tmp.dir.writeFile(.{ .sub_path = "f.yml", .data = "x\n" });
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const root = try tmp.dir.realpathAlloc(a, ".");
+    const file_path = try std.fs.path.join(a, &.{ root, "f.yml" });
+    const dir_path = try std.fs.path.join(a, &.{ root, "d" });
+    try testing.expect(isFile(file_path));
+    try testing.expect(!isFile(dir_path));
+    try testing.expect(!isFile("no such file"));
+    try testing.expect(isDir(dir_path));
+    try testing.expect(!isDir(file_path));
+    try testing.expectEqualStrings("x\n", readFile(a, file_path).?);
+    try testing.expect(readFile(a, dir_path) == null);
+    try testing.expect(readFile(a, "no such file") == null);
+    try testing.expectEqualStrings("x", trimEnd("x \t\r\n"));
+    try testing.expectEqualStrings(" x", trimEnd(" x"));
 }

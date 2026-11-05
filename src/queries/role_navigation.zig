@@ -79,11 +79,13 @@ pub fn hover(context: *Context, subject: *Subject) !?types.Hover {
 /// Markdown for a resolved role directory.
 pub fn roleCard(a: Allocator, name: []const u8, dir: []const u8) ![]const u8 {
     for ([_][]const u8{ "README.md", "readme.md", "Readme.md" }) |readme| {
-        if (readFile(a, &.{ dir, readme })) |text| return text;
+        const p = try std.fs.path.join(a, &.{ dir, readme });
+        if (paths.readFile(a, p)) |text| return text;
     }
     for ([_][]const u8{ "argument_specs.yml", "argument_specs.yaml", "main.yml", "main.yaml" }) |meta| {
-        if (readFile(a, &.{ dir, "meta", meta })) |text| {
-            return std.fmt.allocPrint(a, "**Role** `{s}` — `meta/{s}`\n\n```yaml\n{s}\n```", .{ name, meta, trimEnd(text) });
+        const p = try std.fs.path.join(a, &.{ dir, "meta", meta });
+        if (paths.readFile(a, p)) |text| {
+            return std.fmt.allocPrint(a, "**Role** `{s}` — `meta/{s}`\n\n```yaml\n{s}\n```", .{ name, meta, paths.trimEnd(text) });
         }
     }
     return std.fmt.allocPrint(a, "**Role** `{s}`\n\n`{s}`", .{ name, dir });
@@ -91,17 +93,6 @@ pub fn roleCard(a: Allocator, name: []const u8, dir: []const u8) ![]const u8 {
 
 fn markdown(range: types.Range, text: []const u8) types.Hover {
     return .{ .contents = .{ .kind = .markdown, .value = text }, .range = range };
-}
-
-fn readFile(a: Allocator, parts: []const []const u8) ?[]const u8 {
-    const p = std.fs.path.join(a, parts) catch return null;
-    const f = std.fs.cwd().openFile(p, .{}) catch return null;
-    defer f.close();
-    return f.readToEndAlloc(a, 256 * 1024) catch null;
-}
-
-fn trimEnd(s: []const u8) []const u8 {
-    return std.mem.trimRight(u8, s, " \t\r\n");
 }
 
 fn lessLocation(_: void, x: types.Location, y: types.Location) bool {

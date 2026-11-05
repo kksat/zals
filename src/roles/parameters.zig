@@ -114,10 +114,11 @@ fn optionSpecFrom(a: Allocator, source: ?variables.FileSource, role_dir: []const
 pub fn optionSpecPathFrom(a: Allocator, source: ?variables.FileSource, role_dir: []const u8, entry: []const u8, names: []const []const u8) !?OptionSpec {
     if (names.len == 0) return null;
     for ([_][]const u8{ "argument_specs.yml", "argument_specs.yaml", "main.yml", "main.yaml" }) |file| {
-        const text = if (source) |src| blk: {
-            const path = try std.fs.path.join(a, &.{ role_dir, "meta", file });
-            break :blk (try src.read(a, try paths.pathToUri(a, path))) orelse continue;
-        } else readFile(a, &.{ role_dir, "meta", file }) orelse continue;
+        const path = try std.fs.path.join(a, &.{ role_dir, "meta", file });
+        const text = if (source) |src|
+            (try src.read(a, try paths.pathToUri(a, path))) orelse continue
+        else
+            paths.readFile(a, path) orelse continue;
         var forest = yaml.parse(a, text) catch continue;
         defer forest.deinit();
         for (forest.roots) |root| {
@@ -175,13 +176,6 @@ fn dedent(a: Allocator, text: []const u8, start: usize, end: usize) ![]const u8 
 fn stripExt(name: []const u8) []const u8 {
     if (std.mem.lastIndexOfScalar(u8, name, '.')) |dot| return name[0..dot];
     return name;
-}
-
-fn readFile(a: Allocator, parts: []const []const u8) ?[]const u8 {
-    const p = std.fs.path.join(a, parts) catch return null;
-    const f = std.fs.cwd().openFile(p, .{}) catch return null;
-    defer f.close();
-    return f.readToEndAlloc(a, 256 * 1024) catch null;
 }
 
 const testing = std.testing;

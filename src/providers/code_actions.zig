@@ -103,13 +103,7 @@ fn extractEnv(self: *Server, path: []const u8) ?ExtractEnv {
     const dir = std.fs.path.dirname(path) orelse return null;
     var ext = std.fs.path.extension(path);
     if (ext.len == 0) ext = ".yml";
-    return ExtractEnv{ .dir = dir, .ext = ext, .exists = fileExists };
-}
-
-fn fileExists(path: []const u8) bool {
-    const f = std.fs.cwd().openFile(path, .{}) catch return false;
-    f.close();
-    return true;
+    return ExtractEnv{ .dir = dir, .ext = ext, .exists = paths.isFile };
 }
 
 fn empty(a: Allocator) !Value {

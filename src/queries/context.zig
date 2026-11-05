@@ -498,7 +498,7 @@ pub const Context = struct {
     pub fn text(self: *Context, uri: []const u8) !?[]const u8 {
         if (self.document(uri)) |doc| return doc.bytes();
         if (self.texts.get(uri)) |cached| return cached;
-        const body = readFile(self.allocator, try self.pathOf(uri));
+        const body = paths.readFile(self.allocator, try self.pathOf(uri));
         try self.texts.put(uri, body);
         return body;
     }
@@ -606,12 +606,6 @@ fn isBelow(path: []const u8, dir: []const u8) bool {
     if (path.len <= dir.len or !std.mem.startsWith(u8, path, dir)) return false;
     if (dir.len > 0 and (dir[dir.len - 1] == '/' or dir[dir.len - 1] == '\\')) return true;
     return path[dir.len] == '/' or path[dir.len] == '\\';
-}
-
-fn readFile(a: Allocator, path: []const u8) ?[]const u8 {
-    const f = std.fs.cwd().openFile(path, .{}) catch return null;
-    defer f.close();
-    return f.readToEndAlloc(a, 16 * 1024 * 1024) catch null;
 }
 
 const testing = std.testing;
