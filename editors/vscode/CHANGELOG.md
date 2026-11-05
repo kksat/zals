@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.3.1](https://github.com/kksat/zals/compare/v0.3.0...v0.3.1) (2026-11-04)
+
+### Fixed
+
+- **Install the 0.3.0 feature set as 0.3.1.** This release provides the binary
+  archives, Python wheels, and platform-specific VS Code packages missing from
+  the 0.3.0 GitHub release. Use 0.3.1 for installations and upgrades. There are
+  no language-server feature or editor interaction changes from
+  [0.3.0](https://github.com/kksat/zals/releases/tag/v0.3.0).
+
 ## [0.3.0](https://github.com/kksat/zals/compare/v0.2.0...v0.3.0) (2026-11-04)
 
 ### Added
