@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.3.1](https://github.com/kksat/zals/compare/v0.3.0...v0.3.1) (2026-11-04)
+## [0.3.1](https://github.com/kksat/zals/compare/v0.3.0...v0.3.1) (2026-11-05)
 
 ### Fixed
 
