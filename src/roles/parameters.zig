@@ -6,6 +6,9 @@ const yaml = @import("../yaml/root.zig");
 const variables = @import("../variables/root.zig");
 const paths = @import("../paths.zig");
 
+/// Largest role meta file read from disk for parameter contracts.
+const max_read_bytes = 256 * 1024;
+
 /// A Role parameter under the cursor: the key, the role it is passed to,
 /// and the argument-spec entry point.
 pub const Parameter = struct {
@@ -118,7 +121,7 @@ pub fn optionSpecPathFrom(a: Allocator, source: ?variables.FileSource, role_dir:
         const text = if (source) |src|
             (try src.read(a, try paths.pathToUri(a, path))) orelse continue
         else
-            paths.readFile(a, path) orelse continue;
+            paths.readFile(a, path, max_read_bytes) orelse continue;
         var forest = yaml.parse(a, text) catch continue;
         defer forest.deinit();
         for (forest.roots) |root| {

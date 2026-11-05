@@ -14,6 +14,9 @@ const discover_mod = @import("discover.zig");
 const concurrency = @import("../concurrency/root.zig");
 const paths = @import("../paths.zig");
 
+/// Largest file the index reads from disk for a discovered file's facts.
+const max_read_bytes = 16 * 1024 * 1024;
+
 pub const Facts = facts_mod.Facts;
 
 pub const Entry = struct {
@@ -43,7 +46,7 @@ pub const Entry = struct {
         // Source candidates contribute path-only symbols, so never read their
         // Python/PowerShell bodies. YAML text and parser storage are temporary,
         // not backed by the entry arena which survives for the whole session.
-        const body = if (text == null and discover_mod.isAnsibleFile(std.fs.path.basename(path))) paths.readFile(temporary, path) else null;
+        const body = if (text == null and discover_mod.isAnsibleFile(std.fs.path.basename(path))) paths.readFile(temporary, path, max_read_bytes) else null;
         self.facts = try facts_mod.extractInWithParser(a, temporary, self.root, path, text orelse body orelse "");
         return self;
     }

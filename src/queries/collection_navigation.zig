@@ -9,6 +9,10 @@ const Context = context_mod.Context;
 const paths = @import("../paths.zig");
 const Subject = @import("navigation_subject.zig").Subject;
 
+/// Largest file a collection hover card reads from disk (README, galaxy,
+/// MANIFEST.json).
+const max_read_bytes = 256 * 1024;
+
 pub const At = struct {
     name: []const u8,
     uri: []const u8,
@@ -77,16 +81,16 @@ pub fn hover(context: *Context, subject: *Subject) !?types.Hover {
 pub fn card(a: Allocator, name: []const u8, dir: []const u8) ![]const u8 {
     for ([_][]const u8{ "README.md", "readme.md" }) |f| {
         const p = try std.fs.path.join(a, &.{ dir, f });
-        if (paths.readFile(a, p)) |t| return t;
+        if (paths.readFile(a, p, max_read_bytes)) |t| return t;
     }
     for ([_][]const u8{ "galaxy.yml", "galaxy.yaml" }) |f| {
         const p = try std.fs.path.join(a, &.{ dir, f });
-        if (paths.readFile(a, p)) |t| {
+        if (paths.readFile(a, p, max_read_bytes)) |t| {
             return std.fmt.allocPrint(a, "**Collection** `{s}` — `{s}`\n\n```yaml\n{s}\n```", .{ name, f, paths.trimEnd(t) });
         }
     }
     const manifest = try std.fs.path.join(a, &.{ dir, "MANIFEST.json" });
-    if (paths.readFile(a, manifest)) |t| {
+    if (paths.readFile(a, manifest, max_read_bytes)) |t| {
         return std.fmt.allocPrint(a, "**Collection** `{s}` — `MANIFEST.json`\n\n```json\n{s}\n```", .{ name, paths.trimEnd(t) });
     }
     return std.fmt.allocPrint(a, "**Collection** `{s}`\n\n`{s}`", .{ name, dir });

@@ -492,13 +492,16 @@ pub const Context = struct {
         return docs.forPathsFn(docs.ptr, try self.collectionsPaths(try self.pathOf(uri)));
     }
 
+    /// Largest file `text` reads from disk for a URI with no open document.
+    const max_read_bytes = 16 * 1024 * 1024;
+
     /// Text of `uri`: the open document, else the file on disk, read once per
     /// request. Null when neither exists. Every byte offset a query reports
     /// refers to this text.
     pub fn text(self: *Context, uri: []const u8) !?[]const u8 {
         if (self.document(uri)) |doc| return doc.bytes();
         if (self.texts.get(uri)) |cached| return cached;
-        const body = paths.readFile(self.allocator, try self.pathOf(uri));
+        const body = paths.readFile(self.allocator, try self.pathOf(uri), max_read_bytes);
         try self.texts.put(uri, body);
         return body;
     }
