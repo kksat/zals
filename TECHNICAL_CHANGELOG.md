@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/kksat/zals/compare/v0.3.1...v0.3.2) (2026-11-05)
+
+
+### Bug Fixes
+
+* **release:** publish PyPI and Homebrew automatically ([908706e](https://github.com/kksat/zals/commit/908706e3b4f9d5e0106aefb49eab5b9924378d7f))
+
 ## [0.3.1](https://github.com/kksat/zals/compare/v0.3.0...v0.3.1) (2026-11-05)
 
 
