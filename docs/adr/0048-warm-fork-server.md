@@ -93,7 +93,7 @@ Trade-offs accepted:
   leak its one small `~/.ansible/tmp/ansible-local-*` directory — the same
   leak a killed native tool leaves.
 - **The daemon script is embedded, not installed**: it is written to a
-  unique file under the zals cache directory at first use and removed at
+  unique file under the temp directory at first use and removed at
   shutdown.
 
 Future work, not decided here: a socket-based daemon serving concurrent
