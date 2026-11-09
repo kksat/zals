@@ -368,19 +368,36 @@ fn writeRequest(stdin: std.fs.File, allocator: Allocator, argv: []const []const 
     };
 }
 
-/// Write the embedded daemon script to a unique file in the cache dir.
+/// Write the embedded daemon script to a unique file in the cache dir
+/// (created with parents), falling back to the temp dir.
 fn writeDaemonScript(allocator: Allocator) ![]u8 {
-    const dir = cacheDir(allocator) catch return error.NoCacheDir;
-    defer allocator.free(dir);
+    if (cacheDir(allocator)) |dir| {
+        defer allocator.free(dir);
+        if (writeUniqueScript(allocator, dir)) |path| return path else |_| {}
+    } else |_| {}
+    var dir: []const u8 = "/tmp";
+    var owned: ?[]const u8 = null;
+    defer if (owned) |t| allocator.free(t);
+    if (std.process.getEnvVarOwned(allocator, "TMPDIR")) |tmp| {
+        dir = tmp;
+        owned = tmp;
+    } else |_| {}
+    if (!std.fs.path.isAbsolute(dir)) {
+        if (owned) |t| allocator.free(t);
+        owned = try std.fs.cwd().realpathAlloc(allocator, dir);
+        dir = owned.?;
+    }
+    return writeUniqueScript(allocator, dir);
+}
+
+fn writeUniqueScript(allocator: Allocator, dir: []const u8) ![]u8 {
     const name = try std.fmt.allocPrint(allocator, "warm-daemon-{d}.py", .{std.crypto.random.int(u64)});
     defer allocator.free(name);
     const path = try std.fs.path.join(allocator, &.{ dir, name });
     errdefer allocator.free(path);
-    var base: std.fs.Dir = std.fs.openDirAbsolute(dir, .{}) catch blk: {
-        // Cache dir may not exist yet; create it like the docs cache does.
-        std.fs.makeDirAbsolute(dir) catch return error.NoCacheDir;
-        break :blk std.fs.openDirAbsolute(dir, .{}) catch return error.NoCacheDir;
-    };
+    // Creates every missing parent (a fresh HOME may lack .cache entirely).
+    std.fs.cwd().makePath(dir) catch return error.NoCacheDir;
+    var base = try std.fs.openDirAbsolute(dir, .{});
     defer base.close();
     // Unique name: create exclusively so concurrent zals instances never share.
     var file = try base.createFile(name, .{ .exclusive = true });
