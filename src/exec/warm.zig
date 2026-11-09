@@ -43,7 +43,10 @@ pub const default_tools = [_]ToolSpec{
 };
 
 const ready_timeout_ms: i32 = 30 * std.time.ms_per_s;
-const shutdown_timeout_ms: i64 = 2 * std.time.ms_per_s;
+/// Clean shutdown lets an idle daemon exit and run its atexit cleanups
+/// before this; a daemon that cannot exit in time is killed like a native
+/// tool would be.
+const shutdown_grace_ms: i64 = 250;
 const poll_interval_ms: i32 = 25;
 /// Same cap as the native runner; larger tool output falls back to native.
 const max_output_bytes = 16 * 1024 * 1024;
@@ -77,7 +80,7 @@ pub const Warm = struct {
     pub fn deinit(self: *Warm) void {
         var it = self.daemons.valueIterator();
         while (it.next()) |daemon| {
-            daemon.*.stop();
+            daemon.*.stop(shutdown_grace_ms);
             self.allocator.free(daemon.*.script);
             self.allocator.free(daemon.*.preload);
             if (daemon.*.interpreter) |i| self.allocator.free(i);
@@ -144,7 +147,9 @@ pub const Warm = struct {
         const daemon = try self.daemonFor(spec, script);
         // Any failure from here (start or request) stops the daemon so the
         // next call can start a fresh one instead of retrying a dead pipe.
-        errdefer daemon.stop();
+        // Cancellation kills immediately: a request whose tool hangs must
+        // not delay server shutdown past what a native spawn would.
+        errdefer daemon.stop(0);
         if (daemon.child == null) try self.startDaemon(daemon, options.cancel);
         return self.request(allocator, daemon, argv, options);
     }
@@ -201,7 +206,7 @@ pub const Warm = struct {
         child.stderr_behavior = .Inherit;
         try child.spawn();
         daemon.child = child;
-        errdefer daemon.stop();
+        errdefer daemon.stop(0);
 
         // Wait for the ready byte; preload and warmup happen before it.
         var ready: [1]u8 = undefined;
@@ -259,27 +264,31 @@ const Daemon = struct {
     interpreter: ?[]const u8 = null,
     child: ?std.process.Child = null,
 
-    /// Stop the daemon: close its stdin and let it exit (its atexit handlers
-    /// clean up what its warmup created), kill after a grace period.
-    fn stop(self: *Daemon) void {
+    /// Stop the daemon. With a grace period, an idle daemon exits on stdin
+    /// EOF and runs its atexit cleanups; when the grace expires, or when
+    /// `grace_ms` is zero (cancellation, failures), the process group is
+    /// killed outright, taking any in-flight tool child with it.
+    fn stop(self: *Daemon, grace_ms: i64) void {
         var child = self.child orelse return;
         self.child = null;
-        if (child.stdin) |stdin| {
-            stdin.close();
-            child.stdin = null;
-        }
-        const deadline = std.time.milliTimestamp() + shutdown_timeout_ms;
-        while (std.time.milliTimestamp() < deadline) {
-            const result = std.posix.waitpid(child.id, std.posix.W.NOHANG);
-            if (result.pid != 0) {
-                // waitpid reaped it; cache the status so Child.wait only
-                // performs its normal stream cleanup (same trick as the
-                // native runner's cancellation path).
-                child.term = termOf(result.status);
-                _ = child.wait() catch {};
-                return;
+        if (grace_ms > 0) {
+            if (child.stdin) |stdin| {
+                stdin.close();
+                child.stdin = null;
             }
-            std.Thread.sleep(@as(u64, @intCast(poll_interval_ms)) * std.time.ns_per_ms);
+            const deadline = std.time.milliTimestamp() + grace_ms;
+            while (std.time.milliTimestamp() < deadline) {
+                const result = std.posix.waitpid(child.id, std.posix.W.NOHANG);
+                if (result.pid != 0) {
+                    // waitpid reaped it; cache the status so Child.wait only
+                    // performs its normal stream cleanup (same trick as the
+                    // native runner's cancellation path).
+                    child.term = termOf(result.status);
+                    _ = child.wait() catch {};
+                    return;
+                }
+                std.Thread.sleep(@as(u64, @intCast(poll_interval_ms)) * std.time.ns_per_ms);
+            }
         }
         killGroup(&child);
         _ = child.wait() catch {};
@@ -368,13 +377,11 @@ fn writeRequest(stdin: std.fs.File, allocator: Allocator, argv: []const []const 
     };
 }
 
-/// Write the embedded daemon script to a unique file in the cache dir
-/// (created with parents), falling back to the temp dir.
+/// Write the embedded daemon script to a unique file under the temp dir.
+/// The file is transient (removed on deinit) and must outlive zals only for
+/// as long as the daemon runs, so the temp dir is the right home for it —
+/// unlike a cache dir, it is never swept underneath a running process.
 fn writeDaemonScript(allocator: Allocator) ![]u8 {
-    if (cacheDir(allocator)) |dir| {
-        defer allocator.free(dir);
-        if (writeUniqueScript(allocator, dir)) |path| return path else |_| {}
-    } else |_| {}
     var dir: []const u8 = "/tmp";
     var owned: ?[]const u8 = null;
     defer if (owned) |t| allocator.free(t);
@@ -387,16 +394,11 @@ fn writeDaemonScript(allocator: Allocator) ![]u8 {
         owned = try std.fs.cwd().realpathAlloc(allocator, dir);
         dir = owned.?;
     }
-    return writeUniqueScript(allocator, dir);
-}
-
-fn writeUniqueScript(allocator: Allocator, dir: []const u8) ![]u8 {
-    const name = try std.fmt.allocPrint(allocator, "warm-daemon-{d}.py", .{std.crypto.random.int(u64)});
+    const name = try std.fmt.allocPrint(allocator, "zals-warm-daemon-{d}.py", .{std.crypto.random.int(u64)});
     defer allocator.free(name);
     const path = try std.fs.path.join(allocator, &.{ dir, name });
     errdefer allocator.free(path);
-    // Creates every missing parent (a fresh HOME may lack .cache entirely).
-    std.fs.cwd().makePath(dir) catch return error.NoCacheDir;
+    std.fs.cwd().makePath(dir) catch return error.NoTempDir;
     var base = try std.fs.openDirAbsolute(dir, .{});
     defer base.close();
     // Unique name: create exclusively so concurrent zals instances never share.
@@ -404,18 +406,6 @@ fn writeUniqueScript(allocator: Allocator, dir: []const u8) ![]u8 {
     defer file.close();
     try file.writeAll(daemon_source);
     return path;
-}
-
-fn cacheDir(allocator: Allocator) ![]u8 {
-    if (std.process.getEnvVarOwned(allocator, "XDG_CACHE_HOME")) |x| {
-        defer allocator.free(x);
-        return std.fs.path.join(allocator, &.{ x, "zals" });
-    } else |_| {}
-    if (std.process.getEnvVarOwned(allocator, "HOME")) |h| {
-        defer allocator.free(h);
-        return std.fs.path.join(allocator, &.{ h, ".cache", "zals" });
-    } else |_| {}
-    return error.NoCacheDir;
 }
 
 /// Resolve `name` on PATH (or take it as a path when it contains a slash).
@@ -606,7 +596,7 @@ test "warm runner recovers to native after the daemon dies" {
         warm.mutex.lock();
         defer warm.mutex.unlock();
         var it = warm.daemons.valueIterator();
-        if (it.next()) |daemon| daemon.*.stop();
+        if (it.next()) |daemon| daemon.*.stop(shutdown_grace_ms);
     }
 
     // The next call must start a fresh daemon and serve warm again.
