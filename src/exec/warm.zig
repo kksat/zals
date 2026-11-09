@@ -556,7 +556,10 @@ test "warm runner recovers to native after the daemon dies" {
     var warm = Warm.init(allocator, &.{.{ .name = "zals-warm-test" }});
     defer warm.deinit();
 
-    const first = try warm.runner().run(allocator, &.{script_path});
+    const first = warm.serveWarm(allocator, &.{script_path}, .{}) catch |err| {
+        std.debug.print("warm: first call not served (error {s})\n", .{@errorName(err)});
+        return error.FirstCallNotWarm;
+    };
     defer first.deinit(allocator);
     try std.testing.expectEqualStrings("served\n", first.stdout);
 
@@ -590,7 +593,10 @@ test "warm runner recovers to native after the daemon dies" {
     }
 
     // The next call must start a fresh daemon and serve warm again.
-    const third = try warm.runner().run(allocator, &.{script_path});
+    const third = warm.serveWarm(allocator, &.{script_path}, .{}) catch |err| {
+        std.debug.print("warm: restart not served (error {s})\n", .{@errorName(err)});
+        return error.RestartNotWarm;
+    };
     defer third.deinit(allocator);
     try std.testing.expectEqualStrings("served\n", third.stdout);
     {
