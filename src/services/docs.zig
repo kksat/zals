@@ -133,6 +133,25 @@ pub const DocsLibrary = struct {
         }
     }
 
+    /// Load full docs for every installed module in one `ansible-doc
+    /// --metadata-dump` call (the same shape `fetchMany` ingests, for all
+    /// collections at once). Returns false when the command or its output is
+    /// unusable — for example an ansible-core without `--metadata-dump` —
+    /// so the caller can fall back to batched `fetchMany` calls.
+    pub fn loadMetadataDump(self: *DocsLibrary) bool {
+        const argv = [_][]const u8{ self.ansible_doc, "--metadata-dump" };
+        const result = self.runner.runWithOptions(self.allocator, &argv, self.execution) catch return false;
+        defer result.deinit(self.allocator);
+        if (!result.success() or result.stdout.len == 0) return false;
+
+        const parsed = std.json.parseFromSlice(Value, self.allocator, result.stdout, .{}) catch return false;
+        defer parsed.deinit();
+        const all = json_util.field(parsed.value, "all") orelse return false;
+        const modules = json_util.object(all, "module") orelse return false;
+        self.ingestDocs(.{ .object = modules }) catch return false;
+        return true;
+    }
+
     pub fn loadCatalog(self: *DocsLibrary) !void {
         const argv = [_][]const u8{ self.ansible_doc, "-l", "--json", "-t", "module" };
         const result = self.runner.runWithOptions(self.allocator, &argv, self.execution) catch return;
@@ -633,4 +652,55 @@ fn descriptionOf(v: Value) ?[]const u8 {
     }
     if (json_util.string(v, "short_description")) |s| return s;
     return null;
+}
+
+test "loadMetadataDump ingests every module from one call" {
+    const Fake = struct {
+        argv0: []const u8 = "ansible-doc",
+        stdout: []const u8,
+        exit: u8 = 0,
+
+        fn run(ptr: *anyopaque, a: Allocator, argv: []const []const u8) anyerror!exec.Result {
+            return runWithOptions(ptr, a, argv, .{});
+        }
+        fn runWithOptions(ptr: *anyopaque, a: Allocator, _: []const []const u8, _: exec.Options) anyerror!exec.Result {
+            const self: *@This() = @ptrCast(@alignCast(ptr));
+            return .{
+                .stdout = try a.dupe(u8, self.stdout),
+                .stderr = try a.dupe(u8, ""),
+                .term = .{ .Exited = self.exit },
+            };
+        }
+        const vtable = exec.Runner.VTable{ .run = run, .run_with_options = runWithOptions };
+    };
+    const dump =
+        \\{"all": {"module": {
+        \\  "ns.one": {"doc": {"short_description": "First", "filename": "/x/one.py",
+        \\      "options": {"path": {"description": "A path", "type": "str", "required": true}}}},
+        \\  "ns.two": {"doc": {"short_description": "Second", "filename": "/x/two.py"}}
+        \\}}}
+    ;
+    var fake = Fake{ .stdout = dump };
+    var lib = DocsLibrary.init(std.testing.allocator, .{ .ptr = &fake, .vtable = &Fake.vtable }, "ansible-doc");
+    defer lib.deinit();
+    try std.testing.expect(lib.loadMetadataDump());
+
+    const one = lib.modules.get("ns.one").?;
+    try std.testing.expectEqualStrings("First", one.description);
+    try std.testing.expectEqualStrings("/x/one.py", one.filename);
+    const opt = one.getOption("path") orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqualStrings("A path", opt.description);
+    try std.testing.expect(opt.required);
+    try std.testing.expect(lib.modules.get("ns.two") != null);
+
+    // Failed commands and unusable output report false so the caller can
+    // fall back to batched fetching.
+    var failed = Fake{ .stdout = "boom", .exit = 2 };
+    var lib2 = DocsLibrary.init(std.testing.allocator, .{ .ptr = &failed, .vtable = &Fake.vtable }, "ansible-doc");
+    defer lib2.deinit();
+    try std.testing.expect(!lib2.loadMetadataDump());
+    var no_modules = Fake{ .stdout = "{\"all\": {}}" };
+    var lib3 = DocsLibrary.init(std.testing.allocator, .{ .ptr = &no_modules, .vtable = &Fake.vtable }, "ansible-doc");
+    defer lib3.deinit();
+    try std.testing.expect(!lib3.loadMetadataDump());
 }
