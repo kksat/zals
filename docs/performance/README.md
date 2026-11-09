@@ -1,5 +1,15 @@
 # Editor operation benchmarks
 
+This directory holds the LSP operations gate and its config; see
+[`ci-gate.md`](ci-gate.md). The warm fork-server benchmark
+(`warm_bench.py`) lives alongside it and measures native spawns against the
+warm daemons for the exact `ansible-doc`/`ansible-lint` command shapes zals
+issues ([ADR-0048](../adr/0048-warm-fork-server.md)):
+
+```sh
+python3 tools/performance/warm_bench.py [--iterations N] [--json]
+```
+
 `test/benchmark_operations.py` measures real LSP requests over stdio, checks
 responses, and generates a Markdown table plus optional JSON with every timing
 sample. It uses an isolated, generated Ansible Workspace, not the user's source

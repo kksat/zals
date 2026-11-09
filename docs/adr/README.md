@@ -51,6 +51,7 @@ Each ADR captures one decision, its context, and its consequences. Statuses are
 | [0044](0044-user-facing-release-notes.md) | User-facing release notes | Accepted |
 | [0045](0045-variable-files.md) | Variable files | Accepted |
 | [0047](0047-personal-owner-release-approval.md) | Personal-owner release-note approval | Accepted |
+| [0048](0048-warm-fork-server.md) | Warm fork-server for ansible-doc and ansible-lint | Accepted |
 
 ## Template
 

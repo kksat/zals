@@ -81,7 +81,7 @@ it in this list.
 | `src/roles/` | Role reference detection, name-to-directory resolution, navigation targets |
 | `src/services/` | Docs library, schema cache/service/validator, validation manager, config |
 | `src/yaml/` | YAML parser interface, tree-sitter backend, semantic DOM, path utilities |
-| `src/exec/` | Command-runner interface and POSIX backend |
+| `src/exec/` | Command-runner interface, POSIX backend, and the warm fork-server for `ansible-doc`/`ansible-lint` ([ADR-0048](adr/0048-warm-fork-server.md)) |
 | `src/workspace/` | Document store, git Workspaces, settings |
 | `vendor/` | Vendored C (tree-sitter) and the schema snapshot |
 | `test/` | Ported upstream fixtures and unit tests |
