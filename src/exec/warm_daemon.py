@@ -64,6 +64,17 @@ def write_all(fd, data):
         data = data[os.write(fd, data):]
 
 
+def write_reply(fd, data):
+    """Write a protocol message; False when the client is gone (zals died
+    mid-start or mid-request). An orphaned daemon exits quietly instead of
+    spraying BrokenPipe tracebacks into the log its client inherited."""
+    try:
+        write_all(fd, data)
+    except OSError:
+        return False
+    return True
+
+
 def read_request_line(fd):
     """Read one newline-terminated request; None on EOF. Caps total size."""
     buf = b""
@@ -226,7 +237,8 @@ def serve(script, warmup):
             os.close(saved_out)
             os.close(saved_err)
             sys.argv = [tool]
-    write_all(1, READY)
+    if not write_reply(1, READY):
+        return
 
     while True:
         try:
@@ -244,7 +256,8 @@ def serve(script, warmup):
                 env = {str(k): str(v) for k, v in env.items()}
             cwd = request.get("cwd")
         except (ValueError, KeyError, TypeError) as exc:
-            write_all(1, REPLY_ERROR + struct.pack("<I", len(repr(exc))) + repr(exc).encode())
+            if not write_reply(1, REPLY_ERROR + struct.pack("<I", len(repr(exc))) + repr(exc).encode()):
+                return
             continue
 
         out_r, out_w = os.pipe()
@@ -257,7 +270,8 @@ def serve(script, warmup):
             os.close(err_r)
             os.close(err_w)
             msg = ("fork: %s" % exc).encode()
-            write_all(1, REPLY_ERROR + struct.pack("<I", len(msg)) + msg)
+            if not write_reply(1, REPLY_ERROR + struct.pack("<I", len(msg)) + msg):
+                return
             continue
         if pid == 0:
             os.close(out_r)
@@ -282,10 +296,11 @@ def serve(script, warmup):
             code = -127
         stdout = bytes(chunks[out_r])
         stderr = bytes(chunks[err_r])
-        write_all(
+        if not write_reply(
             1,
             REPLY_RESULT + struct.pack("<iQQ", code, len(stdout), len(stderr)) + stdout + stderr,
-        )
+        ):
+            return
 
 
 def main():
