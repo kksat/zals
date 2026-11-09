@@ -70,7 +70,8 @@ byte-identical output verified per case):
 | `ansible-doc -l --json -t module` (catalog) | 324 ms | 107 ms | x3.0 |
 | `ansible-doc --json -t module` (batch of 27) | 379 ms | 187 ms | x2.0 |
 | `ansible-lint --offline -f codeclimate` (save) | 1548 ms | 1325 ms | x1.2 |
-| Cold-cache docs bootstrap, end to end | 2587 ms | 1446 ms | x1.8 |
+| Cold-cache docs bootstrap, first cache write | 2420 ms | 1408 ms | x1.7 |
+| Cold-cache docs bootstrap, all 861 module docs cached | 14.0 s | 6.2 s | x2.3 |
 
 `ansible-lint` gains least: about 1 s of its runtime is itself spent spawning
 `ansible-config`, `ansible`, `ansible-playbook --syntax-check`, and
