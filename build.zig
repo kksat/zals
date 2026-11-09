@@ -130,6 +130,13 @@ pub fn build(b: *std.Build) void {
             .needs_ansible = true,
         },
         .{
+            .name = "module-docs-e2e",
+            .source = "test/module_docs_e2e.zig",
+            .description = "Run real ansible-doc builtin module documentation, completion, and docs cache tests",
+            .inputs = &.{},
+            .needs_ansible = true,
+        },
+        .{
             .name = "collection-symbols-e2e",
             .source = "test/collection_symbols_e2e.zig",
             .description = "Run Workspace collection layout and member symbol tests",
