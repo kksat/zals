@@ -109,7 +109,10 @@ def reset_ansible_state():
     """
     try:
         from ansible import constants as C
-    except ImportError:
+    except Exception:
+        # Not importable in this child, or its import itself fails (ansible
+        # resolves config paths at import): leave everything as the daemon
+        # loaded it. The reset must never fail a call.
         return
     try:
         for setting in C.config.get_configuration_definitions():
