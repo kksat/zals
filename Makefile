@@ -67,6 +67,7 @@ zig:
 # Optional editor integration test; requires Neovim 0.11+.
 neovim-test: build
 	nvim --headless -u NONE -l test/neovim_attachment.lua
+	nvim --headless -u NONE -l test/neovim_lsp.lua
 
 # Compare zals against the upstream Ansible Language Server. Requires the
 # upstream package (see test/parity/compare.py) and a built zals binary.
