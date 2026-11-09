@@ -3,3 +3,4 @@ pub const Runner = runner.Runner;
 pub const Posix = runner.Posix;
 pub const Result = runner.Result;
 pub const Options = runner.Options;
+pub const warm = @import("warm.zig");

@@ -31,6 +31,8 @@ pub const Server = struct {
     documents: DocumentStore,
     settings: Settings,
     runner: exec.Runner,
+    /// Owner of the warm fork-server daemons behind `runner`.
+    warm: *exec.warm.Warm,
     docs: DocsLibrary,
     schemas: SchemaCatalog,
     ansible_config: AnsibleConfig,
@@ -54,7 +56,13 @@ pub const Server = struct {
     watching_files: bool = false,
 
     pub fn init(allocator: Allocator, transport: Transport, venv_override: ?[]const u8) !Server {
-        const runner = exec.Posix.posixRunner();
+        // Warm fork-servers for ansible-doc/ansible-lint (speedrunner idea):
+        // one preloaded daemon per tool, forked per call, native fallback.
+        // Heap-allocated: every Runner copy shares this stable address.
+        const warm = try allocator.create(exec.warm.Warm);
+        errdefer allocator.destroy(warm);
+        warm.* = exec.warm.Warm.init(allocator, &exec.warm.default_tools);
+        errdefer warm.deinit();
         // Leave room for file parsing alongside blocking docs bootstrap, but
         // bound the pool on both large and single-core machines.
         const workers = @min(4, @max(2, std.Thread.getCpuCount() catch 2));
@@ -71,14 +79,15 @@ pub const Server = struct {
             .writer = writer,
             .documents = DocumentStore.init(allocator, .utf16),
             .settings = Settings.init(allocator),
-            .runner = runner,
-            .docs = DocsLibrary.init(allocator, runner, "ansible-doc"),
+            .runner = warm.runner(),
+            .warm = warm,
+            .docs = DocsLibrary.init(allocator, warm.runner(), "ansible-doc"),
             .schemas = SchemaCatalog.init(allocator),
-            .ansible_config = AnsibleConfig.init(allocator, runner),
+            .ansible_config = AnsibleConfig.init(allocator, warm.runner()),
             .pool = pool,
             .docs_service = DocsService.init(allocator),
             .validation = validation_provider.Queue.init(allocator),
-            .contextual_docs = docs_service.ContextLibraries.init(allocator, runner),
+            .contextual_docs = docs_service.ContextLibraries.init(allocator, warm.runner()),
             .session = try workspace_session.Session.init(allocator, venv_override),
             .index = index,
         };
@@ -91,6 +100,10 @@ pub const Server = struct {
         self.index.shutdown.store(true, .release);
         self.validation.shutdown.store(true, .release);
         self.pool.deinit();
+        // Workers are joined: no runner call can be in flight. Stop the warm
+        // daemons gracefully so their atexit cleanups run.
+        self.warm.deinit();
+        self.allocator.destroy(self.warm);
         self.validation.deinit();
         self.index.destroy();
         self.documents.deinit();
