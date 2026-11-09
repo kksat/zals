@@ -560,9 +560,9 @@ test "warm runner recovers to native after the daemon dies" {
     defer first.deinit(allocator);
     try std.testing.expectEqualStrings("served\n", first.stdout);
 
-    // Kill the daemon behind the runner's back; the next call must still be
-    // served (natively) rather than fail, and the one after that must have a
-    // fresh daemon serving warm again.
+    // Kill the daemon behind the runner's back. Depending on scheduling, the
+    // next call may hit the dead pipe (native fallback) or race the kill and
+    // be served warm; both must return the right output.
     var killed_pid: std.process.Child.Id = 0;
     {
         warm.mutex.lock();
@@ -580,7 +580,16 @@ test "warm runner recovers to native after the daemon dies" {
     defer second.deinit(allocator);
     try std.testing.expectEqualStrings("served\n", second.stdout);
 
-    // The failed call stopped the dead daemon; this one starts a fresh one.
+    // Force whatever remains of the daemon to a stopped state (reaped or
+    // gently exited), so the restart assertion below cannot race the kill.
+    {
+        warm.mutex.lock();
+        defer warm.mutex.unlock();
+        var it = warm.daemons.valueIterator();
+        if (it.next()) |daemon| daemon.*.stop();
+    }
+
+    // The next call must start a fresh daemon and serve warm again.
     const third = try warm.runner().run(allocator, &.{script_path});
     defer third.deinit(allocator);
     try std.testing.expectEqualStrings("served\n", third.stdout);
