@@ -103,7 +103,11 @@ pub const DocsService = struct {
         defer config.deinit();
         self.lib.scanModuleIndex(&config);
         self.ready.store(true, .release);
-        self.prefetch();
+        // One `--metadata-dump` call carries every installed module's full
+        // docs, replacing the batched prefetch entirely; when it is not
+        // usable (older ansible-core), prefetch in batches as before.
+        if (!self.lib.loadMetadataDump()) self.prefetch();
+        self.scheduleCacheWrite();
     }
 
     fn prefetch(self: *DocsService) void {
