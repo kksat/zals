@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.0](https://github.com/kksat/zals/compare/v0.3.1...v0.4.0) (2026-11-10)
+
+
+### Features
+
+* **docs:** bootstrap all module docs from one ansible-doc --metadata-dump ([6d8e9a4](https://github.com/kksat/zals/commit/6d8e9a48aea62caf882d1c2075742c66dcd94e97))
+
+
+### Bug Fixes
+
+* **fs:** preserve per-call-site read size caps in paths.readFile ([95a1cf3](https://github.com/kksat/zals/commit/95a1cf3992ac6343baaeb1bca23f416de96ca853))
+* **release:** publish PyPI and Homebrew automatically ([908706e](https://github.com/kksat/zals/commit/908706e3b4f9d5e0106aefb49eab5b9924378d7f))
+
 ## [0.3.1](https://github.com/kksat/zals/compare/v0.3.0...v0.3.1) (2026-11-05)
 
 
