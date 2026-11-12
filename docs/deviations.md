@@ -9,7 +9,7 @@ what differs, why, and whether it is expected to be permanent.
 | # | Deviation | Rationale | Permanent? |
 | --- | --- | --- | --- |
 | 1 | Speaks LSP over **stdio**, not Node IPC. | `zals` is a standalone binary; Node IPC is unavailable. See [ADR-0001](adr/0001-standalone-stdio-lsp-server.md). | Yes |
-| 2 | No VS Code extension integration. | Out of scope for v1. See [ADR-0002](adr/0002-tier-1-feature-scope.md). | Until Tier 2 |
+| 2 | Ships a **thin stdio VS Code client** (`editors/vscode/`), not upstream's full extension surface. | Bundles the native `zals` binary and forwards `ansible.*` settings without Tier 2 views, Lightspeed, or execution-environment integration. See [ADR-0002](adr/0002-tier-1-feature-scope.md). | Until Tier 2 |
 | 3 | `--generate-docs` is not implemented. | Tier 2. See [ADR-0018](adr/0018-cli-and-logging.md). | Until Tier 2 |
 
 ## Features
@@ -24,7 +24,7 @@ what differs, why, and whether it is expected to be permanent.
 
 | # | Deviation | Rationale | Permanent? |
 | --- | --- | --- | --- |
-| 6 | Validation reconciles cached diagnostics with a **sorted array**, not an interval tree. | Simpler; sufficient for the document sizes involved. See [ADR-0015](adr/0015-validation-behavior.md). | Maybe |
+| 6 | Validation runs asynchronously on **open and save** (coalescing queued jobs per URI), without on-change line reconciliation, multi-file diagnostic refcounting, `autoFixOnSave`, or `$/progress`. | Keeps subprocess execution off edit hot paths while covering schema, `ansible-lint`, and `--syntax-check` diagnostics. See [ADR-0015](adr/0015-validation-behavior.md). | Maybe |
 | 7 | Schemas are a **pinned build-time snapshot**, not a 24-hour remote cache. | Reproducibility and offline use. See [ADR-0006](adr/0006-bundle-schema-snapshot.md). | Yes |
 | 8 | JSON-schema validation supports a **draft-07 subset**. | The bundled schemas use a bounded keyword set. See [ADR-0005](adr/0005-json-schema-validation-in-zig.md). | Maybe |
 | 9 | Schema diagnostics always use the **document root range**. | Matches upstream's observable behavior; avoids mapping schema paths to YAML ranges. See [ADR-0005](adr/0005-json-schema-validation-in-zig.md). | Yes |
@@ -32,7 +32,7 @@ what differs, why, and whether it is expected to be permanent.
 | 12 | Schema snapshot is **committed** under `vendor/schemas/`, not fetched at build. | Offline clones; pin is ansible-lint v25.8.2. See [ADR-0006](adr/0006-bundle-schema-snapshot.md). | Maybe |
 | 13 | JSON Schema `pattern` uses a **built-in ECMA-262 subset regex engine**, not a full regex library. | Covers the patterns in the bundled schemas; unsupported constructs are treated as non-matching. See [ADR-0005](adr/0005-json-schema-validation-in-zig.md). | Maybe |
 | 14 | Request-time YAML parsing runs on the **main thread**; the worker pool is used for Workspace indexing, document validation (`ansible-lint`, `ansible-playbook --syntax-check`, and schema validation), docs prefetch, and cache writes. | Keeps request dispatch deterministic while offloading subprocess and index work. See [ADR-0011](adr/0011-threading-topology.md). | Maybe |
-| 15 | Docs catalog is loaded on `initialized` (from an on-disk cache when warm); full docs are prefetched in the background and cached. | Implements the hybrid strategy. See [ADR-0008](adr/0008-hybrid-docs-loading.md). | No |
+| 15 | Docs catalog is loaded on `initialized` (from an on-disk cache when warm); full docs load in the background via one `ansible-doc --metadata-dump` call (falling back to batched `ansible-doc --json` prefetch on older `ansible-core`) and are cached on disk. | Implements the hybrid strategy with minimal subprocess overhead. See [ADR-0008](adr/0008-hybrid-docs-loading.md). | No |
 
 ## Extensions beyond upstream
 
