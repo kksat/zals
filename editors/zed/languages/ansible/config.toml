@@ -1,0 +1,23 @@
+name = "Ansible"
+grammar = "yaml"
+path_suffixes = [
+  "ansible.yml",
+  "ansible.yaml",
+  "playbook.yml",
+  "playbook.yaml",
+  "site.yml",
+  "site.yaml",
+]
+line_comments = ["# "]
+tab_size = 2
+hard_tabs = false
+
+[brackets]
+"{" = "}"
+"[" = "]"
+"(" = ")"
+"\"" = "\""
+"'" = "'"
+
+[autoclose_before]
+characters = ";:.,=}])> \n\t"

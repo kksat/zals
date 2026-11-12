@@ -187,6 +187,11 @@ relative filesystem targets
 For Neovim, see the [filetype and LSP setup](docs/neovim.md), including
 `requirements.yml`, collection metadata, and Jinja templates.
 
+### Editor Integrations
+
+* **Zed**: See [`docs/editors/zed.md`](docs/editors/zed.md) or [`editors/zed`](editors/zed/) for the Zed extension.
+
+
 ## Releasing
 
 Releases are driven by [release-please](https://github.com/googleapis/release-please)
