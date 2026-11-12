@@ -187,6 +187,11 @@ relative filesystem targets
 For Neovim, see the [filetype and LSP setup](docs/neovim.md), including
 `requirements.yml`, collection metadata, and Jinja templates.
 
+### Editor Integrations
+
+* **Sublime Text**: See [`docs/editors/sublime.md`](docs/editors/sublime.md) or [`editors/sublime`](editors/sublime/) for the `LSP-zals` package.
+
+
 ## Releasing
 
 Releases are driven by [release-please](https://github.com/googleapis/release-please)
