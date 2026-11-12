@@ -187,6 +187,11 @@ relative filesystem targets
 For Neovim, see the [filetype and LSP setup](docs/neovim.md), including
 `requirements.yml`, collection metadata, and Jinja templates.
 
+### Editor Integrations
+
+* **PyCharm & IntelliJ IDEA**: See [`docs/editors/pycharm.md`](docs/editors/pycharm.md) or [`editors/pycharm`](editors/pycharm/) for the JetBrains plugin.
+
+
 ## Releasing
 
 Releases are driven by [release-please](https://github.com/googleapis/release-please)
