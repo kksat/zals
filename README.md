@@ -4,16 +4,21 @@ A reimplementation of the [Ansible Language Server](https://github.com/ansible/v
 (`packages/ansible-language-server`) in [Zig](https://ziglang.org/).
 
 The goal is feature parity with the upstream language server for its core LSP
-surface, with a codebase that is easier to embed, faster to start, and free of
-the Node.js runtime. New features will be considered after parity is reached.
+surface—and Ansible-aware semantic navigation beyond it—with a codebase that is
+easier to embed, faster to start, and free of the Node.js runtime.
 
 ## Status
 
-M1–M8 skeleton is in place: stdio LSP, YAML subset parser, providers (semantic
-tokens, hover, completion, definition, validation), `ansible-doc` catalog, and
-bundled JSON-schema snapshots. See [`docs/deviations.md`](docs/deviations.md)
-for intentional gaps versus upstream. Design lives in [`docs/DESIGN.md`](docs/DESIGN.md)
-and the decision records under [`docs/adr/`](docs/adr/).
+Tier 1 LSP parity and Workspace-wide semantic extensions ship for Linux, macOS,
+and Windows: stdio LSP, `tree-sitter-yaml` parser with semantic DOM, module
+documentation via `ansible-doc` (`--metadata-dump` and batched JSON with on-disk
+caching), bundled JSON-schema validation, `ansible-lint` / syntax-check
+diagnostics, Workspace-wide navigation and root variable rename, document and
+Workspace symbols, debug and extract-tasks code actions, and a bundled-binary
+VS Code extension. See [`docs/deviations.md`](docs/deviations.md) for
+intentional differences versus upstream. Design lives in
+[`docs/DESIGN.md`](docs/DESIGN.md) and the decision records under
+[`docs/adr/`](docs/adr/).
 
 ## Scope (v1)
 
@@ -73,8 +78,8 @@ under the cursor or selection into a new sibling `taskN.yml` and replace them
 with `include_tasks` or `import_tasks`. See
 [ADR-0030](docs/adr/0030-extract-tasks-code-actions.md).
 
-Out of scope for v1: the VS Code extension, inventory/metadata notifications,
-and execution environments.
+Out of scope: inventory/metadata notifications, execution environments, and
+`--generate-docs`.
 
 ## Requirements
 
@@ -114,11 +119,20 @@ release page and put `zals` on your `PATH`.
 
 ### VS Code
 
-Download the `.vsix` matching your VS Code host platform from the release page,
-then use **Extensions: Install from VSIX...** or:
+Install **Ansible Language Server (zals)** from the
+[Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=kksat.zals),
+[Open VSX](https://open-vsx.org/extension/kksat/zals), or with:
 
 ```sh
-code --install-extension ./zals-0.1.0-<platform>.vsix
+code --install-extension kksat.zals
+```
+
+For offline or manual installation, download the `.vsix` matching your VS Code
+host platform from the release page, then use **Extensions: Install from VSIX...**
+or:
+
+```sh
+code --install-extension ./zals-<version>-<platform>.vsix
 ```
 
 Each VSIX bundles the matching native binary; no separate server install is
