@@ -325,3 +325,62 @@ test "context.only refactor.rewrite excludes extract" {
     });
     try testing.expectEqual(@as(usize, 0), acts.len);
 }
+
+test "codeActions encodes WorkspaceEdit documentChanges for debug and extract" {
+    const Transport = @import("../../lsp/transport.zig").Transport;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.makePath("tasks");
+    const out_file = try tmp.dir.createFile("messages", .{ .read = true });
+    defer out_file.close();
+
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const dir = try tmp.dir.realpathAlloc(a, "tasks");
+    const main_path = try std.fs.path.join(a, &.{ dir, "main.yml" });
+    const uri = try paths.pathToUri(a, main_path);
+    const task1_uri = try paths.pathToUri(a, try std.fs.path.join(a, &.{ dir, "task1.yml" }));
+
+    var server = try Server.init(testing.allocator, Transport.init(out_file, out_file), null);
+    defer server.deinit();
+
+    const src =
+        \\- name: A
+        \\  ansible.builtin.package:
+        \\    name: "{{ foo }}"
+        \\
+    ;
+    _ = try server.documents.open(uri, "ansible", 7, src);
+
+    var td = json_util.obj(a);
+    try td.put("uri", json_util.str(uri));
+    const range = try rangeValue(a, .{
+        .start = .{ .line = 2, .character = 14 },
+        .end = .{ .line = 2, .character = 14 },
+    });
+    var params = json_util.obj(a);
+    try params.put("textDocument", .{ .object = td });
+    try params.put("range", range);
+
+    // Without create-file support, only the versioned in-place debug edit is returned.
+    const debug_only = (try codeActions(&server, a, .{ .object = params })).array.items;
+    try testing.expectEqual(@as(usize, 1), debug_only.len);
+    const debug_changes = json_util.array(json_util.field(debug_only[0], "edit").?, "documentChanges").?.items;
+    try testing.expectEqual(@as(usize, 1), debug_changes.len);
+    try testing.expectEqual(@as(i64, 7), json_util.integer(json_util.field(debug_changes[0], "textDocument").?, "version").?);
+
+    // With create-file support, extract actions emit create -> unversioned fill -> versioned replace.
+    server.supports_create_file = true;
+    const all = (try codeActions(&server, a, .{ .object = params })).array.items;
+    try testing.expectEqual(@as(usize, 3), all.len);
+    const extract_changes = json_util.array(json_util.field(all[1], "edit").?, "documentChanges").?.items;
+    try testing.expectEqual(@as(usize, 3), extract_changes.len);
+    try testing.expectEqualStrings("create", json_util.string(extract_changes[0], "kind").?);
+    try testing.expectEqualStrings(task1_uri, json_util.string(extract_changes[0], "uri").?);
+    try testing.expect(json_util.field(json_util.field(extract_changes[1], "textDocument").?, "version").? == .null);
+    try testing.expectEqualStrings(task1_uri, json_util.string(json_util.field(extract_changes[1], "textDocument").?, "uri").?);
+    try testing.expectEqual(@as(i64, 7), json_util.integer(json_util.field(extract_changes[2], "textDocument").?, "version").?);
+    try testing.expectEqualStrings(uri, json_util.string(json_util.field(extract_changes[2], "textDocument").?, "uri").?);
+}
