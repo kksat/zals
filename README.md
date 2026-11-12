@@ -187,6 +187,11 @@ relative filesystem targets
 For Neovim, see the [filetype and LSP setup](docs/neovim.md), including
 `requirements.yml`, collection metadata, and Jinja templates.
 
+### Editor Integrations
+
+* **Neovim**: See [`docs/editors/neovim.md`](docs/editors/neovim.md) or [`editors/nvim`](editors/nvim/) for Neovim configuration and runtime plugin.
+
+
 ## Releasing
 
 Releases are driven by [release-please](https://github.com/googleapis/release-please)
