@@ -25,8 +25,9 @@ The v1 target is **feature parity with upstream's Tier 1 surface**:
 | Workspace symbols | collections, roles, playbooks, task files, plays, tasks, handlers |
 | Validation | `ansible-lint`, `ansible-playbook --syntax-check` fallback, JSON-schema validation |
 
-Out of scope for v1 (Tier 2/3): the VS Code extension, inventory and metadata
-notifications, execution environments, and `--generate-docs`.
+Out of scope (Tier 2/3): inventory and metadata notifications, execution
+environments, and `--generate-docs`. A standalone VS Code client bundling the
+native stdio binary lives under `editors/vscode/`.
 
 Post-parity extensions: variable navigation (find-references and variable
 go-to-definition, §5), document symbols ([ADR-0027](adr/0027-document-symbols.md)),
@@ -49,23 +50,25 @@ Parity is behavioral, not byte-for-byte. Intentional differences are tracked in
                  │  (framing out)        • owns all state      │
                  │                       • reads/parses input  │
                  │                       • dispatches requests │
-                 │                       • poll() loop         │
-                 └───────┬───────────────────────┬─────────────┘
-                         │ immutable snapshots   │ jobs
-                 ┌───────▼───────┐       ┌───────▼─────────────┐
-                 │ worker pool   │       │ docs thread         │
-                 │ (parse, lint, │       │ (ansible-doc batch) │
-                 │  schema)      │       └───────┬─────────────┘
-                 └───────────────┘               │
-                                         ┌───────▼─────────────┐
-                                         │ cache-writer thread │
-                                         │ (docs/schema cache) │
-                                         └─────────────────────┘
+                 │                       • drains worker pool  │
+                 └──────────────────────────┬──────────────────┘
+                                            │ immutable snapshots / tasks
+                                    ┌───────▼──────────────────┐
+                                    │ bounded worker pool      │
+                                    │  • Workspace discovery   │
+                                    │    & parallel YAML parse │
+                                    │  • validation (lint,     │
+                                    │    syntax, schema)       │
+                                    │  • docs bootstrap,       │
+                                    │    metadata-dump & cache │
+                                    └──────────────────────────┘
 ```
 
 The **main thread is the sole writer** of shared state. Workers receive
-immutable snapshots and return results over channels; the main thread applies
-them. A self-pipe wakes the `poll()` loop when a worker finishes.
+immutable inputs and publish results back to synchronized queues; while
+background bootstrap, indexing, or validation is pending, the main thread waits
+for input in bounded 25 ms intervals to drain completed work and emit readiness
+notifications, returning to blocking reads once idle.
 
 ## 3. Layers
 
@@ -81,11 +84,14 @@ it in this list.
 | `src/roles/` | Role reference detection, name-to-directory resolution, navigation targets |
 | `src/services/` | Docs library, schema cache/service/validator, validation manager, config |
 | `src/yaml/` | YAML parser interface, tree-sitter backend, semantic DOM, path utilities |
+| `src/concurrency/` | Bounded worker thread pool |
 | `src/exec/` | Command-runner interface and POSIX backend |
-| `src/workspace/` | Document store, git Workspaces, settings |
-| `vendor/` | Vendored C (tree-sitter) and the schema snapshot |
-| `test/` | Ported upstream fixtures and unit tests |
-| `tools/differential/` | Dev-only parity harness against upstream |
+| `src/workspace/` | Document store, Workspace index, git Workspaces, settings |
+| `vendor/` | Vendored C (`tree-sitter`, `tree-sitter-yaml`) and committed schema snapshots |
+| `editors/vscode/` | VS Code extension client bundling the native `zals` binary |
+| `python/` | PyPI wrapper package bundling the native `zals` binary |
+| `test/` | Unit fixtures, real-stdio E2E suites, headless Neovim tests, smoke tests, and the upstream parity harness (`test/parity/compare.py`) |
+| `tools/` | Release automation (`tools/release/`) and CI performance regression gate (`tools/performance/`) |
 
 ### Pluggable seams
 
@@ -143,38 +149,47 @@ collections ([ADR-0032](adr/0032-workspace-wide-navigation.md)).
 
 ## 6. Documentation data
 
-Module documentation comes from `ansible-doc --json`, behind `DocsSource`.
+Module documentation comes from `ansible-doc`, behind `DocsLibrary` and
+`DocsService` (`src/services/docs.zig`, `src/services/docs_service.zig`).
 
-- **Catalog:** `ansible-doc -l --json` on startup (~0.6 s for ~860 modules).
-- **Lazy:** `ansible-doc --json <names>` in batches on demand.
-- **Prefetch:** a background pass loads all modules (~6 s, ~8 MB) and persists
-  them through the cache-writer thread.
+- **Catalog:** `ansible-doc -l --json -t module` on startup (skipped when a warm
+  on-disk cache matches the `ansible-doc --version` fingerprint), plus on-disk
+  module FQCN scanning for completion.
+- **Full-docs bootstrap:** one `ansible-doc --metadata-dump` call ingests every
+  installed module's documentation at once; when `--metadata-dump` is
+  unavailable (older `ansible-core`), `DocsService` falls back to batched
+  `ansible-doc --json <names>` prefetch.
+- **Lazy & contextual:** `ansible-doc --json <names>` serves uncached modules on
+  demand, and isolated `ContextLibraries` (keyed by effective ordered
+  `collections_paths`, [ADR-0037](adr/0037-selected-venv-collections.md)) handle
+  per-file collection search paths.
 
-The cache is keyed by `ansible_version + config_fingerprint` and shared across
-Workspaces.
+The global disk cache is keyed by the `ansible-doc --version` fingerprint and
+persisted asynchronously through coalesced worker-pool writes.
 
 ## 7. Validation
 
-Validation has three sources, merged into one diagnostic set per document:
+Validation runs asynchronously on the worker pool on `didOpen` and `didSave`
+(dropping superseded queued jobs for the same URI) and merges three sources into
+one diagnostic set per document:
 
-1. **`ansible-lint`** — `--offline --nocolor -f codeclimate`, run on open and
-   save. Parsed into LSP diagnostics.
-2. **Syntax check** — `ansible-playbook --syntax-check` when lint is unavailable.
-3. **JSON schema** — a Zig-native draft-07 subset validator over the bundled
-   schema snapshot, for Ansible metadata files.
-
-On change, a quick validation runs and cached diagnostics are reconciled against
-the edited lines using a **sorted array** (upstream uses an interval tree).
-Multi-file diagnostics are ref-counted. `autoFixOnSave` is supported. Progress
-is reported best-effort via `$/progress`.
+1. **JSON schema** — a Zig-native draft-07 subset validator over the committed
+   schema snapshot (`vendor/schemas/`), for Ansible metadata files.
+2. **`ansible-lint`** — `--offline --nocolor -f codeclimate`, parsed into LSP
+   diagnostics.
+3. **Syntax check** — `ansible-playbook --syntax-check` fallback when lint is
+   disabled (and schema diagnostics are empty) or when the `ansible-lint`
+   executable is unavailable.
 
 ## 8. Protocol and runtime
 
 - **Transport:** hand-rolled JSON-RPC over stdio using `std.json`.
 - **Sync:** incremental (`TextDocumentSyncKind.Incremental`); position encoding
   negotiated as `utf-8` when the client supports it, else `utf-16`.
-- **Concurrency:** main thread owns state; worker pool + docs thread +
-  cache-writer thread + writer thread; self-pipe wakeup.
+- **Concurrency:** main thread owns state (with request-scoped `WorkspaceIndex`
+  query leases); dedicated stdout `Writer` thread + bounded `ThreadPool` (2–4
+  workers) for indexing, validation, docs bootstrap, and cache writes; 25 ms
+  bounded input wait while background tasks are pending.
 - **Memory:** arenas for request-scoped work; explicit ownership for long-lived
   state; the debug allocator in tests.
 - **Workspace:** one context per root marker (default `.git`, file or directory), with a shared docs cache.
@@ -203,15 +218,18 @@ See [ADR-0043](adr/0043-custom-readiness-without-refresh.md).
 ## 11. Build and platforms
 
 - Zig **0.15.1** (pinned via `build.zig.zon`).
-- Linux and macOS first; Windows later.
+- Prebuilt binaries, Python wheels, and VS Code VSIXs for Linux, macOS, and Windows.
 - Static binaries where feasible.
-- Schemas are materialized into `vendor/schemas/` at build time.
+- Schemas are committed under `vendor/schemas/` (`embed.zig`).
 
 ## 12. Testing
 
-- Upstream unit fixtures are ported and run under `zig build test`.
-- A dev-only **differential harness** (`tools/differential/`) runs the same
-  inputs through upstream ALS and `zals` and diffs the results.
+- Unit tests and ported upstream fixtures run under `zig build test` (`make test`).
+- Real-stdio end-to-end suites (`make e2e`), headless Neovim integration tests
+  (`make neovim-test`), and stdio smoke/latency harnesses (`make smoke`,
+  `test/benchmark_operations.py`) exercise the built `zals` binary.
+- A dev-only **differential parity harness** (`test/parity/compare.py`, `make parity`)
+  runs the same inputs through upstream ALS and `zals` and diffs the results.
 - Behavioral differences are documented in `docs/deviations.md`.
 
 ## 13. License
