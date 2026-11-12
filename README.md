@@ -187,6 +187,11 @@ relative filesystem targets
 For Neovim, see the [filetype and LSP setup](docs/neovim.md), including
 `requirements.yml`, collection metadata, and Jinja templates.
 
+### Editor Integrations
+
+* **Helix**: See [`docs/editors/helix.md`](docs/editors/helix.md) or [`editors/helix`](editors/helix/) for `languages.toml` configuration.
+
+
 ## Releasing
 
 Releases are driven by [release-please](https://github.com/googleapis/release-please)
