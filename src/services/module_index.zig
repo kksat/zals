@@ -9,7 +9,6 @@ const std = @import("std");
 const fsio = @import("../fsio.zig");
 const Allocator = std.mem.Allocator;
 const exec = @import("../exec/root.zig");
-const yaml = @import("../yaml/root.zig");
 const parsePythonArray = @import("ansible_config.zig").parsePythonArray;
 
 pub const Index = struct {
@@ -125,32 +124,119 @@ pub const Index = struct {
     fn scanRuntime(self: *Index, a: Allocator, path: []const u8, collection: []const u8) void {
         const bytes = fsio.readFileAlloc(self.allocator, path, 64 * 1024 * 1024) catch return;
         defer self.allocator.free(bytes);
-        var forest = yaml.parse(self.allocator, bytes) catch return;
-        defer forest.deinit();
-        if (forest.roots.len == 0) return;
-        const pr = mapGet(forest.roots[0], "plugin_routing") orelse return;
-        const modules = mapGet(pr, "modules") orelse return;
-        if (!modules.isMap()) return;
-        for (modules.items) |pair| {
-            const key = pair.key orelse continue;
-            const name = key.stringValue() orelse continue;
-            const route = pair.val orelse continue;
-            if (mapGet(route, "redirect") == null) continue;
-            if (mapGet(route, "tombstone") != null) continue;
+        var routes = std.ArrayList([]const u8).empty;
+        runtimeModuleRoutes(a, bytes, &routes) catch return;
+        for (routes.items) |name| {
             const fqcn = std.fmt.allocPrint(a, "{s}.{s}", .{ collection, name }) catch continue;
             self.add(a, fqcn);
         }
     }
 };
 
-fn mapGet(node: *yaml.Node, key: []const u8) ?*yaml.Node {
-    if (!node.isMap()) return null;
-    for (node.items) |pair| {
-        const k = pair.key orelse continue;
-        const s = k.stringValue() orelse continue;
-        if (std.mem.eql(u8, s, key)) return pair.val;
+const RouteLine = struct {
+    indent: usize,
+    body: []const u8,
+};
+
+fn nextRouteLine(text: []const u8, pos: *usize) ?RouteLine {
+    while (pos.* < text.len) {
+        const line_start = pos.*;
+        while (pos.* < text.len and text[pos.*] != '\n') : (pos.* += 1) {}
+        var line_end = pos.*;
+        if (line_end > line_start and text[line_end - 1] == '\r') line_end -= 1;
+        if (pos.* < text.len) pos.* += 1;
+
+        const raw = text[line_start..line_end];
+        var indent: usize = 0;
+        while (indent < raw.len and raw[indent] == ' ') : (indent += 1) {}
+        const trimmed = std.mem.trimEnd(u8, raw[indent..], " \t");
+        if (trimmed.len == 0) continue;
+        if (trimmed[0] == '#') continue;
+        return .{ .indent = indent, .body = trimmed };
     }
     return null;
+}
+
+fn routeKey(body: []const u8) ?[]const u8 {
+    var quote: u8 = 0;
+    var i: usize = 0;
+    while (i < body.len) : (i += 1) {
+        const c = body[i];
+        if (quote != 0) {
+            if (c == quote) quote = 0;
+            continue;
+        }
+        if (c == '"' or c == '\'') {
+            quote = c;
+            continue;
+        }
+        if (c == '#') return null;
+        if (c == ':') {
+            if (i + 1 != body.len and body[i + 1] != ' ' and body[i + 1] != '\t') continue;
+            const key = std.mem.trimEnd(u8, body[0..i], " \t");
+            if (key.len >= 2 and ((key[0] == '"' and key[key.len - 1] == '"') or
+                (key[0] == '\'' and key[key.len - 1] == '\'')))
+            {
+                return key[1 .. key.len - 1];
+            }
+            return key;
+        }
+    }
+    return null;
+}
+
+pub fn runtimeModuleRoutes(a: Allocator, text: []const u8, out: *std.ArrayList([]const u8)) !void {
+    var pos: usize = 0;
+
+    const first = nextRouteLine(text, &pos) orelse return;
+    const root_indent = first.indent;
+    var pr_indent: usize = undefined;
+    var line = first;
+    while (true) {
+        if (line.indent < root_indent) return;
+        if (line.indent == root_indent and
+            std.mem.eql(u8, routeKey(line.body) orelse "", "plugin_routing"))
+        {
+            pr_indent = line.indent;
+            break;
+        }
+        line = nextRouteLine(text, &pos) orelse return;
+    }
+
+    var modules_indent: usize = undefined;
+    while (true) {
+        const l = nextRouteLine(text, &pos) orelse return;
+        if (l.indent <= pr_indent) return;
+        if (std.mem.eql(u8, routeKey(l.body) orelse "", "modules")) {
+            modules_indent = l.indent;
+            break;
+        }
+    }
+
+    var entry_indent: ?usize = null;
+    var name: []const u8 = "";
+    var has_redirect = false;
+    var has_tombstone = false;
+    while (true) {
+        const l = nextRouteLine(text, &pos) orelse break;
+        if (l.indent <= modules_indent) break;
+        if (entry_indent == null) entry_indent = l.indent;
+        if (l.indent == entry_indent.?) {
+            if (name.len > 0 and has_redirect and !has_tombstone)
+                try out.append(a, try a.dupe(u8, name));
+            name = routeKey(l.body) orelse "";
+            has_redirect = false;
+            has_tombstone = false;
+            continue;
+        }
+        if (l.indent > entry_indent.?) {
+            const fact_key = routeKey(l.body) orelse continue;
+            if (std.mem.eql(u8, fact_key, "redirect")) has_redirect = true;
+            if (std.mem.eql(u8, fact_key, "tombstone")) has_tombstone = true;
+        }
+    }
+    if (name.len > 0 and has_redirect and !has_tombstone)
+        try out.append(a, try a.dupe(u8, name));
 }
 
 /// Extract `key = value` from `ansible --version` output.
@@ -164,6 +250,63 @@ fn versionField(stdout: []const u8, key: []const u8) ?[]const u8 {
         return std.mem.trim(u8, rest[eq + 1 ..], " \t");
     }
     return null;
+}
+
+test "runtime module routes" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const text =
+        \\# leading comment
+        \\plugin_routing:
+        \\  connection:   # non-module categories are skipped
+        \\    local:
+        \\      redirect: ansible.builtin.whatever
+        \\  modules:
+        \\    # a comment between entries
+        \\    old_name:
+        \\      redirect: ns.coll.new_name
+        \\    "quoted_name":
+        \\      redirect: ns.coll.other
+        \\      # tombstone below disqualifies
+        \\    gone:
+        \\      redirect: ns.coll.gone
+        \\      tombstone:
+        \\        removal_version: 2.12
+        \\    no_redirect:
+        \\      deprecation:
+        \\        removal_version: 3.0
+        \\
+    ;
+    var routes = std.ArrayList([]const u8).empty;
+    try runtimeModuleRoutes(a, text, &routes);
+    try std.testing.expectEqual(@as(usize, 2), routes.items.len);
+    try std.testing.expectEqualStrings("old_name", routes.items[0]);
+    try std.testing.expectEqualStrings("quoted_name", routes.items[1]);
+}
+
+test "runtime module routes ignore unrelated roots" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const text =
+        \\requires_ansible: ">=2.10"
+        \\plugin_routing:
+        \\  modules:
+        \\    nested:
+        \\      redirect: x.y.z
+        \\
+    ;
+    var routes = std.ArrayList([]const u8).empty;
+    try runtimeModuleRoutes(a, text, &routes);
+    try std.testing.expectEqual(@as(usize, 1), routes.items.len);
+    try std.testing.expectEqualStrings("nested", routes.items[0]);
+
+    var empty = std.ArrayList([]const u8).empty;
+    try runtimeModuleRoutes(a, "plugin_routing:\n  connection: {}\n", &empty);
+    try std.testing.expectEqual(@as(usize, 0), empty.items.len);
+    try runtimeModuleRoutes(a, "no routing here\n", &empty);
+    try std.testing.expectEqual(@as(usize, 0), empty.items.len);
 }
 
 test "version field" {
