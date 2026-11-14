@@ -75,6 +75,7 @@ pub const DocsLibrary = struct {
     mutex: @import("../sync.zig").Mutex = .{},
     /// Ansible version string used as part of the on-disk cache fingerprint.
     ansible_version: []const u8 = "",
+    cache_complete: bool = false,
 
     pub fn init(allocator: Allocator, runner: exec.Runner, ansible_doc: []const u8) DocsLibrary {
         return .{
@@ -339,6 +340,8 @@ pub const DocsLibrary = struct {
         try jw.write(cache_format_version);
         try jw.objectField("ansible_version");
         try jw.write(self.ansible_version);
+        try jw.objectField("complete");
+        try jw.write(self.cache_complete);
 
         try jw.objectField("catalog");
         try jw.beginObject();
@@ -398,11 +401,24 @@ pub const DocsLibrary = struct {
         try parser.cacheDocument(&cache);
 
         if (cache.ansible_version) |ver| self.ansible_version = ver;
+        self.cache_complete = cache.complete;
         for (cache.catalog.items) |entry| try self.catalog.put(entry.name, entry);
         for (cache.modules.items) |m| try self.modules.put(m.name, m);
 
         self.ready = true;
         return true;
+    }
+
+    pub fn markBootstrapComplete(self: *DocsLibrary) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        self.cache_complete = true;
+    }
+
+    pub fn cacheComplete(self: *DocsLibrary) bool {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        return self.cache_complete;
     }
 
     fn fetchOne(self: *DocsLibrary, name: []const u8) !void {
