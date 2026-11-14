@@ -107,7 +107,10 @@ pub const DocsService = struct {
         // One `--metadata-dump` call carries every installed module's full
         // docs, replacing the batched prefetch entirely; when it is not
         // usable (older ansible-core), prefetch in batches as before.
-        if (!self.lib.loadMetadataDump()) self.prefetch();
+        if (!loaded or !self.lib.cacheComplete()) {
+            if (!self.lib.loadMetadataDump()) self.prefetch();
+        }
+        self.lib.markBootstrapComplete();
         self.scheduleCacheWrite();
     }
 
