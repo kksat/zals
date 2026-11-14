@@ -2,9 +2,8 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const Value = std.json.Value;
 const exec = @import("../exec/root.zig");
-const json_util = @import("../lsp/json_util.zig");
+const docs_json = @import("docs_json.zig");
 const AnsibleConfig = @import("ansible_config.zig").AnsibleConfig;
 
 /// Options returned by a library lookup are immutable borrowed views; all
@@ -143,12 +142,18 @@ pub const DocsLibrary = struct {
         const result = self.runner.runWithOptions(self.allocator, &argv, self.execution) catch return false;
         defer result.deinit(self.allocator);
         if (!result.success() or result.stdout.len == 0) return false;
+        if (!docs_json.validate(self.allocator, result.stdout)) return false;
 
-        const parsed = std.json.parseFromSlice(Value, self.allocator, result.stdout, .{}) catch return false;
-        defer parsed.deinit();
-        const all = json_util.field(parsed.value, "all") orelse return false;
-        const modules = json_util.object(all, "module") orelse return false;
-        self.ingestDocs(.{ .object = modules }) catch return false;
+        var modules = std.ArrayList(Module).empty;
+        {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            var parser = docs_json.Parser.init(self.arena.allocator(), self.allocator, result.stdout);
+            defer parser.deinit();
+            const found = parser.metadataDump(&modules) catch return false;
+            if (!found) return false;
+            for (modules.items) |m| self.modules.put(m.name, m) catch return false;
+        }
         return true;
     }
 
@@ -157,25 +162,16 @@ pub const DocsLibrary = struct {
         const result = self.runner.runWithOptions(self.allocator, &argv, self.execution) catch return;
         defer result.deinit(self.allocator);
         if (result.stdout.len == 0) return;
+        if (!docs_json.validate(self.allocator, result.stdout)) return;
 
-        const parsed = std.json.parseFromSlice(Value, self.allocator, result.stdout, .{}) catch return;
-        defer parsed.deinit();
-        const a = self.arena.allocator();
-        self.mutex.lock();
-        defer self.mutex.unlock();
-        switch (parsed.value) {
-            .object => |obj| {
-                var it = obj.iterator();
-                while (it.next()) |e| {
-                    const name = try a.dupe(u8, e.key_ptr.*);
-                    const desc = descriptionOf(e.value_ptr.*) orelse "";
-                    try self.catalog.put(name, .{
-                        .name = name,
-                        .description = try a.dupe(u8, desc),
-                    });
-                }
-            },
-            else => {},
+        {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            var parser = docs_json.Parser.init(self.arena.allocator(), self.allocator, result.stdout);
+            defer parser.deinit();
+            var entries = std.ArrayList(CatalogEntry).empty;
+            parser.catalogEntries(&entries) catch return;
+            for (entries.items) |entry| try self.catalog.put(entry.name, entry);
         }
         self.ready = true;
     }
@@ -390,56 +386,20 @@ pub const DocsLibrary = struct {
     /// Retains copied docs just like subprocess ingestion; never shares them
     /// with per-file contextual libraries.
     pub fn restoreCache(self: *DocsLibrary, allocator: Allocator, bytes: []const u8) !bool {
-        const parsed = std.json.parseFromSlice(Value, allocator, bytes, .{}) catch return false;
-        defer parsed.deinit();
-        const v = json_util.integer(parsed.value, "version") orelse return false;
-        if (v != cache_format_version) return false;
+        if (!docs_json.validate(allocator, bytes)) return false;
+        const version = docs_json.topLevelVersion(allocator, bytes) orelse return false;
+        if (version != cache_format_version) return false;
 
-        const a = self.arena.allocator();
         self.mutex.lock();
         defer self.mutex.unlock();
+        var parser = docs_json.Parser.init(self.arena.allocator(), allocator, bytes);
+        defer parser.deinit();
+        var cache = docs_json.CacheDocument{};
+        try parser.cacheDocument(&cache);
 
-        if (json_util.string(parsed.value, "ansible_version")) |ver| {
-            self.ansible_version = try a.dupe(u8, ver);
-        }
-
-        if (json_util.object(parsed.value, "catalog")) |cat| {
-            var it = cat.iterator();
-            while (it.next()) |e| {
-                const name = try a.dupe(u8, e.key_ptr.*);
-                const desc = switch (e.value_ptr.*) {
-                    .string => |s| s,
-                    else => "",
-                };
-                try self.catalog.put(name, .{ .name = name, .description = try a.dupe(u8, desc) });
-            }
-        }
-
-        if (json_util.object(parsed.value, "modules")) |mods| {
-            var it = mods.iterator();
-            while (it.next()) |e| {
-                const name = try a.dupe(u8, e.key_ptr.*);
-                var options = std.ArrayList(Option).empty;
-                if (json_util.object(e.value_ptr.*, "options")) |opts| {
-                    var oi = opts.iterator();
-                    while (oi.next()) |oe| {
-                        var opt = try cacheOptionFromJson(a, oe.value_ptr.*);
-                        opt.name = try a.dupe(u8, oe.key_ptr.*);
-                        try options.append(a, opt);
-                    }
-                }
-                try self.modules.put(name, .{
-                    .name = name,
-                    .description = try a.dupe(u8, json_util.string(e.value_ptr.*, "description") orelse ""),
-                    .long_description = try cacheStringList(a, json_util.field(e.value_ptr.*, "long_description") orelse Value.null),
-                    .requirements = try cacheStringList(a, json_util.field(e.value_ptr.*, "requirements") orelse Value.null),
-                    .notes = try cacheStringList(a, json_util.field(e.value_ptr.*, "notes") orelse Value.null),
-                    .deprecated = json_util.boolean(e.value_ptr.*, "deprecated") orelse false,
-                    .filename = try a.dupe(u8, json_util.string(e.value_ptr.*, "filename") orelse ""),
-                    .options = try options.toOwnedSlice(a),
-                });
-            }
-        }
+        if (cache.ansible_version) |ver| self.ansible_version = ver;
+        for (cache.catalog.items) |entry| try self.catalog.put(entry.name, entry);
+        for (cache.modules.items) |m| try self.modules.put(m.name, m);
 
         self.ready = true;
         return true;
@@ -450,9 +410,7 @@ pub const DocsLibrary = struct {
         const result = try self.runner.runWithOptions(self.allocator, &argv, self.execution);
         defer result.deinit(self.allocator);
         if (result.stdout.len == 0) return;
-        const parsed = std.json.parseFromSlice(Value, self.allocator, result.stdout, .{}) catch return;
-        defer parsed.deinit();
-        try self.ingestDocs(parsed.value);
+        try self.ingestModuleJson(result.stdout);
     }
 
     /// Fetch full docs for several modules in one `ansible-doc` invocation.
@@ -465,49 +423,21 @@ pub const DocsLibrary = struct {
         const result = try self.runner.runWithOptions(self.allocator, argv.items, self.execution);
         defer result.deinit(self.allocator);
         if (result.stdout.len == 0) return;
-        const parsed = std.json.parseFromSlice(Value, self.allocator, result.stdout, .{}) catch return;
-        defer parsed.deinit();
-        try self.ingestDocs(parsed.value);
+        try self.ingestModuleJson(result.stdout);
     }
 
-    fn ingestDocs(self: *DocsLibrary, value: Value) !void {
-        const a = self.arena.allocator();
-        const obj = switch (value) {
-            .object => |o| o,
-            else => return,
-        };
-        self.mutex.lock();
-        defer self.mutex.unlock();
-        var it = obj.iterator();
-        while (it.next()) |e| {
-            const doc = json_util.field(e.value_ptr.*, "doc") orelse continue;
-            const filename = json_util.string(doc, "filename") orelse "";
-            var options = std.ArrayList(Option).empty;
-            if (json_util.object(doc, "options")) |opts| {
-                var oi = opts.iterator();
-                while (oi.next()) |opt| {
-                    try options.append(a, .{
-                        .name = try a.dupe(u8, opt.key_ptr.*),
-                        .description = try a.dupe(u8, descriptionOf(opt.value_ptr.*) orelse ""),
-                        .type = try a.dupe(u8, json_util.string(opt.value_ptr.*, "type") orelse ""),
-                        .required = json_util.boolean(opt.value_ptr.*, "required") orelse false,
-                        .suboptions = try parseSuboptions(a, opt.value_ptr.*),
-                        .default = try defaultString(a, opt.value_ptr.*),
-                        .elements = try a.dupe(u8, json_util.string(opt.value_ptr.*, "elements") orelse ""),
-                    });
-                }
-            }
-            const stored_name = try a.dupe(u8, e.key_ptr.*);
-            try self.modules.put(stored_name, .{
-                .name = stored_name,
-                .description = try a.dupe(u8, shortDescriptionOf(doc) orelse ""),
-                .long_description = try stringList(a, json_util.field(doc, "description") orelse Value.null),
-                .requirements = try stringList(a, json_util.field(doc, "requirements") orelse Value.null),
-                .notes = try stringList(a, json_util.field(doc, "notes") orelse Value.null),
-                .deprecated = json_util.field(doc, "deprecated") != null,
-                .filename = try a.dupe(u8, filename),
-                .options = try options.toOwnedSlice(a),
-            });
+    /// Stream one `ansible-doc --json` document into the library. The
+    /// document is validated up front; malformed output ingests nothing.
+    fn ingestModuleJson(self: *DocsLibrary, stdout: []const u8) !void {
+        if (!docs_json.validate(self.allocator, stdout)) return;
+        var modules = std.ArrayList(Module).empty;
+        {
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            var parser = docs_json.Parser.init(self.arena.allocator(), self.allocator, stdout);
+            defer parser.deinit();
+            parser.moduleMap(&modules) catch return;
+            for (modules.items) |m| try self.modules.put(m.name, m);
         }
     }
 };
@@ -534,124 +464,6 @@ fn writeCacheOption(jw: *std.json.Stringify, o: Option) std.Io.Writer.Error!void
         try jw.endObject();
     }
     try jw.endObject();
-}
-
-fn cacheOptionFromJson(a: Allocator, v: Value) !Option {
-    var sub: []const Option = &.{};
-    if (json_util.object(v, "suboptions")) |subs| {
-        var list = std.ArrayList(Option).empty;
-        var it = subs.iterator();
-        while (it.next()) |e| {
-            var o = try cacheOptionFromJson(a, e.value_ptr.*);
-            o.name = try a.dupe(u8, e.key_ptr.*);
-            try list.append(a, o);
-        }
-        sub = try list.toOwnedSlice(a);
-    }
-    return .{
-        .name = "",
-        .description = try a.dupe(u8, json_util.string(v, "description") orelse ""),
-        .type = try a.dupe(u8, json_util.string(v, "type") orelse ""),
-        .required = json_util.boolean(v, "required") orelse false,
-        .suboptions = sub,
-        .default = if (json_util.string(v, "default")) |d| try a.dupe(u8, d) else null,
-        .elements = try a.dupe(u8, json_util.string(v, "elements") orelse ""),
-    };
-}
-
-fn cacheStringList(a: Allocator, v: Value) ![]const []const u8 {
-    switch (v) {
-        .array => |arr| {
-            var list = std.ArrayList([]const u8).empty;
-            for (arr.items) |item| {
-                switch (item) {
-                    .string => |s| try list.append(a, try a.dupe(u8, s)),
-                    else => {},
-                }
-            }
-            return try list.toOwnedSlice(a);
-        },
-        else => return &.{},
-    }
-}
-
-fn parseSuboptions(a: Allocator, opt: Value) ![]const Option {
-    const subs = json_util.object(opt, "suboptions") orelse return &.{};
-    var list = std.ArrayList(Option).empty;
-    var it = subs.iterator();
-    while (it.next()) |e| {
-        try list.append(a, .{
-            .name = try a.dupe(u8, e.key_ptr.*),
-            .description = try a.dupe(u8, descriptionOf(e.value_ptr.*) orelse ""),
-            .type = try a.dupe(u8, json_util.string(e.value_ptr.*, "type") orelse ""),
-            .required = json_util.boolean(e.value_ptr.*, "required") orelse false,
-            .suboptions = try parseSuboptions(a, e.value_ptr.*),
-            .default = try defaultString(a, e.value_ptr.*),
-            .elements = try a.dupe(u8, json_util.string(e.value_ptr.*, "elements") orelse ""),
-        });
-    }
-    return try list.toOwnedSlice(a);
-}
-
-/// Coerce a string-or-list JSON value into a list of strings.
-fn stringList(a: Allocator, v: Value) ![]const []const u8 {
-    switch (v) {
-        .array => |arr| {
-            var list = std.ArrayList([]const u8).empty;
-            for (arr.items) |item| {
-                switch (item) {
-                    .string => |s| try list.append(a, try a.dupe(u8, s)),
-                    else => {},
-                }
-            }
-            return try list.toOwnedSlice(a);
-        },
-        .string => |s| {
-            const list = try a.alloc([]const u8, 1);
-            list[0] = try a.dupe(u8, s);
-            return list;
-        },
-        else => return &.{},
-    }
-}
-
-/// Render an option's default value as a string, or null when absent.
-fn defaultString(a: Allocator, opt: Value) !?[]const u8 {
-    const d = json_util.field(opt, "default") orelse return null;
-    return switch (d) {
-        .null => null,
-        .string => |s| try a.dupe(u8, s),
-        .bool => |b| if (b) "true" else "false",
-        .integer => |i| try std.fmt.allocPrint(a, "{d}", .{i}),
-        .float => |f| try std.fmt.allocPrint(a, "{d}", .{f}),
-        else => try std.json.Stringify.valueAlloc(a, d, .{}),
-    };
-}
-
-/// Prefer `short_description` for modules; fall back to `description`.
-fn shortDescriptionOf(v: Value) ?[]const u8 {
-    if (json_util.string(v, "short_description")) |s| return s;
-    return descriptionOf(v);
-}
-
-fn descriptionOf(v: Value) ?[]const u8 {
-    if (json_util.string(v, "description")) |s| return s;
-    if (json_util.field(v, "description")) |d| {
-        switch (d) {
-            .array => |arr| {
-                if (arr.items.len > 0) {
-                    return switch (arr.items[0]) {
-                        .string => |s| s,
-                        else => null,
-                    };
-                }
-            },
-            .string => |s| return s,
-            else => {},
-        }
-    }
-    if (json_util.string(v, "short_description")) |s| return s;
-    return null;
 }
 
 test "loadMetadataDump ingests every module from one call" {

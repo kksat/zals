@@ -50,7 +50,7 @@
     "src/roles/targets.zig": 7,
     "src/root.zig": 3,
     "src/services/ansible_config.zig": 11,
-    "src/services/docs.zig": 53,
+    "src/services/docs.zig": 52,
     "src/services/docs_cache.zig": 8,
     "src/services/docs_service.zig": 42,
     "src/services/lint.zig": 16,
