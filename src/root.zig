@@ -32,6 +32,7 @@ pub const sync = @import("sync.zig");
 pub const concurrency = @import("concurrency/root.zig");
 pub const cel_rules = @import("cel/root.zig");
 pub const ast = @import("ast/root.zig");
+pub const memory = @import("memory.zig");
 
 test {
     @import("std").testing.refAllDecls(@This());

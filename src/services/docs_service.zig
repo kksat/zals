@@ -9,6 +9,7 @@ const std = @import("std");
 const fsio = @import("../fsio.zig");
 const Allocator = std.mem.Allocator;
 const docs = @import("docs.zig");
+const memory = @import("../memory.zig");
 const DocsLibrary = docs.DocsLibrary;
 const docs_cache = @import("docs_cache.zig");
 const exec = @import("../exec/root.zig");
@@ -103,6 +104,7 @@ pub const DocsService = struct {
         var config = AnsibleConfig.init(self.allocator, self.lib.runner);
         defer config.deinit();
         self.lib.scanModuleIndex(&config);
+        memory.trimReleasedHeap();
         self.ready.store(true, .release);
         // One `--metadata-dump` call carries every installed module's full
         // docs, replacing the batched prefetch entirely; when it is not
@@ -112,6 +114,7 @@ pub const DocsService = struct {
         }
         self.lib.markBootstrapComplete();
         self.scheduleCacheWrite();
+        memory.trimReleasedHeap();
     }
 
     fn prefetch(self: *DocsService) void {
@@ -143,6 +146,7 @@ pub const DocsService = struct {
         defer self.cache_writing.store(false, .release);
         const p = self.cache_path orelse return;
         docs_cache.save(self.allocator, self.lib, p) catch {};
+        memory.trimReleasedHeap();
     }
 };
 

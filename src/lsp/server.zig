@@ -4,6 +4,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Value = std.json.Value;
 const json_util = @import("json_util.zig");
+const memory = @import("../memory.zig");
 const out = @import("outgoing.zig");
 const Transport = @import("transport.zig").Transport;
 const DocumentStore = @import("../workspace/store.zig").DocumentStore;
@@ -157,6 +158,7 @@ pub const Server = struct {
             try ready.put("filesCount", json_util.num(@as(i64, @intCast(self.index.count()))));
             try self.notify(a, "ansible/workspaceIndexReady", .{ .object = ready.map });
             validation_provider.onWorkspaceIndexReady(self, a) catch {};
+            memory.trimReleasedHeap();
         }
         if (self.docs_service.takeReadyEvent()) {
             var ready = json_util.obj(a);
