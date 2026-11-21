@@ -34,7 +34,6 @@ function fixture(candidates = [candidate()]) {
     } },
     repository: { owner: 'kksat', repo: 'zals', defaultBranch: 'main' },
     async createRelease(release, options) {
-      // Simulate the first upstream mutation, including forceTag's tag creation.
       if (options.forceTag) mutations.push(['tag', release.sha]);
       mutations.push(['release', release, options]);
       return { tagName: release.tag.toString(), notes: release.notes, url: 'https://example.test/release' };
@@ -301,7 +300,6 @@ test('tag is checked again at actual delegate even after approved preflight', as
 test('all existing tags preflight before claiming the first absent candidate tag', async () => {
   const { github, manifest, calls } = await upstreamTagFixture();
   const build = manifest.buildReleases;
-  // Build two candidates through the gate, with the second tag already wrong.
   const second = candidate({ tag: TagName.parse('v0.3.0') });
   manifest.buildReleases = async () => [...await build(), second];
   const underlying = github.octokit.git.getRef;

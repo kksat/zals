@@ -79,7 +79,6 @@ def main():
         text = f.read()
     open_doc(proc, playbook, text)
 
-    # Locate the role name in `- role: demo`.
     line_no = next(i for i, l in enumerate(text.splitlines()) if "role: demo" in l)
     col = text.splitlines()[line_no].index("demo")
 
@@ -88,7 +87,6 @@ def main():
     impl = request(proc, 3, "textDocument/implementation", playbook, line_no, col)
     print("implementation(role demo):", json.dumps(impl.get("result")))
 
-    # include_role form in a synthetic document next to the fixtures.
     synthetic = os.path.join(ROOT, "test/fixtures/role_nav_playbook.yml")
     synthetic_text = (
         "---\n"

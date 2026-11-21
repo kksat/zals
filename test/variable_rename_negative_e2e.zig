@@ -131,7 +131,6 @@ test "renaming variables named like metadata keys never touches role meta, galax
             \\
             ,
         },
-        // Non-Variable files and Role metadata files with identical top-level keys.
         .{
             .path = "roles/app/meta/main.yml",
             .text =
@@ -255,7 +254,6 @@ test "renaming variables named like metadata keys never touches role meta, galax
     const defaults_uri = try ws.open(files[0].path, files[0].text);
     const tasks_uri = try ws.open(files[1].path, files[1].text);
 
-    // Every non-Variable / metadata file must remain untouched across all renames.
     const untouched_paths = [_][]const u8{
         "roles/app/meta/main.yml",
         "galaxy.yml",
@@ -306,7 +304,6 @@ test "renaming variables named like metadata keys never touches role meta, galax
         try std.testing.expectEqualStrings(tasks_uri, edits[1].uri);
     }
 
-    // Cursors placed directly on keys in those metadata/non-Variable files must return null.
     for (untouched_paths) |untouched| {
         for (files) |f| if (std.mem.eql(u8, f.path, untouched)) {
             const u = try ws.open(f.path, f.text);
@@ -384,7 +381,6 @@ test "renaming variables named like argument_specs structural keys never edits s
         try std.testing.expectEqualStrings(defaults_uri, edits[0].uri);
     }
 
-    // Cursors on structural keys in argument_specs.yml (`argument_specs`, `main`, `options`, `type`, `description`, `default`, `required`) must return null.
     for ([_]anchor.Position{
         .{ .line = 1, .character = 2 }, // argument_specs
         .{ .line = 2, .character = 4 }, // main
@@ -636,7 +632,6 @@ test "renaming a root variable never modifies import_playbook vars, unloaded gen
             .path = "settings/unloaded.yml",
             .text = "---\napp_port: 8082\n",
         },
-        // Nested Workspace with its own root marker.
         .{
             .path = "nested-project/negative-rename-root",
             .text = "",
@@ -645,7 +640,6 @@ test "renaming a root variable never modifies import_playbook vars, unloaded gen
             .path = "nested-project/roles/web/defaults/main.yml",
             .text = "---\napp_port: 8083\n",
         },
-        // Virtual environment with pyvenv.cfg.
         .{
             .path = "custom-env/pyvenv.cfg",
             .text = "home = /usr/bin\n",
@@ -714,7 +708,6 @@ test "renaming a root variable never modifies import_playbook vars, unloaded gen
         .{ .uri = site_uri, .range = range(9, 17, 9, 25) },
     }, after_unlink_edits);
 
-    // And a cursor in the now-unloaded `settings/loaded.yml` or `settings/unloaded.yml` must return null.
     for ([_][]const u8{ loaded_uri, unloaded_uri }) |u| {
         const pos = anchor.Position{ .line = 1, .character = 2 };
         try std.testing.expect(try ws.client.request("textDocument/prepareRename", .{ .textDocument = .{ .uri = u }, .position = pos }) == .null);
@@ -853,7 +846,6 @@ test "renaming a root variable after unsaved didChange removes bindings or reads
     const vars_uri = try ws.open(files[1].path, files[1].text);
     const tasks_uri = try ws.open(files[2].path, files[2].text);
 
-    // Replace the binding in vars/main.yml and the first read in tasks/main.yml via unsaved didChange.
     try ws.change(vars_uri, "---\nother_port: 9090\n");
     try ws.change(tasks_uri,
         \\---
@@ -931,7 +923,6 @@ test "renaming a root variable in one Workspace of a multi-root session never mo
         } },
     });
     try client.notify("initialized", .{});
-    // Wait for both Workspace roots to finish indexing.
     try client.waitForIndex();
     try client.waitForIndex();
 

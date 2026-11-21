@@ -271,7 +271,6 @@ fn locationLessThan(_: void, a: anchor.Location, b: anchor.Location) bool {
 }
 
 fn printLocation(resolver: anchor.Resolver, location: anchor.Location) void {
-    // Paths are shown relative to the Workspace or the configured dependency.
     const uri = location.uri;
     const fixture_prefix = std.fmt.allocPrint(resolver.allocator, "file://{s}/", .{resolver.fixture}) catch unreachable;
     const deps_prefix = std.fmt.allocPrint(resolver.allocator, "file://{s}/", .{resolver.deps}) catch unreachable;

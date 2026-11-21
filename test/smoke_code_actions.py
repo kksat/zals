@@ -82,7 +82,6 @@ def main():
     }}))
     proc.stdin.flush()
 
-    # Cursor on `app_result` in `register: app_result` (line 8).
     line = text.splitlines()[8]
     col = line.index("app_result")
     resp = code_actions(proc, 2, tasks, 8, col)
@@ -92,7 +91,6 @@ def main():
             continue
         print("  ", act["title"], "->", repr(act["edit"]["documentChanges"][0]["edits"][0]["newText"]))
 
-    # Cursor inside the first debug task (line 2, the module key).
     resp = code_actions(proc, 3, tasks, 2, 2)
     print("\ncodeAction(debug task):")
     for act in resp["result"]:
@@ -100,7 +98,6 @@ def main():
             continue
         print("  ", act["title"], "->", act["edit"]["documentChanges"][0]["edits"][0]["range"])
 
-    # Cursor on the first task (line 1): extract actions.
     resp = code_actions(proc, 4, tasks, 1, 2)
     print("\ncodeAction(extract first task):")
     extract = [a for a in resp["result"] if a["kind"] == "refactor.extract"]

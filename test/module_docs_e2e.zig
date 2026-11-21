@@ -217,7 +217,6 @@ test "docs bootstrap persists real documentation and a warm restart serves it" {
         try session.openPlaybook(a);
         const cache_path = try waitForDocsCache(a, &home);
 
-        // The persisted cache carries the real ansible-doc documentation.
         const bytes = try std.fs.cwd().readFileAlloc(a, cache_path, 256 << 20);
         const parsed = try std.json.parseFromSlice(Value, a, bytes, .{});
         defer parsed.deinit();

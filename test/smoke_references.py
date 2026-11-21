@@ -70,7 +70,6 @@ def main():
     }}))
     proc.stdin.flush()
 
-    # Cursor on `app_name` in the debug msg (line 3, col 12).
     line = text.splitlines()[3]
     col = line.index("app_name")
     proc.stdin.write(frame({"jsonrpc": "2.0", "id": 2, "method": "textDocument/references", "params": {
@@ -84,7 +83,6 @@ def main():
     for loc in refs["result"]:
         print("  ", loc["uri"].replace(uri(ROOT) + "/", ""), loc["range"]["start"])
 
-    # Go to definition for app_name.
     proc.stdin.write(frame({"jsonrpc": "2.0", "id": 3, "method": "textDocument/definition", "params": {
         "textDocument": {"uri": uri(tasks)},
         "position": {"line": 3, "character": col},
@@ -95,7 +93,6 @@ def main():
     for loc in defn["result"]:
         print("  ", loc["uri"].replace(uri(ROOT) + "/", ""), loc["range"]["start"])
 
-    # References for app_port (defined in defaults and vars, used in tasks).
     col2 = line.index("app_port")
     proc.stdin.write(frame({"jsonrpc": "2.0", "id": 4, "method": "textDocument/references", "params": {
         "textDocument": {"uri": uri(tasks)},

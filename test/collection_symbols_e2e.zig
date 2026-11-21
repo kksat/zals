@@ -101,7 +101,6 @@ const Session = struct {
             });
             return error.UnexpectedSymbols;
         }
-        // Order-independent, preserving duplicates by consuming each match.
         const used = try self.resolver.allocator.alloc(bool, expected.len);
         @memset(used, false);
         for (expected) |symbol| {
@@ -145,7 +144,6 @@ fn symbolEqual(actual: Value, expected: ExpectedSymbol, location: anchor.Locatio
     const container = if (lsp.field(actual, "containerName")) |_| try stringField(actual, "containerName") else "";
     const loc = lsp.field(actual, "location") orelse return error.MissingLocation;
     const uri = try stringField(loc, "uri");
-    // Absolute file URIs are required, and every actual target must exist.
     if (!std.mem.startsWith(u8, uri, "file:///")) return error.NonAbsoluteFileUri;
     const target = try std.fs.openFileAbsolute(uri["file://".len..], .{});
     target.close();

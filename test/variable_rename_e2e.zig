@@ -102,32 +102,21 @@ test "quoted and escaped root variable definitions preserve quotes on rename" {
     try open(&client, tasks_uri, unsaved_tasks);
     try open(&client, rollout_uri, unsaved_rollout);
 
-    // Every site's expected quote-free range.
     const expected_edits = [_]anchor.Location{
-        // defaults: `"quoted_port": 8080` on line 1, inside quotes is col 1..12
         .{ .uri = defaults_uri, .range = range(1, 1, 1, 12) },
-        // vars: `'quoted_port': 9090` on line 1, inside quotes is col 1..12
         .{ .uri = vars_uri, .range = range(1, 1, 1, 12) },
-        // vars: `"\u0071uoted_port": 9091` on line 2, inside quotes is col 1..17
         .{ .uri = vars_uri, .range = range(2, 1, 2, 17) },
-        // specs: `      "quoted_port":` on line 4, inside quotes is col 7..18
         .{ .uri = specs_uri, .range = range(4, 7, 4, 18) },
-        // tasks: `    msg: "Listening on {{ quoted_port }}"` on line 3, col 26..37
         .{ .uri = tasks_uri, .range = range(3, 26, 3, 37) },
-        // tasks: `  register: "quoted_port"` on line 4, inside quotes is col 13..24
         .{ .uri = tasks_uri, .range = range(4, 13, 4, 24) },
-        // tasks: `  when: quoted_port > 0` on line 5, col 8..19
         .{ .uri = tasks_uri, .range = range(5, 8, 5, 19) },
-        // rollout: `    "quoted_port": 7070` on line 4, inside quotes is col 5..16
         .{ .uri = rollout_uri, .range = range(4, 5, 4, 16) },
-        // rollout: `      "quoted_port": 6060` on line 7, inside quotes is col 7..18
         .{ .uri = rollout_uri, .range = range(7, 7, 7, 18) },
     };
 
     const sorted_expected = try a.dupe(anchor.Location, &expected_edits);
     std.mem.sort(anchor.Location, sorted_expected, {}, lessLocation);
 
-    // Query both prepareRename and rename from each of the 9 sites.
     const cursors = [_]struct { uri: []const u8, pos: anchor.Position, expected_range: anchor.Range }{
         .{ .uri = defaults_uri, .pos = .{ .line = 1, .character = 5 }, .expected_range = range(1, 1, 1, 12) },
         .{ .uri = vars_uri, .pos = .{ .line = 1, .character = 5 }, .expected_range = range(1, 1, 1, 12) },
@@ -160,7 +149,6 @@ test "quoted and escaped root variable definitions preserve quotes on rename" {
         try expectLocations(sorted_expected, actual);
     }
 
-    // Apply edits to the defaults and vars buffers and verify surrounding quotes remain intact.
     const final_edit = try client.request("textDocument/rename", .{
         .textDocument = .{ .uri = defaults_uri },
         .position = .{ .line = 1, .character = 5 },
@@ -242,18 +230,14 @@ test "rename rejects invalid variable names and returns null on non-root-variabl
         try std.testing.expectEqual(@as(i64, -32602), code.integer);
     }
 
-    // Non-root-variable cursors must return null for both prepareRename and rename.
     const non_root_anchors = [_]m.Anchor{
-        // Ordinary field reads and definitions
         m.cursor("roles/field_nav/tasks/main.yml", "🛰 {{ field_item.<resourcegroup_name> }} /"),
         m.cursor("roles/field_nav/tasks/main.yml", "🛰 {{ static_item['<resourcegroup_name>'] }} /"),
         m.cursor("roles/field_nav/tasks/main.yml", "/ {{ static_backup[\"<resourcegroup_name>\"] }}"),
         m.cursor("roles/field_nav/defaults/main.yml", "  - <resourcegroup_name>: default-group"),
         m.cursor("roles/field_nav/vars/main.yml", "  \"<resourcegroup_name>\": vars-group"),
         m.cursor("roles/field_nav/meta/argument_specs.yml", "          <resourcegroup_name>:"),
-        // Passed role parameter field
         m.cursor("playbooks/field-inputs.yml", "            <region_name>: passed-main-region"),
-        // Role reference, file reference, module key, task keyword
         m.cursor(rollout, "- role: <example.rollout.preflight>"),
         m.cursor(pf_tasks, "include_tasks: <steps.yml>"),
         m.cursor(pf_tasks, "<ansible.builtin.debug>:"),
@@ -314,7 +298,6 @@ test "rename reflects unsaved didChange edits across open buffers" {
     try open(&client, common_uri, try resolver.readText(common));
     try open(&client, defaults_uri, try resolver.readText(pf_defaults));
 
-    // Shift `app_port` in defaults and add a second read in common.yml via didChange.
     const edited_defaults =
         \\# Unsaved comment shifting lines
         \\# Second comment line
@@ -402,12 +385,9 @@ test "runtime-supplied names and filter keyword arguments are not renamable, whi
             return error.RuntimeNameRenamable;
         }
     }
-    // The definition key of a supplied name is not renamable either.
     const key = try client.request("textDocument/prepareRename", .{ .textDocument = .{ .uri = common_uri }, .position = anchor.Position{ .line = 3, .character = 6 } });
     try std.testing.expect(key == .null);
 
-    // An unbound user variable (such as hana_version read in assert.that and
-    // Jinja expressions) renames across all of its reads.
     const hana_pos = anchor.Position{ .line = 11, .character = 10 };
     const prep_hana = try client.request("textDocument/prepareRename", .{ .textDocument = .{ .uri = common_uri }, .position = hana_pos });
     try std.testing.expectEqualStrings("hana_version", (lsp.field(prep_hana, "placeholder") orelse return error.MissingPlaceholder).string);

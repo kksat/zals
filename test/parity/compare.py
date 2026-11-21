@@ -34,10 +34,6 @@ ALS_BIN = os.environ.get(
 )
 ALS_CMD = os.environ.get("ALS_CMD")
 
-# ---------------------------------------------------------------------------
-# Corpus
-# ---------------------------------------------------------------------------
-
 PLAYBOOK = """---
 - hosts: all
   become: true
@@ -101,10 +97,6 @@ CASES = [
         ],
     },
 ]
-
-# ---------------------------------------------------------------------------
-# LSP client
-# ---------------------------------------------------------------------------
 
 
 def frame(obj):
@@ -205,11 +197,6 @@ class LspClient:
             self.proc.kill()
 
 
-# ---------------------------------------------------------------------------
-# Normalization
-# ---------------------------------------------------------------------------
-
-
 def norm_hover(result):
     if not result:
         return None
@@ -277,11 +264,6 @@ def text_similarity(a, b):
     wa = set(re.findall(r"[A-Za-z0-9_.]+", a.lower()))
     wb = set(re.findall(r"[A-Za-z0-9_.]+", b.lower()))
     return jaccard(wa, wb)
-
-
-# ---------------------------------------------------------------------------
-# Comparison
-# ---------------------------------------------------------------------------
 
 
 def compare_request(method, upstream, zals, legend_up, legend_zals):
@@ -354,7 +336,6 @@ def main():
     try:
         upstream.initialize(root_uri)
         zals.initialize(root_uri)
-        # Give both servers time to load their docs catalogs.
         time.sleep(2.0)
 
         for case in CASES:

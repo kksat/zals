@@ -1,5 +1,4 @@
 #!/bin/sh
-# Checks the staged snapshot: whitespace errors and `zig fmt` on staged Zig files.
 # Install with `make hooks`.
 status=0
 git diff --cached --check || status=1

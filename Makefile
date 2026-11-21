@@ -1,5 +1,3 @@
-# Convenience wrapper around `zig build`.
-#
 # macOS 26 + Xcode 26.5 SDK note:
 #   Zig 0.15.1's bundled lld does not match a plain `arm64-macos` request against
 #   the SDK's `libSystem.B.tbd`, which only lists `arm64e-macos`. The result is a
@@ -12,7 +10,6 @@ export DEVELOPER_DIR := /nonexistent
 endif
 
 ARGS ?=
-# Optional knobs: OPTIMIZE (build), SUITE (e2e), FILE and FILTER (zig-test).
 OPTIMIZE ?=
 SUITE ?=
 FILE ?=
@@ -38,7 +35,6 @@ lint:
 	zig fmt --check src build.zig build.zig.zon test
 	python3 tools/lint/comments.py
 
-# Point git at the tracked hooks (fmt + whitespace, Conventional Commit subject).
 hooks:
 	git config core.hooksPath .githooks
 
@@ -75,8 +71,6 @@ neovim-test: build
 parity: build
 	python3 test/parity/compare.py $(ARGS)
 
-# Exercise the references, definition, implementation, and code-action
-# providers over stdio against the committed fixtures.
 smoke: build
 	python3 test/smoke_references.py
 	python3 test/smoke_code_actions.py
@@ -86,7 +80,6 @@ smoke: build
 	python3 test/smoke_shutdown.py
 	python3 test/benchmark_operations.py --files 2 --tasks 2 --sessions 1 --samples 1 --warmup 0 > /dev/null
 
-# End-to-end request latency tables; pass output paths/load via ARGS.
 benchmark-operations: build
 	python3 test/benchmark_operations.py --label Debug $(ARGS)
 
