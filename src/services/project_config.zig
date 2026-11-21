@@ -351,7 +351,6 @@ test "nearest ansible.cfg walks up and stops at the Workspace root" {
     try testing.expectEqualStrings(try tree.path(a, "apps/custom_roles"), apps[0]);
     const infra = try rolesPaths(a, ctx, try tree.path(a, "infra/site.yml"));
     try testing.expectEqualStrings(try tree.path(a, "root_roles"), infra[0]);
-    // Ansible's defaults follow.
     try testing.expectEqualStrings("/usr/share/ansible/roles", infra[infra.len - 2]);
 }
 

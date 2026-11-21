@@ -202,7 +202,6 @@ fn parseMapStartingAt(p: *Parser, first: Line, indent: usize) anyerror!*Node {
     const map = try p.allocNode(.map, first.start, first.end);
     var pairs = std.array_list.Managed(*Node).init(p.arena);
 
-    // Consume `first` if it is still the current peek.
     if (p.peek()) |cur| {
         if (cur.start == first.start) p.bump();
     }
