@@ -133,20 +133,17 @@ pub fn actions(
     const task = if (container) |c| nearestTaskItem(c) else null;
 
     if (kindRequested(only, kind)) {
-        // Remove: the cursor is inside a debug task.
         if (task) |t| {
             if (isDebugTask(t)) {
                 if (try removeAction(a, text, t)) |act| try out.append(act);
             }
         }
 
-        // Add: the cursor is on a variable occurrence.
         if (try variables.index.occurrenceInForest(a, &forest, path, sel.start)) |cur| {
             if (try addAction(a, text, task, container, cur.name)) |act| try out.append(act);
         }
     }
 
-    // Extract: the cursor or selection is on task item(s).
     if (extract) |env| {
         if (kindRequested(only, extract_kind)) {
             const acts = try extractActions(a, text, &forest, sel, env);
@@ -182,10 +179,6 @@ fn onlyKinds(a: Allocator, params: Value) !?[]const []const u8 {
     }
     return try out.toOwnedSlice();
 }
-
-// ---------------------------------------------------------------------------
-// Add
-// ---------------------------------------------------------------------------
 
 const Edit = struct {
     start: usize,
@@ -236,7 +229,6 @@ fn taskInsertion(
 
     const task_line_end = lineEnd(text, stripTrailingNewlines(text, task.end));
     if (task_line_end >= text.len) {
-        // No trailing newline: terminate the task's line, then a blank line.
         return .{
             .start = text.len,
             .end = text.len,
@@ -267,20 +259,17 @@ fn playInsertion(
                     const first = tasks_val.items[0];
                     const line_start = lineStart(text, first.start);
                     const body = try taskText(a, lineIndent(text, line_start), var_name, eol);
-                    // First task in the list: no blank line before it, one after.
                     return .{
                         .start = line_start,
                         .end = line_start,
                         .text = try std.fmt.allocPrint(a, "{s}{s}", .{ body, eol }),
                     };
                 }
-                // `tasks:` with no items: insert after the key's line.
                 const body = try taskText(a, taskIndent(text, play) + 4, var_name, eol);
                 return try afterLine(a, text, tasks_pair.end, body, eol);
             }
         }
     }
-    // No `tasks:` section: create one at the end of the play.
     const body = try tasksHeaderText(a, taskIndent(text, play), var_name, eol);
     return try afterLine(a, text, play.end, body, eol);
 }
@@ -321,10 +310,6 @@ fn tasksHeaderText(a: Allocator, play_indent: usize, var_name: []const u8, eol: 
         .{ pad, eol, pad, var_name, eol, pad, eol, pad, var_name, eol },
     );
 }
-
-// ---------------------------------------------------------------------------
-// Remove
-// ---------------------------------------------------------------------------
 
 fn removeAction(a: Allocator, text: []const u8, task: *Node) !?Action {
     const seq = task.parent orelse return null;
@@ -385,10 +370,6 @@ fn removeAction(a: Allocator, text: []const u8, task: *Node) !?Action {
     };
 }
 
-// ---------------------------------------------------------------------------
-// Extract
-// ---------------------------------------------------------------------------
-
 /// The two extract actions for the task(s) under `sel`, or an empty slice when
 /// there is nothing to extract.
 fn extractActions(
@@ -407,8 +388,6 @@ fn extractActions(
     const indent = taskIndent(text, first);
     const eol = detectEol(text);
 
-    // The moved span starts at the first item's line, extended upward over a
-    // directly-attached comment block, and ends after the last item's line.
     const first_line = lineStart(text, first.start);
     const span_start = attachedCommentStart(text, first_line);
     const last_line_end = lineEnd(text, stripTrailingNewlines(text, last.end));
@@ -427,8 +406,6 @@ fn extractActions(
     const has_prev = first_idx > 0;
     const has_next = last_idx + 1 < seq.items.len;
 
-    // Replace from the end of the previous sibling's line (or the span start)
-    // through the start of the next sibling's line (or the span end).
     var start = span_start;
     if (has_prev) {
         const pe = lineEnd(text, stripTrailingNewlines(text, seq.items[first_idx - 1].end));
@@ -623,10 +600,6 @@ fn lineOf(text: []const u8, offset: usize) usize {
     return line;
 }
 
-// ---------------------------------------------------------------------------
-// DOM classification
-// ---------------------------------------------------------------------------
-
 /// The deepest map whose parent is a sequence and whose line range contains
 /// `offset`. This is the task, block, play, role invocation, or `vars_prompt`
 /// entry the cursor sits in.
@@ -708,10 +681,6 @@ fn indexOf(seq: *Node, item: *Node) ?usize {
     }
     return null;
 }
-
-// ---------------------------------------------------------------------------
-// Text helpers
-// ---------------------------------------------------------------------------
 
 fn detectEol(text: []const u8) []const u8 {
     if (std.mem.indexOf(u8, text, "\r\n") != null) return "\r\n";
@@ -815,10 +784,6 @@ fn contentEnd(node: *Node) usize {
     }
 }
 
-// ---------------------------------------------------------------------------
-// JSON
-// ---------------------------------------------------------------------------
-
 fn toValue(a: Allocator, doc: *const Document, uri: []const u8, act: Action) !Value {
     var o = json_util.obj(a);
     try o.put("title", json_util.str(act.title));
@@ -894,10 +859,6 @@ fn posValue(a: Allocator, p: types.Position) !Value {
     try o.put("character", json_util.num(p.character));
     return .{ .object = o };
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 const testing = std.testing;
 
@@ -1276,10 +1237,6 @@ test "crlf line endings are preserved" {
         acts[0].new_text,
     );
 }
-
-// ---------------------------------------------------------------------------
-// Extract tests
-// ---------------------------------------------------------------------------
 
 var test_existing: []const []const u8 = &.{};
 

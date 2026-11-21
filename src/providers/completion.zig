@@ -23,8 +23,6 @@ pub fn list(a: Allocator, cur: ?cursor.Cursor, lookup: cursor.Docs) !types.Compl
             .module_option => |o| {
                 if (o.list_options) try addOptions(&items, o) else try addFallback(&items, a, lookup);
             },
-            // A value that is not a keyword context used to fall through to
-            // the same default list.
             .role_reference, .variable => try addFallback(&items, a, lookup),
         }
     } else {

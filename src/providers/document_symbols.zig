@@ -172,7 +172,6 @@ fn taskSymbol(
     else
         try std.fmt.allocPrint(a, "{s} {d}", .{ if (kind == .event) "Handler" else "Task", n });
     const sel = name_node orelse mod orelse map;
-    // Only show the module as detail when it is not already the name.
     const detail: ?[]const u8 = if (mod_name.len > 0 and !std.mem.eql(u8, mod_name, final))
         try dup(a, mod_name)
     else
@@ -346,10 +345,6 @@ fn positionValue(a: Allocator, p: lsp.Position) Allocator.Error!Value {
     try o.put("character", json_util.num(p.character));
     return .{ .object = o };
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 const testing = std.testing;
 
