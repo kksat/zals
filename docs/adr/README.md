@@ -52,6 +52,7 @@ Each ADR captures one decision, its context, and its consequences. Statuses are
 | [0045](0045-variable-files.md) | Variable files | Accepted |
 | [0047](0047-personal-owner-release-approval.md) | Personal-owner release-note approval | Accepted |
 | [0048](0048-no-inline-code-comments.md) | No inline code comments | Accepted |
+| [0049](0049-vendored-parser-optimized-in-every-build-mode.md) | Optimize the vendored parser in every build mode | Accepted |
 
 ## Template
 
