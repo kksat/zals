@@ -36,6 +36,7 @@ check: lint build test
 
 lint:
 	zig fmt --check src build.zig build.zig.zon test
+	python3 tools/lint/comments.py
 
 # Point git at the tracked hooks (fmt + whitespace, Conventional Commit subject).
 hooks:
