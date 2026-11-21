@@ -39,7 +39,6 @@ pub fn build(b: *std.Build) void {
     ts.addIncludePath(b.path("vendor/tree-sitter-yaml/src"));
     ts.linkLibC();
 
-    // Core library: everything except the CLI entry point.
     const schemas = b.createModule(.{
         .root_source_file = b.path("vendor/schemas/embed.zig"),
         .target = target,
@@ -55,7 +54,6 @@ pub fn build(b: *std.Build) void {
     mod.addIncludePath(b.path("vendor/tree-sitter/src"));
     mod.addIncludePath(b.path("vendor/tree-sitter-yaml/src"));
 
-    // CLI entry point.
     const exe = b.addExecutable(.{
         .name = "zals",
         .root_module = b.createModule(.{
@@ -76,7 +74,6 @@ pub fn build(b: *std.Build) void {
     run_cmd.step.dependOn(b.getInstallStep());
     if (b.args) |args| run_cmd.addArgs(args);
 
-    // Tests.
     const mod_tests = b.addTest(.{ .root_module = mod });
     mod_tests.linkLibrary(ts);
     const run_mod_tests = b.addRunArtifact(mod_tests);

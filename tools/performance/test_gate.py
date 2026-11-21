@@ -294,7 +294,6 @@ class GuardTests(unittest.TestCase):
             bad_argv = ["compare", "--workload", "matrix"]
             for path in paths:
                 bad_argv += ["--current", str(path)]
-            # Restore distinct unchanged baseline files.
             for i, report in enumerate(self.before):
                 path = root / f"original-{i}.json"
                 gate.write_json(path, report)

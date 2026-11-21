@@ -144,7 +144,6 @@ fn standaloneRole(comptime name: []const u8, comptime ext: []const u8, vars: []c
         try nav.hover(origin, &.{ "**Variable field** `port`", "**Active:** `8080`", "(role_vars)", "(role_defaults)", "Port used by the standalone Role." }, &.{ "(vars_files)", "Elsewhere in the Workspace" });
     }
 
-    // Each split defaults file contributes bindings, including bare when reads.
     for ([_]struct { origin: m.Anchor, target: m.ExpectedLocation }{
         .{ .origin = m.cursor(tasks, "when: <os_check>"), .target = m.span(defaults, "<os_check>: true") },
         .{ .origin = m.cursor(checks, "when: <audit_enabled>"), .target = m.span(audit, "<audit_enabled>: true") },

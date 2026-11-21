@@ -186,7 +186,6 @@ if Path(sys.argv[0]).name == "ansible-doc":
         client = Client(str(root), env)
         try:
             client.request("initialize", {"processId": None, "rootUri": root.as_uri(), "capabilities": {}})
-            # Initialization must not spawn any Ansible subprocess.
             assert not calls.exists(), "initialize synchronously probes Ansible"
             client.notify("workspace/didChangeConfiguration", {
                 "settings": {"ansible": {"validation": {"enabled": False}}}})

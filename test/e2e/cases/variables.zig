@@ -960,7 +960,6 @@ pub const all = [_]m.Case{
             m.span("negative/roles.yml", "<dynamic_role>: example.rollout.deploy"),
         },
     },
-    // Root variable prepareRename and rename across all definition and reference sites.
     .{
         .name = "variable/rename: prepareRename on Jinja Unicode prefix read",
         .method = .prepare_rename,

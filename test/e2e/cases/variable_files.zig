@@ -31,7 +31,6 @@ const opens_read = m.cursor(play, "{{ release_window.<opens> }}");
 const image_read = m.cursor(play, "{{ release_window.<image> }}");
 
 pub const all = [_]m.Case{
-    // A play var named like galaxy/EE/Compose/template `version` keys.
     .{
         .name = "variable file/metadata-spelled play var: definition excludes metadata maps",
         .method = .definition,
@@ -73,7 +72,6 @@ pub const all = [_]m.Case{
         .markdown_excludes = &.{ "galaxy.yml", "execution-environment.yml", "docker-compose.yml", "compose.yml.j2", "1.0.0", "3.8" },
     },
 
-    // vars_files target outside a vars/ directory binds because it is loaded.
     .{
         .name = "variable file/vars_files target outside a vars directory: definition",
         .method = .definition,
@@ -111,7 +109,6 @@ pub const all = [_]m.Case{
         .markdown_excludes = &.{ "runtime.yml", "redirect" },
     },
 
-    // include_vars target outside a vars/ directory binds because it is loaded.
     .{
         .name = "variable file/include_vars target outside a vars directory: definition",
         .method = .definition,
@@ -139,7 +136,6 @@ pub const all = [_]m.Case{
         },
     },
 
-    // Names that only non-Variable files spell as keys are unbound.
     .{
         .name = "variable file/unloaded Molecule platforms: no definition",
         .method = .definition,

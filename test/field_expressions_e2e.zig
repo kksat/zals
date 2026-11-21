@@ -665,7 +665,6 @@ fn parseLocations(a: Allocator, result: Value) ![]anchor.Location {
 }
 
 fn expectLocations(expected: []const anchor.Location, actual: []const anchor.Location) !void {
-    // Compare complete lists, preserving duplicates, not set membership/counts.
     try std.testing.expectEqual(expected.len, actual.len);
     for (expected, actual) |left, right| {
         try std.testing.expectEqualStrings(left.uri, right.uri);
