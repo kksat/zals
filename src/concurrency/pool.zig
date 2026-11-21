@@ -74,7 +74,6 @@ pub const ThreadPool = struct {
             }
             const task = self.queue.items[self.head];
             self.head += 1;
-            // Compact the queue once the consumed prefix dominates.
             if (self.head > 64 and self.head * 2 > self.queue.items.len) {
                 const remaining = self.queue.items.len - self.head;
                 std.mem.copyForwards(*Task, self.queue.items[0..remaining], self.queue.items[self.head..]);

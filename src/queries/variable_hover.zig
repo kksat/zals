@@ -155,7 +155,6 @@ fn pairWithKeyAt(node: *yaml.Node, start: usize) ?*yaml.Node {
 fn dedentValue(a: Allocator, text: []const u8, start: usize, end: usize) ![]const u8 {
     const raw = std.mem.trimRight(u8, text[start..end], " \t\r\n");
     if (std.mem.indexOfScalar(u8, raw, '\n') == null) return a.dupe(u8, raw);
-    // Block value: dedent continuation lines by their common indentation.
     var lines = std.mem.splitScalar(u8, raw, '\n');
     var min_indent: usize = std.math.maxInt(usize);
     _ = lines.next();

@@ -220,7 +220,6 @@ fn collectTaskKeys(node: *const @import("../yaml/root.zig").Node, out: *std.arra
 }
 
 fn onInitialize(self: *Server, a: Allocator, id: Value, params: Value) !void {
-    // Position encoding: prefer utf-8 when the client advertises it.
     var encoding_name: []const u8 = "utf-16";
     if (json_util.field(params, "capabilities")) |caps| {
         if (json_util.field(caps, "general")) |general| {
@@ -338,6 +337,5 @@ test "removed refresh leaves settings and Workspaces unchanged (ADR-0043)" {
         try testing.expectEqual(@as(i64, -32601), json_util.field(err, "code").?.integer);
         try testing.expectEqualStrings("method not found", json_util.string(err, "message").?);
     }
-    // The removed notification emits no response.
     try testing.expectEqual(@as(?[]u8, null), try transport.readMessage(a));
 }
