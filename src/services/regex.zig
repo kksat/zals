@@ -215,7 +215,7 @@ const Parser = struct {
     }
 
     fn parseClass(self: *Parser) Error!*Expr {
-        self.i += 1; // consume '['
+        self.i += 1;
         var negated = false;
         if (self.peek() == '^') {
             negated = true;

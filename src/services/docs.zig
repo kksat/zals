@@ -693,8 +693,6 @@ test "loadMetadataDump ingests every module from one call" {
     try std.testing.expect(opt.required);
     try std.testing.expect(lib.modules.get("ns.two") != null);
 
-    // Failed commands and unusable output report false so the caller can
-    // fall back to batched fetching.
     var failed = Fake{ .stdout = "boom", .exit = 2 };
     var lib2 = DocsLibrary.init(std.testing.allocator, .{ .ptr = &failed, .vtable = &Fake.vtable }, "ansible-doc");
     defer lib2.deinit();

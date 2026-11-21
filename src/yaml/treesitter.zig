@@ -272,7 +272,6 @@ fn convertBlockScalar(a: Allocator, text: []const u8, node: c.TSNode) !*Node {
     const strip = std.mem.indexOfScalar(u8, header, '-') != null;
     const keep = std.mem.indexOfScalar(u8, header, '+') != null;
 
-    // Determine common indentation of non-empty lines.
     var min_indent: usize = std.math.maxInt(usize);
     var it = std.mem.splitScalar(u8, body, '\n');
     while (it.next()) |line| {
