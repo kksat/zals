@@ -87,8 +87,6 @@ pub fn implementation(context: *Context, passed: Passed) ![]const types.Location
 pub fn hover(context: *Context, passed: Passed) !?types.Hover {
     const a = context.allocator;
     const field = passed.names.len > 1;
-    // Root parameter hover historically consults the first resolved directory;
-    // nested field hover tries the full resolved-directory list.
     const dirs = if (!field and passed.directories.len > 0) passed.directories[0..1] else passed.directories;
     for (dirs) |dir| {
         const spec = (try parameters.optionSpecPathFrom(a, context.source(), dir, passed.entry_point, passed.names)) orelse continue;

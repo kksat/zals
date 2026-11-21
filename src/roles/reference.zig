@@ -29,7 +29,6 @@ pub fn detect(path: []*Node, text: []const u8) ?Reference {
     if (!node.isScalar()) return null;
     const parent = path[path.len - 2];
 
-    // Cursor on a pair value.
     if (parent.isPair() and parent.val == node) {
         const key = keyOf(parent) orelse return null;
         if (plays.isAction(key, "include_role") or plays.isAction(key, "import_role")) {
@@ -52,7 +51,6 @@ pub fn detect(path: []*Node, text: []const u8) ?Reference {
         return null;
     }
 
-    // Cursor on a sequence item scalar (string form).
     if (parent.isSeq()) {
         if (path.len < 3) return null;
         const seq_pair = path[path.len - 3];

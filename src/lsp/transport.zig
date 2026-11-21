@@ -67,11 +67,9 @@ pub const Transport = struct {
     pub fn readMessage(self: *Transport, allocator: Allocator) !?[]u8 {
         var content_length: ?usize = null;
 
-        // Read headers line by line until the blank line.
         var line_buf: [256]u8 = undefined;
         while (true) {
             var len: usize = 0;
-            // Read a line terminated by \n, stripping a trailing \r.
             while (true) {
                 const b = self.readByte() catch |err| switch (err) {
                     error.EndOfStream => {
@@ -88,7 +86,7 @@ pub const Transport = struct {
             }
             if (len > 0 and line_buf[len - 1] == '\r') len -= 1;
             const line = line_buf[0..len];
-            if (line.len == 0) break; // end of headers
+            if (line.len == 0) break;
 
             if (std.ascii.startsWithIgnoreCase(line, "content-length:")) {
                 const value = std.mem.trim(u8, line["content-length:".len..], " \t");

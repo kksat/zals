@@ -179,7 +179,7 @@ test "an open document replaces its indexed copy" {
     defer subject.deinit();
     const locs = (try query.definition(&subject)).locations;
     try testing.expectEqual(@as(usize, 4), locs.len);
-    try expectAt(locs[0], extra, 1, 0); // role vars
+    try expectAt(locs[0], extra, 1, 0);
     try expectAt(locs[1], try fixture.uri("playbooks/vars/prod.yml"), 0, 0);
     try expectAt(locs[2], defaults, 1, 0); // the unsaved position, not line 0
     try expectAt(locs[3], try fixture.uri("roles/web/defaults/main.yml"), 0, 0);
@@ -303,7 +303,7 @@ test "without a Workspace a Role scope spans its conventional files and ranks th
     defer subject.deinit();
     const defs = (try query.definition(&subject)).locations;
     try testing.expectEqual(@as(usize, 2), defs.len);
-    try expectAt(defs[0], try fixture.uri("r/vars/main.yml"), 0, 0); // Role vars, then defaults
+    try expectAt(defs[0], try fixture.uri("r/vars/main.yml"), 0, 0);
     try expectAt(defs[1], try fixture.uri("r/defaults/main.yml"), 0, 0);
     try testing.expectEqual(@as(usize, 3), (try query.references(&subject, false)).?.len);
     try testing.expectEqual(@as(usize, 5), (try query.references(&subject, true)).?.len);
