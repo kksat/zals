@@ -128,7 +128,7 @@ pub fn module(task: *const Node) ?ModuleRef {
 }
 
 /// Compatibility rule: a short name or any nonempty dotted namespace. Keep
-/// arbitrary *.name matches until a separate namespace-policy change (D7).
+/// arbitrary *.name matches until a separate namespace-policy change.
 pub fn isAction(name: []const u8, short: []const u8) bool {
     return std.mem.eql(u8, name, short) or
         (name.len > short.len + 1 and name[name.len - short.len - 1] == '.' and std.mem.endsWith(u8, name, short));

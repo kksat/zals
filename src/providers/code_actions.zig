@@ -671,7 +671,7 @@ fn nearestTaskItem(node: *Node) ?*Node {
 
 fn isDebugTask(map: *Node) bool {
     const ref = plays.module(map) orelse return false;
-    // ADR-0028 is keyed to a Module key, not action/local_action (D5).
+    // ADR-0028 is keyed to a Module key, not action/local_action.
     return ref.is_key and plays.isAction(ref.name, "debug");
 }
 

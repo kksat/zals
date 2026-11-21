@@ -21,7 +21,7 @@ pub fn isTaskParam(arena: Allocator, path: []*Node) bool {
     const map = keyMap(arena, path) orelse return false;
     return switch (plays.classify(map, .{}).kind) {
         .task => true,
-        // Preserve the cursor's rescue/always-only gap (D6).
+        // Preserve the cursor's rescue/always-only gap.
         .block => dom.findPair(map, "block") == null,
         else => false,
     };
