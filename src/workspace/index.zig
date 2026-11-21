@@ -182,7 +182,6 @@ pub const WorkspaceIndex = struct {
     /// when `rescan`), and drop entries of roots no longer in the session.
     pub fn syncRoots(self: *WorkspaceIndex, pool: *concurrency.ThreadPool, roots: []const []const u8, marker: []const u8, rescan: bool) !void {
         std.debug.assert(self.query_refresh_stale == null);
-        // Drop removed roots.
         var removed = std.array_list.Managed([]const u8).init(self.gpa);
         defer removed.deinit();
         var git = self.generations.keyIterator();
@@ -632,7 +631,6 @@ test "pool scan delivers through drain" {
         std.Thread.sleep(1 * std.time.ns_per_ms);
     }
     try testing.expectEqual(@as(usize, 2), index.count());
-    // Removing the root drops its entries.
     try index.syncRoots(pool, &.{}, ".git", false);
     try testing.expectEqual(@as(usize, 0), index.count());
     pool.deinit();

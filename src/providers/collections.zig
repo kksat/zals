@@ -54,12 +54,9 @@ pub fn completion(context: *Context, doc: *const Document, offset: usize) !?[]co
 pub fn isListingSite(path: []*yaml.Node, file_path: []const u8) bool {
     const n = path.len;
     if (n < 3) return false;
-    // `collections:` string entry.
     if (path[n - 2].isSeq() and keyIs(path[n - 3], "collections")) return true;
-    // `collections:` map entry `name:` value.
     if (n >= 5 and keyIs(path[n - 2], "name") and path[n - 2].val == path[n - 1] and
         path[n - 3].isMap() and path[n - 4].isSeq() and keyIs(path[n - 5], "collections")) return true;
-    // `galaxy.yml` `dependencies:` key.
     const base = std.fs.path.basename(file_path);
     if (!std.mem.eql(u8, base, "galaxy.yml") and !std.mem.eql(u8, base, "galaxy.yaml")) return false;
     return n >= 4 and path[n - 2].isPair() and path[n - 2].key == path[n - 1] and
