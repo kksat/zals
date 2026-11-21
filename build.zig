@@ -22,9 +22,6 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    // The vendored parser dominates cold indexing when compiled at -O0.
-    // Optimize its C code even in Debug without defining NDEBUG or changing
-    // the requested Zig debug checks. Keep release-mode flags unchanged.
     const ts = b.addLibrary(.{
         .name = "tree_sitter",
         .root_module = b.createModule(.{ .target = target, .optimize = optimize }),
