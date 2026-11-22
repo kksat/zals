@@ -7,6 +7,7 @@ import {
 } from "vscode-languageclient/node.js";
 import { resolveBinaryPath } from "./binary.ts";
 import { createClientOptions } from "./clientOptions.ts";
+import { ServerStatus } from "./status.ts";
 
 let client: LanguageClient | undefined;
 
@@ -34,6 +35,36 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     "Ansible Language Server",
     serverOptions,
     clientOptions,
+  );
+
+  const statusItem = vscode.window.createStatusBarItem(
+    vscode.StatusBarAlignment.Right,
+    100,
+  );
+  statusItem.name = "zals";
+  statusItem.command = "zals.showOutput";
+  const status = new ServerStatus(client, {
+    set: (text, tooltip) => {
+      statusItem.text = text;
+      statusItem.tooltip = tooltip;
+      statusItem.show();
+    },
+  });
+  status.start(vscode.workspace.workspaceFolders !== undefined);
+
+  const restart = async (): Promise<void> => {
+    const active = client;
+    if (!active) return;
+    await active.stop();
+    await active.start();
+  };
+
+  context.subscriptions.push(
+    statusItem,
+    vscode.commands.registerCommand("zals.restart", restart),
+    vscode.commands.registerCommand("zals.showOutput", () => {
+      client?.outputChannel.show();
+    }),
   );
 
   await client.start();
