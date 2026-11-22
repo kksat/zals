@@ -1,5 +1,17 @@
 # Deep-module review
 
+> **Historical snapshot (`c0c7ae3`, October 2026):** The primary architectural
+> recommendations in this review have since been implemented on `main`—including
+> the single outgoing `Writer` owner (`src/lsp/outgoing.zig`), request-long
+> `WorkspaceIndex` query leases and `queries.Context` (`src/queries/context.zig`),
+> the unified `queries.navigation.Query` interface (`src/queries/navigation.zig`),
+> synchronized `DocsLibrary` storage (`src/services/docs.zig`), shared
+> `callee_bindings` / `binding_descriptions`, and explicit validation tool
+> `Status` (`src/services/validation.zig`). For the post-refactor latency
+> verification and regression fixes, see
+> [`docs/performance/deep-modules-repaired.md`](../performance/deep-modules-repaired.md).
+> Line references below describe the pre-refactor tree, not current `HEAD`.
+
 ## Scope and conclusion
 
 Reviewed `c0c7ae384a12a747ca2596f53bbbb121b1c16ba0` on
