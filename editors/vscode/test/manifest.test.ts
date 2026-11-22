@@ -24,6 +24,50 @@ test("manifest uses the selected Zig ember PNG at marketplace icon resolution", 
   assert.deepEqual(icon, fs.readFileSync(selectedLogo));
 });
 
+test("manifest scopes task-file patterns to roles, playbooks, and collections", () => {
+  const patterns = pkg.contributes?.languages?.[0]?.filenamePatterns;
+  assert.ok(patterns, "languages[0].filenamePatterns should exist");
+
+  const expected = [
+    "**/playbooks/**/*.yml",
+    "**/playbooks/**/*.yaml",
+    "**/*playbook*.yml",
+    "**/*playbook*.yaml",
+    "**/roles/**/main.yml",
+    "**/roles/**/main.yaml",
+    "**/roles/**/tasks/**/*.yml",
+    "**/roles/**/tasks/**/*.yaml",
+    "**/roles/**/handlers/**/*.yml",
+    "**/roles/**/handlers/**/*.yaml",
+    "**/roles/**/defaults/**/*.yml",
+    "**/roles/**/defaults/**/*.yaml",
+    "**/roles/**/vars/**/*.yml",
+    "**/roles/**/vars/**/*.yaml",
+    "**/roles/**/meta/*.yml",
+    "**/roles/**/meta/*.yaml",
+    "**/ansible_collections/**/meta/*.yml",
+    "**/ansible_collections/**/meta/*.yaml",
+    "**/host_vars/**/*.yml",
+    "**/host_vars/**/*.yaml",
+    "**/group_vars/**/*.yml",
+    "**/group_vars/**/*.yaml",
+    "**/molecule/*/molecule.yml",
+    "**/molecule/*/molecule.yaml",
+  ];
+  assert.deepEqual([...patterns].sort(), [...expected].sort());
+
+  for (const directory of ["tasks", "handlers", "defaults", "vars"]) {
+    assert.ok(
+      !patterns.includes(`**/${directory}/**/*.yml`),
+      `**/${directory}/**/*.yml must stay scoped to roles`,
+    );
+  }
+  assert.ok(
+    !patterns.includes("**/meta/*.yml") && !patterns.includes("**/meta/*.yaml"),
+    "meta patterns must stay scoped to roles and collections",
+  );
+});
+
 test("manifest disables untrusted workspaces", () => {
   assert.equal(pkg.capabilities?.untrustedWorkspaces?.supported, false);
 });
