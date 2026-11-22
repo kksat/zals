@@ -74,6 +74,7 @@
           "**/vars/**/*.yaml",
           "**/meta/*.yml",
           "**/meta/*.yaml",
+          "**/roles/**/templates/**/*.j2",
           "**/host_vars/**/*.yml",
           "**/host_vars/**/*.yaml",
           "**/group_vars/**/*.yml",
