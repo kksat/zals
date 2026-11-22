@@ -111,6 +111,49 @@ pub const Transport = struct {
         return body;
     }
 
+    pub fn tryReadMessage(self: *Transport, allocator: Allocator) !?[]u8 {
+        if (self.in_pos >= self.in_len) {
+            if (!try self.waitForInput(0)) return null;
+            const n = self.in_file.read(&self.in_buf) catch |err| switch (err) {
+                error.WouldBlock => return null,
+                else => return err,
+            };
+            if (n == 0) return null;
+            self.in_len = n;
+            self.in_pos = 0;
+        }
+        const frame = (try self.scanFrame()) orelse return null;
+        const body = try allocator.dupe(u8, frame.body);
+        self.in_pos = frame.end;
+        return body;
+    }
+
+    const Frame = struct {
+        body: []const u8,
+        end: usize,
+    };
+
+    fn scanFrame(self: *Transport) !?Frame {
+        const buf = self.in_buf[0..self.in_len];
+        var pos = self.in_pos;
+        var content_length: ?usize = null;
+        while (true) {
+            const nl = std.mem.indexOfScalar(u8, buf[pos..], '\n') orelse return null;
+            var line = buf[pos .. pos + nl];
+            pos += nl + 1;
+            if (line.len > 0 and line[line.len - 1] == '\r') line = line[0 .. line.len - 1];
+            if (line.len == 0) break;
+            if (std.ascii.startsWithIgnoreCase(line, "content-length:")) {
+                const value = std.mem.trim(u8, line["content-length:".len..], " \t");
+                content_length = std.fmt.parseInt(usize, value, 10) catch
+                    return error.InvalidContentLength;
+            }
+        }
+        const n = content_length orelse return error.MissingContentLength;
+        if (n > buf.len - pos) return null;
+        return .{ .body = buf[pos .. pos + n], .end = pos + n };
+    }
+
     fn writeAll(self: *Transport, bytes: []const u8) !void {
         var written: usize = 0;
         while (written < bytes.len) {
@@ -155,4 +198,49 @@ test "input waiting honors already buffered messages" {
     transport.in_len = 2;
     transport.in_pos = 1;
     try std.testing.expect(try transport.waitForInput(0));
+}
+
+test "tryReadMessage returns buffered frames without blocking" {
+    const pipe_fds = try std.posix.pipe();
+    const in_file = std.fs.File{ .handle = pipe_fds[0] };
+    const out_file = std.fs.File{ .handle = pipe_fds[1] };
+    defer in_file.close();
+    defer out_file.close();
+    const allocator = std.testing.allocator;
+
+    var reader = Transport.init(in_file, out_file);
+    var writer = Transport.init(in_file, out_file);
+
+    try std.testing.expectEqual(@as(?[]u8, null), try reader.tryReadMessage(allocator));
+
+    try writer.writeMessage("{\"a\":1}");
+    try writer.writeMessage("{\"b\":2}");
+    const first = (try reader.tryReadMessage(allocator)).?;
+    defer allocator.free(first);
+    try std.testing.expectEqualStrings("{\"a\":1}", first);
+    const second = (try reader.tryReadMessage(allocator)).?;
+    defer allocator.free(second);
+    try std.testing.expectEqualStrings("{\"b\":2}", second);
+    try std.testing.expectEqual(@as(?[]u8, null), try reader.tryReadMessage(allocator));
+}
+
+test "tryReadMessage leaves a partial frame for readMessage" {
+    const pipe_fds = try std.posix.pipe();
+    const in_file = std.fs.File{ .handle = pipe_fds[0] };
+    const out_file = std.fs.File{ .handle = pipe_fds[1] };
+    defer in_file.close();
+    defer out_file.close();
+    const allocator = std.testing.allocator;
+
+    var reader = Transport.init(in_file, out_file);
+
+    var header_buf: [64]u8 = undefined;
+    const header = try std.fmt.bufPrint(&header_buf, "Content-Length: 5\r\n\r\n", .{});
+    try out_file.writeAll(header);
+    try out_file.writeAll("hel");
+    try std.testing.expectEqual(@as(?[]u8, null), try reader.tryReadMessage(allocator));
+    try out_file.writeAll("lo");
+    const body = (try reader.readMessage(allocator)).?;
+    defer allocator.free(body);
+    try std.testing.expectEqualStrings("hello", body);
 }

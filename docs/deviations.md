@@ -47,6 +47,7 @@ on top of parity, not deviations from it.
 | 19 | Role go-to-definition and go-to-implementation (`textDocument/implementation`). | Post-parity feature; upstream resolves only modules and never reads `DEFAULT_ROLES_PATH`. See [ADR-0029](adr/0029-role-navigation.md). |
 | 20 | Extract-tasks code actions (`textDocument/codeAction`, kind `refactor.extract`): move the task(s) under the cursor or selection into a new sibling `taskN.yml` and replace them with `include_tasks`/`import_tasks`. | Post-parity feature; upstream has no code-action handler. See [ADR-0030](adr/0030-extract-tasks-code-actions.md). |
 | 22 | Root variable rename (`textDocument/prepareRename` and `textDocument/rename`) across the owning Workspace. | Post-parity feature; upstream has no rename provider. See [ADR-0046](adr/0046-root-variable-rename.md). |
+| 23 | Honors `$/cancelRequest` for requests that have not started computing, replying with LSP `RequestCancelled` (-32800). | Post-parity feature. See [ADR-0050](adr/0050-request-cancellation.md). |
 
 ## Adding an entry
 

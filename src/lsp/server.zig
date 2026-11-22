@@ -13,6 +13,7 @@ const workspace_session = @import("../workspace/session.zig");
 const workspace_index = @import("../workspace/index.zig");
 const WorkspaceIndex = workspace_index.WorkspaceIndex;
 const handlers = @import("handlers.zig");
+const cancellation_mod = @import("cancellation.zig");
 const exec = @import("../exec/root.zig");
 const DocsLibrary = @import("../services/docs.zig").DocsLibrary;
 const SchemaCatalog = @import("../services/schema_service.zig").Catalog;
@@ -52,6 +53,8 @@ pub const Server = struct {
     can_watch_files: bool = false,
     /// Watched-file events keep the index current; otherwise it re-stats.
     watching_files: bool = false,
+    cancellation: cancellation_mod.Cancellation,
+    deferred: std.ArrayListUnmanaged([]u8) = .empty,
 
     pub fn init(allocator: Allocator, transport: Transport, venv_override: ?[]const u8) !Server {
         const runner = exec.Posix.posixRunner();
@@ -81,6 +84,7 @@ pub const Server = struct {
             .contextual_docs = docs_service.ContextLibraries.init(allocator, runner),
             .session = try workspace_session.Session.init(allocator, venv_override),
             .index = index,
+            .cancellation = cancellation_mod.Cancellation.init(allocator),
         };
     }
 
@@ -101,6 +105,9 @@ pub const Server = struct {
         self.ansible_config.deinit();
         self.docs_service.deinit();
         self.session.deinit();
+        self.cancellation.deinit();
+        for (self.deferred.items) |body| self.allocator.free(body);
+        self.deferred.deinit(self.allocator);
         // Flush any queued outgoing messages before tearing down the writer.
         self.writer.deinit();
     }
@@ -114,10 +121,10 @@ pub const Server = struct {
             // While bootstrap/scanning is active, wake periodically to apply
             // results and publish readiness even if the client sends nothing.
             // Once ready, return to a blocking read (no idle polling).
-            if (self.index.isScanning() or self.docs_service.hasPendingBootstrap() or self.validation.hasPending()) {
+            if (self.deferred.items.len == 0 and (self.index.isScanning() or self.docs_service.hasPendingBootstrap() or self.validation.hasPending())) {
                 if (!try self.transport.waitForInput(25)) continue;
             }
-            const body = (try self.transport.readMessage(self.allocator)) orelse break;
+            const body = self.nextDeferred() orelse (try self.transport.readMessage(self.allocator)) orelse break;
             defer self.allocator.free(body);
 
             const msg = std.json.parseFromSliceLeaky(Value, a, body, .{}) catch continue;
@@ -125,6 +132,11 @@ pub const Server = struct {
                 std.log.err("dispatch failed: {s}", .{@errorName(err)});
             };
         }
+    }
+
+    fn nextDeferred(self: *Server) ?[]u8 {
+        if (self.deferred.items.len == 0) return null;
+        return self.deferred.orderedRemove(0);
     }
 
     fn dispatch(self: *Server, a: Allocator, msg: Value) !void {
@@ -135,11 +147,32 @@ pub const Server = struct {
         try self.drainBackground(a);
 
         if (id) |req_id| {
+            self.drainPendingInput(a);
+            if (self.cancellation.take(req_id)) {
+                return self.sendError(a, req_id, -32800, "request cancelled by the client");
+            }
             handlers.handleRequest(self, a, req_id, method, params) catch |err| {
                 try self.sendError(a, req_id, -32603, @errorName(err));
             };
         } else {
             try handlers.handleNotification(self, a, method, params);
+        }
+    }
+
+    fn drainPendingInput(self: *Server, a: Allocator) void {
+        while (true) {
+            const body = (self.transport.tryReadMessage(self.allocator) catch return) orelse return;
+            const msg = std.json.parseFromSliceLeaky(Value, a, body, .{}) catch {
+                self.allocator.free(body);
+                continue;
+            };
+            const method = json_util.string(msg, "method") orelse "";
+            if (std.mem.eql(u8, method, "$/cancelRequest")) {
+                self.cancellation.record(json_util.field(msg, "params") orelse Value.null);
+                self.allocator.free(body);
+            } else {
+                self.deferred.append(self.allocator, body) catch self.allocator.free(body);
+            }
         }
     }
 
@@ -231,3 +264,92 @@ pub const Server = struct {
         });
     }
 };
+
+const testing = std.testing;
+
+fn writeFrame(file: std.fs.File, body: []const u8) !void {
+    var header_buf: [64]u8 = undefined;
+    const header = try std.fmt.bufPrint(&header_buf, "Content-Length: {d}\r\n\r\n", .{body.len});
+    try file.writeAll(header);
+    try file.writeAll(body);
+}
+
+fn runOverFrames(frames: []const []const u8, out_file: std.fs.File) !void {
+    const pipe_fds = try std.posix.pipe();
+    const in_file = std.fs.File{ .handle = pipe_fds[0] };
+    const write_end = std.fs.File{ .handle = pipe_fds[1] };
+    defer in_file.close();
+    defer write_end.close();
+    for (frames) |body| try writeFrame(write_end, body);
+
+    var server = try Server.init(testing.allocator, Transport.init(in_file, out_file), null);
+    errdefer server.deinit();
+    try server.run();
+    server.deinit();
+}
+
+fn readOutput(file: std.fs.File, a: Allocator) ![]u8 {
+    try file.seekTo(0);
+    return try file.readToEndAlloc(a, 64 * 1024);
+}
+
+test "a request cancelled while queued replies RequestCancelled" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const out_file = try tmp.dir.createFile("messages", .{ .read = true });
+    defer out_file.close();
+
+    try runOverFrames(&.{
+        "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"workspace/symbol\",\"params\":{\"query\":\"\"}}",
+        "{\"jsonrpc\":\"2.0\",\"method\":\"$/cancelRequest\",\"params\":{\"id\":1}}",
+        "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}",
+    }, out_file);
+
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const output = try readOutput(out_file, arena.allocator());
+    try testing.expect(std.mem.indexOf(u8, output, "\"id\":1") != null);
+    try testing.expect(std.mem.indexOf(u8, output, "-32800") != null);
+    try testing.expect(std.mem.indexOf(u8, output, "\"result\"") == null);
+}
+
+test "an uncanceled request is answered normally" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const out_file = try tmp.dir.createFile("messages", .{ .read = true });
+    defer out_file.close();
+
+    try runOverFrames(&.{
+        "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"workspace/symbol\",\"params\":{\"query\":\"\"}}",
+        "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}",
+    }, out_file);
+
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const output = try readOutput(out_file, arena.allocator());
+    try testing.expect(std.mem.indexOf(u8, output, "\"id\":1") != null);
+    try testing.expect(std.mem.indexOf(u8, output, "\"result\"") != null);
+    try testing.expect(std.mem.indexOf(u8, output, "-32800") == null);
+}
+
+test "messages after a drained cancel are deferred in order" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const out_file = try tmp.dir.createFile("messages", .{ .read = true });
+    defer out_file.close();
+
+    try runOverFrames(&.{
+        "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"workspace/symbol\",\"params\":{\"query\":\"\"}}",
+        "{\"jsonrpc\":\"2.0\",\"method\":\"$/cancelRequest\",\"params\":{\"id\":1}}",
+        "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"workspace/symbol\",\"params\":{\"query\":\"\"}}",
+        "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}",
+    }, out_file);
+
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const output = try readOutput(out_file, arena.allocator());
+    const first_cancel = std.mem.indexOf(u8, output, "-32800").?;
+    const second = std.mem.indexOf(u8, output, "\"id\":2").?;
+    try testing.expect(first_cancel < second);
+    try testing.expect(std.mem.indexOf(u8, output, "\"result\"") != null);
+}
