@@ -100,6 +100,10 @@ pub fn handleNotification(self: *Server, a: Allocator, method: []const u8, param
     if (std.mem.eql(u8, method, "workspace/didChangeWatchedFiles")) {
         return sync.didChangeWatchedFiles(self, a, params);
     }
+    if (std.mem.eql(u8, method, "$/cancelRequest")) {
+        self.cancellation.record(params);
+        return;
+    }
     // Unknown notifications are ignored, per the LSP spec.
 }
 
