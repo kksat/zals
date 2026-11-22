@@ -109,26 +109,37 @@ pub const DocsService = struct {
         // One `--metadata-dump` call carries every installed module's full
         // docs, replacing the batched prefetch entirely; when it is not
         // usable (older ansible-core), prefetch in batches as before.
-        if (!loaded or !self.lib.cacheComplete()) {
-            if (!self.lib.loadMetadataDump()) self.prefetch();
+        const already_complete = loaded and self.lib.cacheComplete();
+        var complete = already_complete;
+        if (!already_complete) {
+            if (self.lib.loadMetadataDump()) {
+                complete = true;
+            } else {
+                complete = self.prefetch();
+            }
         }
-        self.lib.markBootstrapComplete();
-        self.scheduleCacheWrite();
+        if (!self.shutdown.load(.acquire)) {
+            if (complete) self.lib.markBootstrapComplete();
+            if (!already_complete) self.scheduleCacheWrite();
+        }
         memory.trimReleasedHeap();
     }
 
-    fn prefetch(self: *DocsService) void {
-        const names = self.lib.missingCatalogNames(self.allocator) catch return;
+    fn prefetch(self: *DocsService) bool {
+        if (self.lib.catalogCount() == 0) return false;
+        const names = self.lib.missingCatalogNames(self.allocator) catch return false;
         defer self.allocator.free(names);
 
+        var ok = true;
         var i: usize = 0;
         while (i < names.len) : (i += batch_size) {
-            if (self.shutdown.load(.acquire)) return;
+            if (self.shutdown.load(.acquire)) return false;
             const end = @min(i + batch_size, names.len);
-            self.lib.fetchMany(names[i..end]) catch {};
+            if (!self.lib.fetchBatch(names[i..end])) ok = false;
             if ((i / batch_size) % write_every == write_every - 1) self.scheduleCacheWrite();
         }
-        self.scheduleCacheWrite();
+        if (self.shutdown.load(.acquire)) return false;
+        return ok;
     }
 
     /// Submit a cache write to the pool, coalescing concurrent requests.
@@ -284,12 +295,209 @@ pub fn computeFingerprint(allocator: Allocator, runner: exec.Runner) ?Fingerprin
     const argv = [_][]const u8{ "ansible-doc", "--version" };
     const result = runner.run(allocator, &argv) catch return null;
     defer result.deinit(allocator);
-    if (result.stdout.len == 0) return null;
+    if (!result.success() or result.stdout.len == 0) return null;
     const line = std.mem.sliceTo(result.stdout, '\n');
     var hash = std.hash.Wyhash.init(0);
-    hash.update(line);
+    hash.update(result.stdout);
+    hashInstalledCollections(allocator, &hash, result.stdout);
     return .{
         .hash = std.fmt.allocPrint(allocator, "{x}", .{hash.final()}) catch return null,
         .version = allocator.dupe(u8, line) catch return null,
     };
+}
+
+fn hashInstalledCollections(allocator: Allocator, hash: *std.hash.Wyhash, version_stdout: []const u8) void {
+    const locations = versionOutputField(version_stdout, "ansible collection location") orelse return;
+    const project_config = @import("project_config.zig");
+    var path_it = std.mem.splitScalar(u8, locations, std.fs.path.delimiter);
+    while (path_it.next()) |raw| {
+        const trimmed = std.mem.trim(u8, raw, " \t\r");
+        if (trimmed.len == 0) continue;
+        hash.update("\x00root:");
+        hash.update(trimmed);
+        const base = project_config.collectionPathRoot(trimmed);
+        const root = std.fs.path.join(allocator, &.{ base, "ansible_collections" }) catch continue;
+        defer allocator.free(root);
+        hashCollectionsDir(allocator, hash, root);
+    }
+}
+
+fn versionOutputField(stdout: []const u8, key: []const u8) ?[]const u8 {
+    var it = std.mem.splitScalar(u8, stdout, '\n');
+    while (it.next()) |line| {
+        const trimmed = std.mem.trim(u8, line, " \t\r");
+        if (!std.mem.startsWith(u8, trimmed, key)) continue;
+        const rest = trimmed[key.len..];
+        const eq = std.mem.indexOfScalar(u8, rest, '=') orelse continue;
+        return std.mem.trim(u8, rest[eq + 1 ..], " \t");
+    }
+    return null;
+}
+
+fn hashCollectionsDir(allocator: Allocator, hash: *std.hash.Wyhash, root: []const u8) void {
+    const io = fsio.get();
+    var d = fsio.openDir(root, .{ .iterate = true }) catch return;
+    defer d.close(io);
+
+    var entries = std.ArrayList([]u8).empty;
+    defer {
+        for (entries.items) |e| allocator.free(e);
+        entries.deinit(allocator);
+    }
+
+    var ns_it = d.iterate();
+    while (ns_it.next(io) catch null) |ns_entry| {
+        if (ns_entry.kind != .directory) continue;
+        var ns_dir = d.openDir(io, ns_entry.name, .{ .iterate = true }) catch continue;
+        defer ns_dir.close(io);
+        var coll_it = ns_dir.iterate();
+        while (coll_it.next(io) catch null) |coll_entry| {
+            if (coll_entry.kind != .directory) continue;
+            const rel = std.fs.path.join(allocator, &.{ ns_entry.name, coll_entry.name }) catch continue;
+            entries.append(allocator, rel) catch {
+                allocator.free(rel);
+                continue;
+            };
+        }
+    }
+
+    std.mem.sort([]u8, entries.items, {}, struct {
+        fn lessThan(_: void, a: []u8, b: []u8) bool {
+            return std.mem.order(u8, a, b) == .lt;
+        }
+    }.lessThan);
+
+    const probes = [_][]const u8{ "MANIFEST.json", "galaxy.yml", "meta/runtime.yml", "plugins/modules" };
+    for (entries.items) |rel| {
+        hash.update("\x00coll:");
+        hash.update(rel);
+        var coll_dir = d.openDir(io, rel, .{}) catch continue;
+        defer coll_dir.close(io);
+        for (probes) |probe| {
+            const st = coll_dir.statFile(io, probe, .{}) catch continue;
+            hash.update("\x00stat:");
+            hash.update(probe);
+            const meta = [2]i128{ @as(i128, st.size), st.mtime.nanoseconds };
+            hash.update(std.mem.asBytes(&meta));
+        }
+    }
+}
+
+test "prefetch reports incomplete on failed or cancelled batch" {
+    const Fake = struct {
+        fail_batch: bool = false,
+        cancel_on_batch: ?*std.atomic.Value(bool) = null,
+
+        fn run(ptr: *anyopaque, a: Allocator, argv: []const []const u8) anyerror!exec.Result {
+            return runWithOptions(ptr, a, argv, .{});
+        }
+        fn runWithOptions(ptr: *anyopaque, a: Allocator, argv: []const []const u8, _: exec.Options) anyerror!exec.Result {
+            const self: *@This() = @ptrCast(@alignCast(ptr));
+            if (self.cancel_on_batch) |flag| {
+                flag.store(true, .release);
+                return error.Cancelled;
+            }
+            if (self.fail_batch) {
+                return .{
+                    .stdout = try a.dupe(u8, ""),
+                    .stderr = try a.dupe(u8, "boom"),
+                    .term = .{ .exited = 1 },
+                };
+            }
+            _ = argv;
+            return .{
+                .stdout = try a.dupe(u8, "{\"ns.one\": {\"doc\": {\"short_description\": \"ok\"}}}"),
+                .stderr = try a.dupe(u8, ""),
+                .term = .{ .exited = 0 },
+            };
+        }
+        const vtable = exec.Runner.VTable{ .run = run, .run_with_options = runWithOptions };
+    };
+
+    var fake_fail = Fake{ .fail_batch = true };
+    var lib_fail = DocsLibrary.init(std.testing.allocator, .{ .ptr = &fake_fail, .vtable = &Fake.vtable }, "ansible-doc");
+    defer lib_fail.deinit();
+    try lib_fail.catalog.put(try lib_fail.arena.allocator().dupe(u8, "ns.one"), .{ .name = "ns.one", .description = "" });
+    var svc_fail = DocsService.init(std.testing.allocator);
+    defer svc_fail.deinit();
+    svc_fail.lib = &lib_fail;
+    try std.testing.expect(!svc_fail.prefetch());
+
+    var svc_cancel = DocsService.init(std.testing.allocator);
+    defer svc_cancel.deinit();
+    var fake_cancel = Fake{ .cancel_on_batch = &svc_cancel.shutdown };
+    var lib_cancel = DocsLibrary.init(std.testing.allocator, .{ .ptr = &fake_cancel, .vtable = &Fake.vtable }, "ansible-doc");
+    defer lib_cancel.deinit();
+    try lib_cancel.catalog.put(try lib_cancel.arena.allocator().dupe(u8, "ns.one"), .{ .name = "ns.one", .description = "" });
+    svc_cancel.lib = &lib_cancel;
+    try std.testing.expect(!svc_cancel.prefetch());
+
+    var fake_ok = Fake{};
+    var lib_ok = DocsLibrary.init(std.testing.allocator, .{ .ptr = &fake_ok, .vtable = &Fake.vtable }, "ansible-doc");
+    defer lib_ok.deinit();
+    try lib_ok.catalog.put(try lib_ok.arena.allocator().dupe(u8, "ns.one"), .{ .name = "ns.one", .description = "" });
+    var svc_ok = DocsService.init(std.testing.allocator);
+    defer svc_ok.deinit();
+    svc_ok.lib = &lib_ok;
+    try std.testing.expect(svc_ok.prefetch());
+    try std.testing.expect(lib_ok.modules.get("ns.one") != null);
+}
+
+test "computeFingerprint changes with install location and collection updates" {
+    const Fake = struct {
+        stdout: []const u8,
+        fn run(ptr: *anyopaque, a: Allocator, argv: []const []const u8) anyerror!exec.Result {
+            return runWithOptions(ptr, a, argv, .{});
+        }
+        fn runWithOptions(ptr: *anyopaque, a: Allocator, _: []const []const u8, _: exec.Options) anyerror!exec.Result {
+            const self: *@This() = @ptrCast(@alignCast(ptr));
+            return .{
+                .stdout = try a.dupe(u8, self.stdout),
+                .stderr = try a.dupe(u8, ""),
+                .term = .{ .exited = 0 },
+            };
+        }
+        const vtable = exec.Runner.VTable{ .run = run, .run_with_options = runWithOptions };
+    };
+
+    var a1 = Fake{ .stdout = "ansible-doc [core 2.18.1]\n  ansible python module location = /venv1/ansible\n" };
+    var a2 = Fake{ .stdout = "ansible-doc [core 2.18.1]\n  ansible python module location = /venv2/ansible\n" };
+    const fp1 = computeFingerprint(std.testing.allocator, .{ .ptr = &a1, .vtable = &Fake.vtable }).?;
+    defer std.testing.allocator.free(fp1.hash);
+    defer std.testing.allocator.free(fp1.version);
+    const fp2 = computeFingerprint(std.testing.allocator, .{ .ptr = &a2, .vtable = &Fake.vtable }).?;
+    defer std.testing.allocator.free(fp2.hash);
+    defer std.testing.allocator.free(fp2.version);
+    try std.testing.expect(!std.mem.eql(u8, fp1.hash, fp2.hash));
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try tmp.dir.realPathFileAlloc(std.testing.io, ".", std.testing.allocator);
+    defer std.testing.allocator.free(dir);
+    const stdout = try std.fmt.allocPrint(
+        std.testing.allocator,
+        "ansible-doc [core 2.18.1]\n  ansible collection location = {s}\n",
+        .{dir},
+    );
+    defer std.testing.allocator.free(stdout);
+    var fake_coll = Fake{ .stdout = stdout };
+    const runner = exec.Runner{ .ptr = &fake_coll, .vtable = &Fake.vtable };
+
+    const before = computeFingerprint(std.testing.allocator, runner).?;
+    defer std.testing.allocator.free(before.hash);
+    defer std.testing.allocator.free(before.version);
+
+    try tmp.dir.createDirPath(std.testing.io, "ansible_collections/ns/coll");
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "ansible_collections/ns/coll/MANIFEST.json", .data = "{\"version\":\"1.0.0\"}" });
+
+    const after_install = computeFingerprint(std.testing.allocator, runner).?;
+    defer std.testing.allocator.free(after_install.hash);
+    defer std.testing.allocator.free(after_install.version);
+    try std.testing.expect(!std.mem.eql(u8, before.hash, after_install.hash));
+
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "ansible_collections/ns/coll/MANIFEST.json", .data = "{\"version\":\"1.1.0\",\"extra\":true}" });
+    const after_upgrade = computeFingerprint(std.testing.allocator, runner).?;
+    defer std.testing.allocator.free(after_upgrade.hash);
+    defer std.testing.allocator.free(after_upgrade.version);
+    try std.testing.expect(!std.mem.eql(u8, after_install.hash, after_upgrade.hash));
 }

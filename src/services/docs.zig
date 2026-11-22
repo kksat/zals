@@ -471,6 +471,20 @@ pub const DocsLibrary = struct {
         try self.ingestModuleJson(result.stdout);
     }
 
+    pub fn fetchBatch(self: *DocsLibrary, names: []const []const u8) bool {
+        if (names.len == 0) return true;
+        var argv = std.ArrayList([]const u8).empty;
+        defer argv.deinit(self.allocator);
+        argv.appendSlice(self.allocator, &.{ self.ansible_doc, "--json", "-t", "module" }) catch return false;
+        argv.appendSlice(self.allocator, names) catch return false;
+        const result = self.runner.runWithOptions(self.allocator, argv.items, self.execution) catch return false;
+        defer result.deinit(self.allocator);
+        if (!result.success() or result.stdout.len == 0) return false;
+        if (!docs_json.validate(self.allocator, result.stdout)) return false;
+        self.ingestModuleJson(result.stdout) catch return false;
+        return true;
+    }
+
     /// Fetch full docs for several modules in one `ansible-doc` invocation.
     pub fn fetchMany(self: *DocsLibrary, names: []const []const u8) !void {
         if (names.len == 0) return;
