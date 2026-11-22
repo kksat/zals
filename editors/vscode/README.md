@@ -171,6 +171,18 @@ validation. Common options:
 | `ansible.validation.lint.arguments`                | `""`             | Pass additional arguments to `ansible-lint`.                 |
 | `ansible.validation.lint.autoFixOnSave`            | `false`          | Opt in to `ansible-lint --fix` on save; this modifies files. |
 
+## Server status and troubleshooting
+
+The status bar shows zals readiness: **indexing…** while the workspace index
+builds, then the indexed file count once indexing finishes; the tooltip also
+reports module-docs readiness. Clicking the item opens the server output
+channel, where server diagnostics are logged.
+
+- **zals: Restart Language Server** — stops and starts the bundled server
+  without reloading the window (useful after changing the Ansible
+  environment the server should use).
+- **zals: Show Server Output** — opens the server output channel.
+
 ## Focused, local, and open source
 
 - **Runs on your extension host.** The bundled native server communicates

@@ -92,6 +92,18 @@
         "path": "./syntaxes/ansible.tmLanguage"
       }
     ],
+    "commands": [
+      {
+        "command": "zals.restart",
+        "title": "Restart Language Server",
+        "category": "zals"
+      },
+      {
+        "command": "zals.showOutput",
+        "title": "Show Server Output",
+        "category": "zals"
+      }
+    ],
     "configurationDefaults": {
       "[ansible]": {
         "editor.tabSize": 2,

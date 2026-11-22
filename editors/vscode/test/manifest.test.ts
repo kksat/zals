@@ -32,8 +32,13 @@ test("manifest requires VS Code engine ^1.82.0", () => {
   assert.equal(pkg.engines?.vscode, "^1.82.0");
 });
 
-test("manifest contributes only language client and no commands", () => {
-  assert.equal(pkg.contributes?.commands, undefined);
+test("manifest contributes the zals server commands", () => {
+  const commands = pkg.contributes?.commands;
+  assert.ok(commands, "contributes.commands should exist");
+  assert.deepEqual(
+    commands.map((c: { command: string }) => c.command).sort(),
+    ["zals.restart", "zals.showOutput"],
+  );
 });
 
 test("manifest contributes exactly the 9 approved settings", () => {
