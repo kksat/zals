@@ -153,11 +153,18 @@ Use the **Outline** view to navigate the current file.
 
 ## Fits your Ansible project
 
-zals recognizes common playbook and role paths, including tasks, handlers,
-defaults, vars, and metadata. It also supports Ansible metadata files such as
-`galaxy.yml`, `requirements.yml`, and `execution-environment.yml` with bundled
-schema validation. For other filenames, select **Ansible** as the language mode
-or add a targeted `files.associations` entry in VS Code settings.
+zals recognizes Ansible files where Ansible keeps them: playbooks (including
+their task and vars subdirectories), everything under `roles/` (tasks,
+handlers, defaults, vars, meta), collection metadata under
+`ansible_collections/`, inventory directories such as `host_vars/` and
+`group_vars/`, and Ansible metadata files such as `galaxy.yml`,
+`requirements.yml`, and `execution-environment.yml` with bundled schema
+validation. Convention directories are deliberately **not** claimed outside
+these layouts, so `src/tasks/` or `docs/vars/` in a polyglot repository keep
+their own language. A standalone role repository (with `tasks/` or `vars/` at
+the repository root, outside `roles/`) is not auto-detected: select
+**Ansible** as the language mode for those files, or add a targeted
+`files.associations` entry in VS Code settings.
 
 Open **Settings** and search for `@ext:kksat.zals` to adjust completion and
 validation. Common options:
