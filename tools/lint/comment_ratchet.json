@@ -23,7 +23,6 @@
     "src/lsp/types.zig": 9,
     "src/lsp/writer.zig": 8,
     "src/paths.zig": 17,
-    "src/providers/code_actions.zig": 89,
     "src/providers/collections.zig": 6,
     "src/providers/completion.zig": 1,
     "src/providers/document_symbols.zig": 10,
