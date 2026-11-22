@@ -187,6 +187,13 @@ relative filesystem targets
 For Neovim, see the [filetype and LSP setup](docs/neovim.md), including
 `requirements.yml`, collection metadata, and Jinja templates.
 
+## Design and requirements
+
+See the [architecture](docs/DESIGN.md) and
+[architecture decisions](docs/adr/README.md) for the existing design. The
+[native Ansible AST and CEL diagnostics PRDs](docs/prd/README.md) record proposed
+feature requirements and acceptance criteria, not shipped functionality.
+
 ## Releasing
 
 Releases are driven by [release-please](https://github.com/googleapis/release-please)

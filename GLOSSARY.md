@@ -5,7 +5,7 @@ vocabulary of variable navigation (finding the definition of a variable and
 finding every reference to it), of the document outline (the symbols a client
 shows for a single file), of code actions (adding and removing a debug task
 for a variable, and extracting tasks into a task file), and of the project
-tree.
+tree, together with the vocabulary of the native diagnostic design.
 
 ## Language
 
@@ -128,6 +128,24 @@ _Avoid_: module, helper
 The key of a task map that names the Module the task invokes.
 _Avoid_: action key, module name
 
+**Ansible AST**:
+A source-backed, recovered representation of Ansible document structure, values,
+and observed parsing problems. It describes the source that can be interpreted,
+not a complete model of Ansible execution.
+_Avoid_: execution graph, YAML DOM
+
+**Parse issue**:
+An observed inability to interpret a source region as YAML or as the required
+Ansible structure. It does not necessarily identify one omitted Task or the
+number of Tasks the author intended.
+_Avoid_: incomplete Task, synthetic Task
+
+**CEL rule**:
+A named diagnostic policy that selects Ansible source entities and reports a
+finding when its condition matches. Built-in and custom CEL rules share this
+meaning.
+_Avoid_: Python lint rule, query script
+
 **Document symbol**:
 An entity shown in a client's outline for a single document.
 _Avoid_: outline entry, breadcrumb
@@ -206,6 +224,12 @@ A task or play key whose value is a Jinja expression without delimiters:
 `when`, `changed_when`, `failed_when`, `until`, `loop`, `with_*`, and
 `assert.that`.
 _Avoid_: implicit template, raw expression
+
+**Templated value**:
+An Ansible value whose meaning depends on a runtime expression rather than
+entirely on literal source. Its source expression can be known without knowing
+its computed value.
+_Avoid_: CEL dyn, missing value
 
 **Debug statement**:
 A task that invokes the `debug` module (`debug` or `*.debug`) to print a
