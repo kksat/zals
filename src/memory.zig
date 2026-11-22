@@ -1,17 +1,17 @@
 const builtin = @import("builtin");
 
-const MallocTrim = if (trim_supported)
-    @extern(?*const fn (pad: usize) c_int, .{
-        .name = "malloc_trim",
-        .linkage = .weak,
-    })
-else
-    null;
-
 const trim_supported = builtin.link_libc and builtin.os.tag == .linux and
-    builtin.mode != .debug;
+    builtin.abi.isGnu() and builtin.mode != .debug;
+
+const glibc = struct {
+    extern "c" fn malloc_trim(pad: usize) c_int;
+};
 
 pub fn trimReleasedHeap() void {
     if (!trim_supported) return;
-    if (MallocTrim) |f| _ = f(0);
+    _ = glibc.malloc_trim(0);
+}
+
+test "trimReleasedHeap is safe to call" {
+    trimReleasedHeap();
 }
