@@ -69,6 +69,7 @@ pub const DocsLibrary = struct {
     module_fqcns: std.StringHashMap(void),
     attempted: std.StringHashMap(void),
     arena: std.heap.ArenaAllocator,
+    extra_arenas: std.ArrayList(std.heap.ArenaAllocator) = .empty,
     ready: bool = false,
     /// Guards all maps, arena allocation, readiness, and version. Never held
     /// across a subprocess or disk I/O; cache encoding stays under the lock.
@@ -95,7 +96,15 @@ pub const DocsLibrary = struct {
         self.modules.deinit();
         self.module_fqcns.deinit();
         self.attempted.deinit();
+        for (self.extra_arenas.items) |*a| a.deinit();
+        self.extra_arenas.deinit(self.allocator);
         self.arena.deinit();
+    }
+
+    fn adoptArenaAssumeCapacity(self: *DocsLibrary, stage: *std.heap.ArenaAllocator) void {
+        if (stage.queryCapacity() == 0) return;
+        self.extra_arenas.appendAssumeCapacity(stage.*);
+        stage.* = std.heap.ArenaAllocator.init(self.allocator);
     }
 
     /// Seed `ansible.builtin.*` modules from `base` (which loads the on-disk
@@ -145,17 +154,23 @@ pub const DocsLibrary = struct {
         if (!result.success() or result.stdout.len == 0) return false;
         if (!docs_json.validate(self.allocator, result.stdout)) return false;
 
+        var stage = std.heap.ArenaAllocator.init(self.allocator);
+        defer stage.deinit();
         var modules = std.ArrayList(Module).empty;
         defer modules.deinit(self.allocator);
         {
-            self.mutex.lock();
-            defer self.mutex.unlock();
-            var parser = docs_json.Parser.init(self.arena.allocator(), self.allocator, result.stdout);
+            var parser = docs_json.Parser.init(stage.allocator(), self.allocator, result.stdout);
             defer parser.deinit();
             const found = parser.metadataDump(&modules) catch return false;
             if (!found) return false;
-            for (modules.items) |m| self.modules.put(m.name, m) catch return false;
         }
+        const add_count = std.math.cast(u32, modules.items.len) orelse return false;
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        self.modules.ensureUnusedCapacity(add_count) catch return false;
+        self.extra_arenas.ensureUnusedCapacity(self.allocator, 1) catch return false;
+        self.adoptArenaAssumeCapacity(&stage);
+        for (modules.items) |m| self.modules.putAssumeCapacity(m.name, m);
         return true;
     }
 
@@ -166,16 +181,25 @@ pub const DocsLibrary = struct {
         if (result.stdout.len == 0) return;
         if (!docs_json.validate(self.allocator, result.stdout)) return;
 
+        var stage = std.heap.ArenaAllocator.init(self.allocator);
+        defer stage.deinit();
+        var entries = std.ArrayList(CatalogEntry).empty;
+        defer entries.deinit(self.allocator);
         {
-            self.mutex.lock();
-            defer self.mutex.unlock();
-            var parser = docs_json.Parser.init(self.arena.allocator(), self.allocator, result.stdout);
+            var parser = docs_json.Parser.init(stage.allocator(), self.allocator, result.stdout);
             defer parser.deinit();
-            var entries = std.ArrayList(CatalogEntry).empty;
-            defer entries.deinit(self.allocator);
-            parser.catalogEntries(&entries) catch return;
-            for (entries.items) |entry| try self.catalog.put(entry.name, entry);
+            parser.catalogEntries(&entries) catch |err| switch (err) {
+                error.OutOfMemory => return error.OutOfMemory,
+                else => return,
+            };
         }
+        const add_count = std.math.cast(u32, entries.items.len) orelse return error.OutOfMemory;
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        try self.catalog.ensureUnusedCapacity(add_count);
+        try self.extra_arenas.ensureUnusedCapacity(self.allocator, 1);
+        self.adoptArenaAssumeCapacity(&stage);
+        for (entries.items) |entry| self.catalog.putAssumeCapacity(entry.name, entry);
         self.ready = true;
     }
 
@@ -395,18 +419,33 @@ pub const DocsLibrary = struct {
         const version = docs_json.topLevelVersion(allocator, bytes) orelse return false;
         if (version != cache_format_version) return false;
 
-        self.mutex.lock();
-        defer self.mutex.unlock();
-        var parser = docs_json.Parser.init(self.arena.allocator(), allocator, bytes);
-        defer parser.deinit();
+        var stage = std.heap.ArenaAllocator.init(self.allocator);
+        defer stage.deinit();
         var cache = docs_json.CacheDocument{};
         defer cache.deinit(allocator);
-        try parser.cacheDocument(&cache);
+        {
+            var parser = docs_json.Parser.init(stage.allocator(), allocator, bytes);
+            defer parser.deinit();
+            parser.cacheDocument(&cache) catch |err| switch (err) {
+                error.OutOfMemory => return error.OutOfMemory,
+                else => return false,
+            };
+        }
+
+        const cat_add = std.math.cast(u32, cache.catalog.items.len) orelse return error.OutOfMemory;
+        const mod_add = std.math.cast(u32, cache.modules.items.len) orelse return error.OutOfMemory;
+
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        try self.catalog.ensureUnusedCapacity(cat_add);
+        try self.modules.ensureUnusedCapacity(mod_add);
+        try self.extra_arenas.ensureUnusedCapacity(self.allocator, 1);
+        self.adoptArenaAssumeCapacity(&stage);
 
         if (cache.ansible_version) |ver| self.ansible_version = ver;
         self.cache_complete = cache.complete;
-        for (cache.catalog.items) |entry| try self.catalog.put(entry.name, entry);
-        for (cache.modules.items) |m| try self.modules.put(m.name, m);
+        for (cache.catalog.items) |entry| self.catalog.putAssumeCapacity(entry.name, entry);
+        for (cache.modules.items) |m| self.modules.putAssumeCapacity(m.name, m);
 
         self.ready = true;
         return true;
@@ -446,19 +485,28 @@ pub const DocsLibrary = struct {
     }
 
     /// Stream one `ansible-doc --json` document into the library. The
-    /// document is validated up front; malformed output ingests nothing.
+    /// document is validated and parsed into a staging arena outside the lock.
     fn ingestModuleJson(self: *DocsLibrary, stdout: []const u8) !void {
         if (!docs_json.validate(self.allocator, stdout)) return;
+        var stage = std.heap.ArenaAllocator.init(self.allocator);
+        defer stage.deinit();
         var modules = std.ArrayList(Module).empty;
         defer modules.deinit(self.allocator);
         {
-            self.mutex.lock();
-            defer self.mutex.unlock();
-            var parser = docs_json.Parser.init(self.arena.allocator(), self.allocator, stdout);
+            var parser = docs_json.Parser.init(stage.allocator(), self.allocator, stdout);
             defer parser.deinit();
-            parser.moduleMap(&modules) catch return;
-            for (modules.items) |m| try self.modules.put(m.name, m);
+            parser.moduleMap(&modules) catch |err| switch (err) {
+                error.OutOfMemory => return error.OutOfMemory,
+                else => return,
+            };
         }
+        const add_count = std.math.cast(u32, modules.items.len) orelse return error.OutOfMemory;
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        try self.modules.ensureUnusedCapacity(add_count);
+        try self.extra_arenas.ensureUnusedCapacity(self.allocator, 1);
+        self.adoptArenaAssumeCapacity(&stage);
+        for (modules.items) |m| self.modules.putAssumeCapacity(m.name, m);
     }
 };
 
@@ -533,4 +581,48 @@ test "loadMetadataDump ingests every module from one call" {
     var lib3 = DocsLibrary.init(std.testing.allocator, .{ .ptr = &no_modules, .vtable = &Fake.vtable }, "ansible-doc");
     defer lib3.deinit();
     try std.testing.expect(!lib3.loadMetadataDump());
+}
+
+test "restoreCache rejects duplicate keys and stays atomic on OOM" {
+    const runner = exec.Posix.posixRunner();
+    var lib = DocsLibrary.init(std.testing.allocator, runner, "ansible-doc");
+    defer lib.deinit();
+
+    const dup = "{\"version\": 3, \"version\": 4, \"complete\": true, \"catalog\": {\"ns.a\": \"d\"}}";
+    try std.testing.expect(!(try lib.restoreCache(std.testing.allocator, dup)));
+    try std.testing.expect(!lib.ready);
+    try std.testing.expect(!lib.cacheComplete());
+    try std.testing.expectEqual(@as(usize, 0), lib.catalogCount());
+
+    const valid =
+        \\{"version": 3, "ansible_version": "ansible [core 2.18]", "complete": true,
+        \\ "catalog": {"ns.one": "desc"},
+        \\ "modules": {"ns.one": {"description": "one", "filename": "/x/one.py",
+        \\   "options": {"path": {"description": "p", "type": "str", "required": true}}}}}
+    ;
+    var fail_index: usize = 0;
+    while (fail_index < 64) : (fail_index += 1) {
+        var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = fail_index });
+        var oom_lib = DocsLibrary.init(failing.allocator(), runner, "ansible-doc");
+        defer oom_lib.deinit();
+        if (oom_lib.restoreCache(std.testing.allocator, valid)) |ok| {
+            if (ok) {
+                try std.testing.expect(oom_lib.ready);
+                try std.testing.expect(oom_lib.cacheComplete());
+                try std.testing.expectEqual(@as(usize, 1), oom_lib.catalogCount());
+                try std.testing.expect(oom_lib.modules.get("ns.one") != null);
+                break;
+            }
+            try std.testing.expect(!oom_lib.ready);
+            try std.testing.expect(!oom_lib.cacheComplete());
+            try std.testing.expectEqual(@as(usize, 0), oom_lib.catalogCount());
+        } else |err| {
+            try std.testing.expectEqual(error.OutOfMemory, err);
+            try std.testing.expect(!oom_lib.ready);
+            try std.testing.expect(!oom_lib.cacheComplete());
+            try std.testing.expectEqual(@as(usize, 0), oom_lib.catalogCount());
+            try std.testing.expectEqual(@as(usize, 0), oom_lib.modules.count());
+            try std.testing.expectEqualStrings("", oom_lib.ansible_version);
+        }
+    }
 }
