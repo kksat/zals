@@ -171,6 +171,9 @@ is reported best-effort via `$/progress`.
 ## 8. Protocol and runtime
 
 - **Transport:** hand-rolled JSON-RPC over stdio using `std.json`.
+- **Cancellation:** `$/cancelRequest` is honored for requests that have not
+  started; dispatch drains buffered input, defers later messages in order, and
+  answers cancelled ids with `RequestCancelled` ([ADR-0050](adr/0050-request-cancellation.md)).
 - **Sync:** incremental (`TextDocumentSyncKind.Incremental`); position encoding
   negotiated as `utf-8` when the client supports it, else `utf-16`.
 - **Concurrency:** main thread owns state; worker pool + docs thread +

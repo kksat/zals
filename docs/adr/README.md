@@ -50,9 +50,11 @@ Each ADR captures one decision, its context, and its consequences. Statuses are
 | [0043](0043-custom-readiness-without-refresh.md) | Custom readiness without configuration refresh | Accepted |
 | [0044](0044-user-facing-release-notes.md) | User-facing release notes | Accepted |
 | [0045](0045-variable-files.md) | Variable files | Accepted |
+| [0046](0046-root-variable-rename.md) | Root variable rename | Accepted |
 | [0047](0047-personal-owner-release-approval.md) | Personal-owner release-note approval | Accepted |
 | [0048](0048-no-inline-code-comments.md) | No inline code comments | Accepted |
 | [0049](0049-vendored-parser-optimized-in-every-build-mode.md) | Optimize the vendored parser in every build mode | Accepted |
+| [0050](0050-request-cancellation.md) | Client request cancellation | Accepted |
 
 ## Template
 
