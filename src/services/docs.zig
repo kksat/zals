@@ -146,6 +146,7 @@ pub const DocsLibrary = struct {
         if (!docs_json.validate(self.allocator, result.stdout)) return false;
 
         var modules = std.ArrayList(Module).empty;
+        defer modules.deinit(self.allocator);
         {
             self.mutex.lock();
             defer self.mutex.unlock();
@@ -171,6 +172,7 @@ pub const DocsLibrary = struct {
             var parser = docs_json.Parser.init(self.arena.allocator(), self.allocator, result.stdout);
             defer parser.deinit();
             var entries = std.ArrayList(CatalogEntry).empty;
+            defer entries.deinit(self.allocator);
             parser.catalogEntries(&entries) catch return;
             for (entries.items) |entry| try self.catalog.put(entry.name, entry);
         }
@@ -398,6 +400,7 @@ pub const DocsLibrary = struct {
         var parser = docs_json.Parser.init(self.arena.allocator(), allocator, bytes);
         defer parser.deinit();
         var cache = docs_json.CacheDocument{};
+        defer cache.deinit(allocator);
         try parser.cacheDocument(&cache);
 
         if (cache.ansible_version) |ver| self.ansible_version = ver;
@@ -447,6 +450,7 @@ pub const DocsLibrary = struct {
     fn ingestModuleJson(self: *DocsLibrary, stdout: []const u8) !void {
         if (!docs_json.validate(self.allocator, stdout)) return;
         var modules = std.ArrayList(Module).empty;
+        defer modules.deinit(self.allocator);
         {
             self.mutex.lock();
             defer self.mutex.unlock();
