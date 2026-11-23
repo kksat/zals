@@ -1,0 +1,10 @@
+zals.Rule{
+  id: "name[missing]",
+  target: "task",
+  severity: "warning",
+  field: "action",
+  condition: !node.is_block &&
+    !(node.short_action in ["meta", "include_tasks", "import_tasks", "include_role", "import_role", "debug", "fail", "assert", "set_fact", "include_vars", "block"]) &&
+    (!node.has_name || node.name_text == ""),
+  message: "All tasks should be named."
+}

@@ -183,7 +183,7 @@ local ok, err = xpcall(function()
     -- error diagnostic in the buffer, a valid one must stay clean.
     local published = {}
     local root = start_server(vim.fn.tempname(), {
-      ansible = { validation = { enabled = true, lint = { enabled = false } } },
+      ansible = { validation = { enabled = true, cel = { enabled = false }, lint = { enabled = true, path = "__missing_ansible_lint__" } } },
     }, {
       ["textDocument/publishDiagnostics"] = function(_, result)
         if result and result.uri then published[result.uri] = result.diagnostics or {} end

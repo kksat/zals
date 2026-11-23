@@ -1,0 +1,8 @@
+zals.Rule{
+  id: "deprecated-local-action",
+  target: "task",
+  severity: "warning",
+  field: "local_action",
+  condition: node.has_local_action,
+  message: "Do not use 'local_action', use 'delegate_to: localhost'."
+}

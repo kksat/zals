@@ -20,7 +20,7 @@ pub fn didOpen(self: *Server, a: Allocator, params: Value) !void {
     providers.validation.publish(self, a, uri) catch {};
 }
 
-pub fn didChange(self: *Server, params: Value) !void {
+pub fn didChange(self: *Server, a: Allocator, params: Value) !void {
     const td = json_util.field(params, "textDocument") orelse return;
     const uri = json_util.string(td, "uri") orelse return;
     const version = json_util.integer(td, "version") orelse 0;
@@ -34,18 +34,20 @@ pub fn didChange(self: *Server, params: Value) !void {
         try events.append(.{ .range = range, .text = text });
     }
     try self.documents.applyChanges(uri, version, events.items);
+    providers.validation.onChange(self, a, uri) catch {};
 }
 
-pub fn didClose(self: *Server, params: Value) !void {
+pub fn didClose(self: *Server, a: Allocator, params: Value) !void {
     const td = json_util.field(params, "textDocument") orelse return;
     const uri = json_util.string(td, "uri") orelse return;
     self.documents.close(uri);
+    providers.validation.onClose(self, a, uri) catch {};
 }
 
 pub fn didSave(self: *Server, a: Allocator, params: Value) !void {
     const td = json_util.field(params, "textDocument") orelse return;
     const uri = json_util.string(td, "uri") orelse return;
-    providers.validation.publish(self, a, uri) catch {};
+    providers.validation.onSave(self, a, uri) catch {};
     const path = paths.uriToPath(a, uri) catch return;
     self.reindexPath(a, path);
 }
@@ -58,10 +60,13 @@ pub fn didChangeWatchedFiles(self: *Server, a: Allocator, params: Value) !void {
         const kind = json_util.integer(c, "type") orelse 2;
         const path = paths.uriToPath(a, uri) catch continue;
         if (kind == 3) {
-            const resolved = workspace_session.resolvedPath(a, path) catch continue;
+            const resolved = workspace_session.resolvedPath(a, path) catch path;
             self.index.remove(resolved);
+            providers.validation.onWatchedFile(self, a, resolved, true) catch {};
         } else {
             self.reindexPath(a, path);
+            const resolved = workspace_session.resolvedPath(a, path) catch path;
+            providers.validation.onWatchedFile(self, a, resolved, false) catch {};
         }
     }
 }
@@ -81,6 +86,7 @@ pub fn didChangeWorkspaceFolders(self: *Server, a: Allocator, params: Value) !vo
         }
     }
     try self.applySession(a, .{ .folders_changed = .{ .removed = removed.items, .added = added.items } });
+    providers.validation.reloadAndRevalidateAll(self, a) catch {};
 }
 
 test "saved and watched symlink paths use the snapshot's resolved membership" {

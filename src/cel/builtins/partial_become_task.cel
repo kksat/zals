@@ -1,0 +1,8 @@
+zals.Rule{
+  id: "partial-become[task]",
+  target: "task",
+  severity: "error",
+  field: "become_user",
+  condition: node.has_become_user && !node.has_become,
+  message: "become_user requires become to work as expected."
+}

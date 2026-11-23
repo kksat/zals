@@ -1,0 +1,11 @@
+zals.Rule{
+  id: "zals/parse-issue",
+  target: "parse_issue",
+  severity: "error",
+  condition: true,
+  message:
+    "Cannot parse " + location.path +
+    " on line " + string(location.line) +
+    ", column " + string(location.column) +
+    ": " + node.message
+}

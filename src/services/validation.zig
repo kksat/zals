@@ -19,34 +19,20 @@ pub const Snapshot = struct {
 };
 
 pub const Options = struct {
-    lint_enabled: bool = true,
+    schema_enabled: bool = true,
+    lint_enabled: bool = false,
     lint_path: []const u8 = "ansible-lint",
     lint_arguments: []const u8 = "",
 };
 
 pub const Result = struct {
     diagnostics: []const types.Diagnostic = &.{},
-    /// Null means not run, never clean. Failure/unavailability survives even
-    /// when schema diagnostics exist or a tool yields no diagnostics.
+    schema_diagnostics: []const types.Diagnostic = &.{},
+    external_diagnostics: []const types.Diagnostic = &.{},
     lint_status: ?lint.Status = null,
     syntax_status: ?lint.Status = null,
 };
 
-/// Validate an enabled document using borrowed options/schema and an injected
-/// Runner. The caller handles globally disabled validation by publishing empty
-/// diagnostics without needing a document. Results/strings live in `arena`.
-///
-/// External tools use the existing disk file if it can be opened, otherwise a
-/// temporary copy of the buffer; schema validation always uses the buffer's
-/// first YAML root and reports whole-document ranges. Temporary files are
-/// removed on success and error (deletion is best-effort).
-///
-/// Disabled lint retains the existing policy: syntax-check runs only when
-/// schema diagnostics are empty. Enabled-but-unavailable lint runs syntax-check
-/// regardless of schema findings (ADR-0015), merging schema diagnostics first.
-/// Only executable/spawn unavailability triggers that fallback: clean/findings,
-/// invalid output, abnormal termination and other execution failures do not.
-/// Tool/schema allocation errors propagate rather than masquerading as absence.
 pub fn validate(
     arena: Allocator,
     snapshot: Snapshot,
@@ -54,26 +40,27 @@ pub fn validate(
     runner: exec.Runner,
     document_schema: ?Value,
 ) !Result {
-    const path = try paths.uriToPath(arena, snapshot.uri);
-    const target = try existingOrTemp(arena, path, snapshot.bytes);
-    defer target.deinit();
-
     var result = Result{};
-    if (document_schema) |sch| {
-        result.diagnostics = try schemaDiags(arena, snapshot, sch);
+    if (options.schema_enabled) {
+        if (document_schema) |sch| {
+            result.schema_diagnostics = try schemaDiags(arena, snapshot, sch);
+        }
     }
-    var syntax_fallback = !options.lint_enabled and result.diagnostics.len == 0;
     if (options.lint_enabled) {
+        const path = try paths.uriToPath(arena, snapshot.uri);
+        const target = try existingOrTemp(arena, path, snapshot.bytes);
+        defer target.deinit();
+
         const outcome = try lint.lintFile(arena, runner, options.lint_path, options.lint_arguments, target.path);
         result.lint_status = outcome.status;
-        result.diagnostics = try concatDiags(arena, result.diagnostics, outcome.diagnostics);
-        syntax_fallback = outcome.status == .unavailable;
+        result.external_diagnostics = outcome.diagnostics;
+        if (outcome.status == .unavailable) {
+            const syntax_outcome = try lint.syntaxCheck(arena, runner, "ansible-playbook", target.path, snapshot.document_range);
+            result.syntax_status = syntax_outcome.status;
+            result.external_diagnostics = try concatDiags(arena, result.external_diagnostics, syntax_outcome.diagnostics);
+        }
     }
-    if (syntax_fallback) {
-        const outcome = try lint.syntaxCheck(arena, runner, "ansible-playbook", target.path, snapshot.document_range);
-        result.syntax_status = outcome.status;
-        result.diagnostics = try concatDiags(arena, result.diagnostics, outcome.diagnostics);
-    }
+    result.diagnostics = try concatDiags(arena, result.schema_diagnostics, result.external_diagnostics);
     return result;
 }
 

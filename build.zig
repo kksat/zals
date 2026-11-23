@@ -174,6 +174,12 @@ pub fn build(b: *std.Build) void {
             .description = "Run root variable rename negative and non-collateral-edit tests",
             .inputs = &.{ "test/fixtures/e2e-workspace", "test/dependencies" },
         },
+        .{
+            .name = "cel-diagnostics-e2e",
+            .source = "test/cel_diagnostics_e2e.zig",
+            .description = "Run native CEL diagnostics real-stdio end-to-end tests",
+            .inputs = &.{},
+        },
     };
     for (suites) |suite| {
         const tests = b.addTest(.{ .root_module = b.createModule(.{
