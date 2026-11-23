@@ -1,0 +1,8 @@
+zals.Rule{
+  id: "name[play]",
+  target: "play",
+  severity: "warning",
+  field: "hosts",
+  condition: !node.is_import_playbook && (!node.has_name || node.name_text == ""),
+  message: "All plays should be named."
+}

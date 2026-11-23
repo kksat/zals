@@ -86,12 +86,13 @@ pub fn handleNotification(self: *Server, a: Allocator, method: []const u8, param
         return;
     }
     if (std.mem.eql(u8, method, "textDocument/didOpen")) return sync.didOpen(self, a, params);
-    if (std.mem.eql(u8, method, "textDocument/didChange")) return sync.didChange(self, params);
-    if (std.mem.eql(u8, method, "textDocument/didClose")) return sync.didClose(self, params);
+    if (std.mem.eql(u8, method, "textDocument/didChange")) return sync.didChange(self, a, params);
+    if (std.mem.eql(u8, method, "textDocument/didClose")) return sync.didClose(self, a, params);
     if (std.mem.eql(u8, method, "textDocument/didSave")) return sync.didSave(self, a, params);
     if (std.mem.eql(u8, method, "workspace/didChangeConfiguration")) {
         try self.settings.update(params);
         try self.applySession(a, .{ .config_changed = SessionConfig.from(&self.settings) });
+        providers.validation.reloadAndRevalidateAll(self, a) catch {};
         return;
     }
     if (std.mem.eql(u8, method, "workspace/didChangeWorkspaceFolders")) {

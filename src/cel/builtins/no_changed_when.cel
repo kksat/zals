@@ -1,0 +1,13 @@
+zals.Rule{
+  id: "no-changed-when",
+  target: "task",
+  severity: "warning",
+  field: "action",
+  condition: !node.in_handlers &&
+    node.short_action in ["command", "shell", "raw"] &&
+    !node.has_changed_when &&
+    !("creates" in node.args) &&
+    !("removes" in node.args) &&
+    !(node.has_async && node.has_poll && node.poll != null && node.poll.kind == "int" && node.poll.value == 0),
+  message: "Commands should not change things if nothing needs doing."
+}

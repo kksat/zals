@@ -68,8 +68,13 @@ else:
         smoke_cold_start.BIN = binary
         client = smoke_cold_start.Client(str(root), env)
         try:
-            client.request("initialize", {"processId": None, "rootUri": root.as_uri(),
-                                          "capabilities": {}})
+            init_params = {"processId": None, "rootUri": root.as_uri(),
+                           "capabilities": {}}
+            if stage == "lint":
+                init_params["initializationOptions"] = {
+                    "ansible": {"validation": {"lint": {"enabled": True}}}
+                }
+            client.request("initialize", init_params)
             client.notify("initialized", {})
             if stage == "lint":
                 site = root / "site.yml"

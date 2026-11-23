@@ -149,6 +149,7 @@ pub const Server = struct {
             var ready = json_util.obj(a);
             try ready.put("filesCount", json_util.num(@as(i64, @intCast(self.index.count()))));
             try self.notify(a, "ansible/workspaceIndexReady", .{ .object = ready });
+            validation_provider.onWorkspaceIndexReady(self, a) catch {};
         }
         if (self.docs_service.takeReadyEvent()) {
             var ready = json_util.obj(a);
@@ -187,7 +188,7 @@ pub const Server = struct {
     pub fn registerFileWatchers(self: *Server, a: Allocator) !void {
         if (!self.can_watch_files) return;
         var watchers = std.json.Array.init(a);
-        for ([_][]const u8{ "**/*.{yml,yaml,j2}", "**/plugins/**/*.{py,ps1}", "**/ansible.cfg", "**/galaxy.{yml,yaml}" }) |glob| {
+        for ([_][]const u8{ "**/*.{yml,yaml,j2}", "**/plugins/**/*.{py,ps1}", "**/ansible.cfg", "**/galaxy.{yml,yaml}", "**/*.cel" }) |glob| {
             var w = json_util.obj(a);
             try w.put("globPattern", json_util.str(glob));
             try watchers.append(.{ .object = w });
