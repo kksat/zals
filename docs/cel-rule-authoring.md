@@ -29,6 +29,23 @@ zals.Rule{
 - See [`docs/cel-rule-environment.json`](cel-rule-environment.json) for the
   complete machine-readable v1 environment schema, bindings, target fields,
   supported functions, and resource limits.
+- For editor completion, hover docs, go-to-definition, and static type checking
+  with [`cells`](https://github.com/stefanvanburen/cells), Zals ships a
+  `cel-go` environment config and compiled protobuf descriptor set under
+  `docs/cel/`:
+  - `docs/cel/cel.yaml` — declares `node`, `location`, `document`, `context`,
+    `metadata`, and `options`.
+  - `docs/cel/zals.proto` — documented protobuf definitions for `zals.Rule`,
+    `zals.Node`, per-target messages (`zals.Task`, `zals.Play`, `zals.RoleRef`,
+    `zals.VarDef`, `zals.RoleMeta`, `zals.GalaxyMeta`, `zals.ParseIssue`),
+    `zals.Location`, `zals.Document`, `zals.Metadata`, `zals.TypedValue`, and
+    `zals.CommandInfo`.
+  - `docs/cel/zals.binpb` — compiled `FileDescriptorSet` with source comments
+    (`protoc --include_imports --include_source_info -I docs/cel --descriptor_set_out=docs/cel/zals.binpb docs/cel/zals.proto`).
+  - CLI check: `cells check --config=docs/cel/cel.yaml --descriptor-set=docs/cel/zals.binpb path/to/rule.cel`.
+  - To narrow `node` strictly to one target in a folder of rules (for example,
+    task-only rules), drop a local `cel.yaml` in that folder setting
+    `node`'s `type_name` to `zals.Task` (or `zals.Play`, `zals.RoleMeta`, etc.).
 
 ## Configuration and migration notes
 

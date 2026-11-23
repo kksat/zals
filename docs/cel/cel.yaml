@@ -1,0 +1,29 @@
+name: zals-cel-v1
+description: Zals native Ansible CEL rule environment (schema_version 1)
+variables:
+  - name: node
+    type_name: zals.Node
+    description: >-
+      Selected Ansible AST target node (task, play, role_ref, var_def,
+      role_meta, galaxy_meta, parse_issue, or document).
+  - name: location
+    type_name: zals.Location
+    description: 1-based source path, line, and column of the diagnostic range.
+  - name: document
+    type_name: zals.Document
+    description: Read-only facts for the Ansible document being evaluated.
+  - name: context
+    type_name: map
+    params:
+      - type_name: string
+      - type_name: dyn
+    description: Read-only enclosing/sibling AST context map.
+  - name: metadata
+    type_name: zals.Metadata
+    description: Read-only collected Ansible environment metadata snapshot.
+  - name: options
+    type_name: map
+    params:
+      - type_name: string
+      - type_name: dyn
+    description: Effective per-rule LSP options configured under ansible.validation.cel.rules.
