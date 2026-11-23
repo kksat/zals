@@ -3,7 +3,7 @@
 These product requirements documents (PRDs) are for implementers and reviewers
 of Zals's native Ansible diagnostics. They record the agreed product scope and
 provide acceptance criteria; they do **not** describe shipped functionality or
-a completed CEL-C++ integration.
+a completed zig-cel integration.
 
 **Document status:** Drafts recording agreed requirements, ready for review.
 **Repository baseline:** `fb808719d04b9bf68c33c09f588fec934f3847ba`, after rebasing
@@ -17,7 +17,7 @@ Each document owns one part of the contract:
 | Document | Responsibility |
 | --- | --- |
 | [PRD-0001: Recovered Ansible AST](0001-ansible-ast.md) | Minimal rule-driven representation, structural admission, maximal bounded recovery, Parse issues, source/metadata snapshots |
-| [PRD-0002: Native CEL rules and rule authoring](0002-cel-rules.md) | CEL-C++ embedding, typed one-rule-per-file authoring, conditions/messages, custom-rule loading, limits, and reload behavior |
+| [PRD-0002: Native CEL rules and rule authoring](0002-cel-rules.md) | zig-cel embedding, typed one-rule-per-file authoring, conditions/messages, custom-rule loading, limits, and reload behavior |
 | [PRD-0003: Workspace-wide native diagnostics](0003-workspace-diagnostics.md) | Provider defaults, Workspace-wide scheduling, LSP locations, settings, suppressions, compatibility, and failure presentation |
 | [Native coverage of ansible-lint checks](ansible-lint-coverage.md) | Complete pinned built-in inventory and approved implement/defer/exclude decisions |
 
@@ -43,9 +43,9 @@ interpreter, or every upstream lint rule.
 The following decisions are requirements, not alternatives still awaiting
 selection:
 
-- **Engine:** embed CEL-C++ in the native Zig server through a C-compatible
-  interface. Do not implement another CEL interpreter or require a separate
-  runtime service.
+- **Engine:** evaluate rules with [zig-cel](https://github.com/kksat/zig-cel)
+  (pinned commit `895a750`), consumed as a vendored source dependency until it
+  publishes a package manifest. Do not require a separate runtime service.
 - **Catalog:** implement the support entries in the pinned ansible-lint 26.11.0
   matrix. Omit whole deferred/excluded subrules rather than approximate easy
   cases under the same compatibility claim.
@@ -102,7 +102,7 @@ supersede rather than contradict through code alone:
 | [ADR-0004: YAML parsing](../adr/0004-yaml-parsing-tree-sitter.md) | Local recovery and Parse issues must replace the blanket-error fallback where needed without inventing valid structure |
 | [ADR-0011: Threading](../adr/0011-threading-topology.md) and [ADR-0013: Memory](../adr/0013-memory-management.md) | Own immutable input/program lifetimes and keep worker/publication responsibilities clear |
 | [ADR-0015: Validation](../adr/0015-validation-behavior.md) | Add an independent native source while preserving enabled external compatibility and documenting the two intentional behavior changes |
-| [ADR-0019: Toolchain](../adr/0019-toolchain-build-and-platforms.md) | Validate the C++ dependency/linking strategy; the release workflow already has five targets, including Windows |
+| [ADR-0019: Toolchain](../adr/0019-toolchain-build-and-platforms.md) | The engine is plain Zig, so the existing cross-build applies; keep the vendored-commit record and dependency notices explicit |
 | [ADR-0031: Workspace index](../adr/0031-workspace-index.md) | The index retains facts, not AST/source trees; define the smallest reusable storage needed for native evaluation |
 | [ADR-0037: Selected environments](../adr/0037-selected-venv-collections.md) | Preserve per-context metadata isolation and reject version-only cache reuse across different environments |
 | [ADR-0043: Readiness](../adr/0043-custom-readiness-without-refresh.md) | Do not reinterpret catalog readiness as metadata or diagnostic completion, or silently restore a removed refresh command |
@@ -117,10 +117,11 @@ exist in the baseline code.
 The feature can be built in focused changes, but the approved target is the
 complete support column, not an unannounced reduction to a handful of checks.
 
-1. **Prove the integration constraints.** Link a pinned CEL-C++ slice, check the
-   typed declaration, extract/compile condition and message subexpressions,
-   exercise typed inputs and source positions, and validate the five-target
-   distribution strategy. Capture resource/cancellation behavior and costs.
+1. **Prove the integration constraints.** Add the pinned zig-cel dependency,
+   check the typed declaration, extract/re-root/compile condition and message
+   subexpressions, exercise typed inputs and source positions, and confirm
+   ordinary cross-build coverage. Capture resource/cancellation behavior and
+   costs.
 2. **Establish the AST/recovery contract.** Implement explicit structural
    admission, Parse issues, typed/source-backed values, and reusable snapshots.
    Add recovery and metadata-isolation fixtures before expanding the catalog.

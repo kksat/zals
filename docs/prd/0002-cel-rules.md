@@ -14,16 +14,18 @@ native Ansible AST without embedding checks in Python or implementing each
 check as Zig control flow. Built-in and custom rules must use the same rule
 interface.
 
-Use Common Expression Language (CEL), evaluated in process by
-[CEL-C++](https://github.com/cel-expr/cel-cpp). Native means the Zig server can
-embed a native library; it does not require the evaluator to be written in Zig.
-Users must not install or run a separate CEL service, Python interpreter, or
-Ansible process to evaluate a rule.
+Use Common Expression Language (CEL), evaluated in process by the Zig
+implementation [zig-cel](https://github.com/kksat/zig-cel). Users must not
+install or run a separate CEL service, Python interpreter, or Ansible process
+to evaluate a rule.
 
-The initial engine baseline is
-[CEL-C++ v0.17.0](https://github.com/cel-expr/cel-cpp/tree/7fbd8fc9aa398b7690bae5ce922a56517d6e9df0).
-Pin the engine and dependency closure. A release number is not evidence that its
-integration builds or behaves correctly on every Zals target.
+The engine baseline is zig-cel at commit
+[`895a750`](https://github.com/kksat/zig-cel/commit/895a750) ("VM fast paths,
+anchored-regex entry, small-map scan, benchmarks vs cel-go"). Pin an exact
+commit. The library builds and passes its unit tests and its vendored cel-spec
+simple conformance suite on the repository's pinned Zig 0.15.1 toolchain, with
+no C++/protobuf/Bazel dependency closure. Upstream results are not evidence
+that every Zals integration requirement is satisfied.
 
 ## Requirements
 
@@ -110,10 +112,11 @@ Finalize exact field names, target enums, source-field selector syntax, and
 schema versioning as an implementation deliverable. Reject unsupported schema
 versions or invalid declarations rather than interpreting them silently.
 
-The [official CEL AST](https://github.com/cel-expr/cel-spec/blob/21ec6f4e52e8d694687ff9ed7408d3eccbb955d7/proto/cel/expr/syntax.proto)
-represents constructor entries and their expression subtrees separately. This
-supports the hosting design in principle; the chosen CEL-C++ parse/check/plan
-interfaces still need a working integration test. Sharing descriptors with a
+zig-cel exposes its parsed AST (`cel.parser`, `ast.Ast`) with per-node start
+offsets, and `cel.vm.Compiler.compile` accepts any `Ast`. Re-rooting a parsed
+rule record onto its `condition` and `message` member expressions compiles them
+separately from a single parse; that mechanism is verified feasible, but the
+rule host still needs its own integration tests. Sharing declarations with a
 particular CEL language server also needs an editor test, not a compatibility
 claim based on CEL syntax alone.
 
@@ -130,11 +133,16 @@ a precomputed violation boolean to CEL. The host owns common normalization,
 source handling, target traversal, and publication; the check belongs in CEL.
 
 Compile/check rules outside the per-target evaluation loop and reuse programs.
-Set explicit limits for source size, parsing/checking depth and work,
-comprehensions, regex complexity, string/collection sizes, per-rule evaluation,
-aggregate document/workspace work, and diagnostic output. Provide cancellation
-that makes obsolete work stop promptly. A background thread alone is not a
+Set explicit limits for source size, parsing depth and work, comprehensions,
+regex complexity, string/collection sizes, per-rule evaluation, aggregate
+document/workspace work, and diagnostic output. Provide cancellation that
+makes obsolete work stop promptly. A background thread alone is not a
 cancellation mechanism.
+
+zig-cel terminates every expression but exposes no run-step budget or
+mid-evaluation cancellation hook: bound inputs, expression size, and nesting
+first, and treat a library-level evaluation budget as a requested engine
+improvement rather than assuming one exists.
 
 Use the same bounded interface for built-ins, global custom rules, and trusted
 Workspace rules. Trust does not remove resource limits. Do not log complete
@@ -148,10 +156,17 @@ null, an application-level templated-value marker, CEL `dyn`, and CEL unknown
 are different concepts. Follow PRD-0001's value contract; a general symbolic or
 unknown-propagation engine is not required for the first milestone.
 
-Reject invalid syntax, known type errors, missing required metadata, unknown
-rule targets, and invalid field selectors during rule loading where possible.
-Validate runtime result types as well. A condition must be boolean and a message
-must be a string even when `dyn` prevents a static proof.
+Reject invalid syntax, missing required metadata, unknown rule targets, and
+invalid field selectors during rule loading where possible. Validate runtime
+result types as well. A condition must be boolean and a message must be a
+string even when no static proof is available.
+
+zig-cel implements no static type-checking phase. Rule loading must therefore
+always validate runtime result types, and must perform a host-side structural
+lint of the parsed rule AST: required metadata present and literal, a known
+target, and condition/message identifiers resolvable against the declared
+binding set. The lint reports what it can prove at load time; it does not
+replace runtime validation.
 
 A runtime error, unavailable required fact, or exhausted budget must not be
 converted into an Ansible-code violation or silently presented as a successful
@@ -223,31 +238,32 @@ reappear after reload, disablement, deletion, or permission revocation.
 
 ## Native integration and distribution
 
-Use a project-owned C-compatible interface between Zig and CEL-C++. Keep C++
-objects, protobuf/type descriptors, exception handling, arenas, and allocation
-ownership on their appropriate side of that interface. Specify lifetimes for
-compiled programs, input snapshots, evaluation state, and returned strings.
-Prove thread-safety before sharing a program or environment across workers.
+Consume zig-cel as a pinned source dependency of the Zig server:
 
-Preserve a self-contained end-user server and the existing release targets:
+- Until zig-cel publishes a `build.zig.zon`, vendor its `src/`, `LICENSE`, and
+  `README.md` at the pinned commit under `vendor/zig-cel/` (the same policy as
+  the vendored C parsers) and create the `cel` module from
+  `vendor/zig-cel/src/cel.zig`. Record the upstream commit, and switch to a
+  `url`+`hash` package dependency once the library can be fetched.
+- Do not modify the vendored engine logic locally; request changes upstream.
+  The library is maintained by the Zals owner, so engine improvements belong in
+  the upstream repository.
+- One `Program` must not run concurrently: compile per worker (compilation is
+  microsecond-scale) or serialize evaluation per program. Values built by a run
+  reference the caller-provided arena; the snapshot ownership rules of
+  PRD-0001 apply.
+- The engine is plain Zig with no C++/protobuf/Bazel closure, so the existing
+  five-target release matrix (`x86_64-linux-musl`, `aarch64-linux-musl`,
+  `x86_64-macos.13.0`, `aarch64-macos.13.0`, `x86_64-windows`) inherits the
+  ordinary Zig cross-build and needs only normal build coverage, not a
+  foreign-toolchain integration project. The [release workflow](../../.github/workflows/release.yml),
+  not the older “Windows later” wording in ADR-0019, defines this baseline.
 
-- `x86_64-linux-musl`
-- `aarch64-linux-musl`
-- `x86_64-macos.13.0`
-- `aarch64-macos.13.0`
-- `x86_64-windows`
-
-The [release workflow](../../.github/workflows/release.yml), not the older
-“Windows later” wording in ADR-0019, defines this baseline. CEL-C++ brings a
-substantial C++/protobuf/Abseil/RE2/parser dependency graph. Its own Linux,
-macOS, or MSVC support does not prove the existing Ubuntu-hosted cross-build
-works. Revalidate the macOS SDK workaround rather than assuming its vendored-C
-rationale covers the new dependencies.
-
-Do not drop a target, add a runtime helper service, or change the Zig toolchain
-silently to make integration pass. Build-system changes and dependency notices
-must be explicit, reproducible, and reviewed. Build-time tooling is distinct
-from forbidden rule-evaluation subprocesses.
+Preserve a self-contained end-user server. Do not add a separate CEL runtime
+service, runtime downloads, or an interpreter dependency. Do not drop a target
+or change the Zig toolchain silently to make integration pass. Build-system
+changes and dependency notices (the engine is Apache-2.0) must be explicit,
+reproducible, and reviewed.
 
 ## Acceptance scenarios
 
@@ -272,12 +288,14 @@ from forbidden rule-evaluation subprocesses.
 
 Before implementing the full catalog, prove a small end-to-end slice:
 
-- Link the pinned engine through the proposed C interface.
-- Parse a typed rule, extract literal metadata, and compile its condition and
-  message separately with correct source positions.
-- Supply typed Task and parse-issue inputs and source-backed locations.
+- Add the pinned zig-cel dependency and resolve the `cel` module in the server
+  build.
+- Parse a typed rule, extract literal metadata, and re-root/compile its
+  condition and message separately with correct source positions.
+- Supply typed Task and parse-issue inputs and source-backed locations built
+  as zig-cel map/list values.
 - Observe boolean/string results, engine errors, limits, and cancellation.
-- Validate the build/dependency strategy on all release targets.
+- Confirm ordinary cross-build coverage on all release targets.
 - Demonstrate CEL-aware checking with the distributed rule environment.
 
 Record numeric resource limits, memory/startup cost, and measured latency after
