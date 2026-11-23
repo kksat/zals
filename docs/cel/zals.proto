@@ -1,0 +1,618 @@
+syntax = "proto3";
+
+package zals;
+
+import "google/protobuf/struct.proto";
+
+// One Zals native Ansible diagnostic rule declaration.
+message Rule {
+  // Unique rule identifier, e.g. "custom/no-raw-curl" or "name[play]".
+  string id = 1;
+
+  // Target AST node kind(s): a string literal or list of string literals from
+  // "document", "play", "task", "role_ref", "var_def", "role_meta",
+  // "galaxy_meta", "parse_issue".
+  google.protobuf.Value target = 2;
+
+  // Diagnostic severity: "error", "warning", "info", or "hint".
+  string severity = 3;
+
+  // Optional source-backed field selector for underlining a specific key/field
+  // instead of the full target node range.
+  string field = 4;
+
+  // Rule environment schema version (currently 1).
+  int64 schema_version = 5;
+
+  // Boolean predicate evaluated per matching AST target; true emits a finding.
+  // Typed as dyn (google.protobuf.Value) here so cells provides mid-expression
+  // dot-completion inside `condition: node.` before the comparison is finished;
+  // Zals enforces bool results at load and evaluation time.
+  google.protobuf.Value condition = 6;
+
+  // Diagnostic message expression; evaluated only when condition is true.
+  // Typed as dyn here so cells provides mid-expression dot-completion inside
+  // `message: node.` before string concatenation is finished; Zals enforces
+  // string results at load and evaluation time.
+  google.protobuf.Value message = 7;
+}
+
+// 1-based human-facing source coordinates for the selected diagnostic range.
+message Location {
+  // Workspace-relative (or absolute) display path of the Ansible source file.
+  string path = 1;
+
+  // 1-based line number of the selected node or field.
+  int64 line = 2;
+
+  // 1-based column number of the selected node or field.
+  int64 column = 3;
+}
+
+// Document-level facts for the evaluated Ansible file.
+message Document {
+  // Workspace-relative display path.
+  string path = 1;
+
+  // Base filename (e.g. "site.yml", "galaxy.yml").
+  string filename = 2;
+
+  // File extension including leading dot (e.g. ".yml", ".yaml").
+  string extension = 3;
+
+  // Classified document kind: "playbook", "tasks", "handlers", "role_meta",
+  // "galaxy_meta", "vars_file", "defaults", or "other".
+  string kind = 4;
+
+  // Number of recovered plays in the document.
+  int64 play_count = 5;
+
+  // Total number of recovered tasks/blocks in the document.
+  int64 task_count = 6;
+
+  // Number of observed YAML syntax or Ansible structural parse issues.
+  int64 parse_issue_count = 7;
+}
+
+// Static module metadata fact collected outside CEL evaluation.
+message ModuleFact {
+  // True when collected module documentation marks the module deprecated.
+  bool deprecated = 1;
+}
+
+// Immutable collected Ansible environment metadata snapshot.
+message Metadata {
+  // True when collected metadata is ready or partially available.
+  bool available = 1;
+
+  // Snapshot status: "ready", "pending", "unavailable", "partial", or "stale".
+  string status = 2;
+
+  // Environment identity hash isolating per-venv/collection-path contexts.
+  string environment_id = 3;
+
+  // Human-readable explanation when metadata is pending or unavailable.
+  string reason = 4;
+
+  // Collected static facts keyed by module FQCN.
+  map<string, ModuleFact> modules = 5;
+}
+
+// Source-backed YAML value distinguishing literal types, quoting, and templates.
+message TypedValue {
+  // Value kind: "null", "bool", "int", "float", "string", "template", "list", "map".
+  string kind = 1;
+
+  // True when the scalar contains Jinja delimiters ({{, {%, {#).
+  bool is_templated = 2;
+
+  // True when the scalar was single- or double-quoted in YAML source.
+  bool is_quoted = 3;
+
+  // Raw source spelling before YAML decoding.
+  string raw = 4;
+
+  // Decoded typed CEL value (bool, int, double, string, list, map, or null).
+  google.protobuf.Value value = 5;
+}
+
+// Bounded lexical analysis of a command/shell/raw invocation string.
+message CommandInfo {
+  // Raw command text extracted from free-form text or cmd/_raw_params.
+  string text = 1;
+
+  // First command token after any leading inline environment assignments.
+  string first_word = 2;
+
+  // Basename of first_word (e.g. "git" from "/usr/bin/git").
+  string basename = 3;
+
+  // Second command token (subcommand or first argument), if present.
+  string second_word = 4;
+
+  // Tokenized words of the command string.
+  repeated string words = 5;
+
+  // True when leading KEY=VALUE environment assignments precede the command.
+  bool has_inline_env_var = 6;
+
+  // True when unquoted shell metacharacters (|, &, ;, <, >, $, `, *, ?, [], ~, ()) appear.
+  bool has_shell_metachar = 7;
+
+  // True when an unquoted single pipe '|' appears.
+  bool has_pipe = 8;
+
+  // True when the command enables pipefail (e.g. "set -o pipefail").
+  bool has_pipefail = 9;
+
+  // True when the trimmed command spans multiple lines.
+  bool has_multiline = 10;
+}
+
+// Nested scalar string extracted from a task for lexical checks such as no-tabs.
+message StringLeaf {
+  // Enclosing YAML key name.
+  string key = 1;
+
+  // Decoded scalar string value.
+  string value = 2;
+
+  // True when the string contains Jinja delimiters.
+  bool is_templated = 3;
+}
+
+// Entry under galaxy_info.video_links in role meta/main.yml.
+message VideoLink {
+  // True when the list entry is a YAML mapping.
+  bool is_map = 1;
+
+  // Mapping keys present on the entry.
+  repeated string keys = 2;
+
+  // Typed value of the "url" field, if present.
+  TypedValue url = 3;
+
+  // Typed value of the "title" field, if present.
+  TypedValue title = 4;
+}
+
+// Collection dependency entry in galaxy.yml.
+message GalaxyDep {
+  // Dependency collection name ("namespace.collection").
+  string name = 1;
+
+  // Typed version constraint value.
+  TypedValue version = 2;
+}
+
+// Play AST target (target: "play").
+message Play {
+  int64 index = 1;
+  repeated string keys = 2;
+  bool has_name = 3;
+  TypedValue name = 4;
+  string name_text = 5;
+  TypedValue hosts = 6;
+  TypedValue strategy = 7;
+  string strategy_text = 8;
+  bool has_become = 9;
+  bool has_become_user = 10;
+  bool has_vars_prompt = 11;
+  bool has_run_once = 12;
+  TypedValue run_once = 13;
+  int64 task_count = 14;
+  bool is_import_playbook = 15;
+  string import_playbook_key = 16;
+}
+
+// Task/Block/Handler AST target (target: "task").
+message Task {
+  repeated string keys = 1;
+  string invocation_form = 2;
+  bool is_block = 3;
+  string raw_action = 4;
+  string raw_action_key = 5;
+  string action = 6;
+  string short_action = 7;
+  string action_namespace = 8;
+  bool is_free_form = 9;
+  string free_form_text = 10;
+  string module_val_kind = 11;
+  bool has_args_key = 12;
+  string args_val_kind = 13;
+  map<string, TypedValue> args = 14;
+  repeated string arg_keys = 15;
+  CommandInfo command = 16;
+  bool has_name = 17;
+  TypedValue name = 18;
+  string name_text = 19;
+  bool is_duplicate_name = 20;
+  repeated TypedValue when = 21;
+  repeated TypedValue changed_when = 22;
+  repeated TypedValue failed_when = 23;
+  repeated TypedValue until = 24;
+  bool has_changed_when = 25;
+  bool has_failed_when = 26;
+  bool has_ignore_errors = 27;
+  TypedValue ignore_errors = 28;
+  bool has_register = 29;
+  TypedValue register = 30;
+  bool has_no_log = 31;
+  TypedValue no_log = 32;
+  bool has_become = 33;
+  bool has_become_user = 34;
+  bool has_delegate_to = 35;
+  TypedValue delegate_to = 36;
+  bool has_run_once = 37;
+  TypedValue run_once = 38;
+  bool has_async = 39;
+  TypedValue async = 40;
+  bool has_poll = 41;
+  TypedValue poll = 42;
+  bool has_local_action = 43;
+  string loop_key = 44;
+  TypedValue loop = 45;
+  bool in_handlers = 46;
+  bool in_block = 47;
+  int64 nesting_depth = 48;
+  string section = 49;
+  string play_strategy = 50;
+  string play_name = 51;
+  repeated StringLeaf string_leaves = 52;
+}
+
+// Role invocation/reference AST target (target: "role_ref").
+message RoleRef {
+  string name = 1;
+  bool is_templated = 2;
+  repeated TypedValue when = 3;
+  string site = 4;
+}
+
+// Variable definition AST target (target: "var_def").
+message VarDef {
+  string name = 1;
+  string key_kind = 2;
+  bool is_quoted = 3;
+  bool is_templated = 4;
+  bool is_ascii = 5;
+  string site = 6;
+}
+
+// Role metadata AST target for meta/main.yml (target: "role_meta").
+message RoleMeta {
+  bool has_galaxy_info = 1;
+  TypedValue author = 2;
+  TypedValue description = 3;
+  TypedValue company = 4;
+  TypedValue license = 5;
+  TypedValue min_ansible_version = 6;
+  bool has_galaxy_tags = 7;
+  TypedValue galaxy_tags = 8;
+  bool has_categories = 9;
+  TypedValue categories = 10;
+  bool has_platforms = 11;
+  TypedValue platforms = 12;
+  repeated VideoLink video_links = 13;
+}
+
+// Collection metadata AST target for galaxy.yml (target: "galaxy_meta").
+message GalaxyMeta {
+  TypedValue namespace = 1;
+  TypedValue name = 2;
+  bool has_version = 3;
+  TypedValue version = 4;
+  bool has_tags = 5;
+  TypedValue tags = 6;
+  repeated GalaxyDep dependencies = 7;
+  bool has_repository = 8;
+  TypedValue repository = 9;
+  bool has_license = 10;
+  TypedValue license = 11;
+  bool has_license_file = 12;
+  TypedValue license_file = 13;
+}
+
+// Observed YAML syntax or Ansible structural failure (target: "parse_issue").
+message ParseIssue {
+  // Issue category: "yaml_syntax" or "ansible_structure".
+  string kind = 1;
+
+  // Human-readable parse or structural failure explanation.
+  string message = 2;
+}
+
+// Unified AST target node covering all Zals rule targets so a single cel.yaml
+// provides full completion, hover docs, and type checking across every target.
+// Use zals.Task / zals.Play / etc. in a folder-specific cel.yaml for strict
+// per-target narrowing.
+message Node {
+  // [play, task] Ordered YAML keys as written in source.
+  repeated string keys = 1;
+
+  // [task] Invocation syntax: "module_key", "action", "local_action", or "block".
+  string invocation_form = 2;
+
+  // [task] True when this entry is a block/rescue/always container.
+  bool is_block = 3;
+
+  // [task] Original module/action spelling as written (e.g. "ansible.builtin.copy").
+  string raw_action = 4;
+
+  // [task] Raw YAML key used for the action (module key, "action", or "local_action").
+  string raw_action_key = 5;
+
+  // [task] Normalized short action name (strips ansible.builtin./ansible.legacy.).
+  string action = 6;
+
+  // [task] Normalized short action name (e.g. "shell", "copy", "community.general.ufw").
+  string short_action = 7;
+
+  // [task] Action namespace ("ansible.builtin", "ansible.legacy", collection prefix, or "").
+  string action_namespace = 8;
+
+  // [task] True when the action used free-form string arguments.
+  bool is_free_form = 9;
+
+  // [task] Raw free-form argument string, if any.
+  string free_form_text = 10;
+
+  // [task] Value kind of the module key's YAML value ("map", "string", "null", etc.).
+  string module_val_kind = 11;
+
+  // [task] True when the task explicitly defines an "args:" keyword.
+  bool has_args_key = 12;
+
+  // [task] Value kind of the "args:" keyword value.
+  string args_val_kind = 13;
+
+  // [task] Normalized module arguments keyed by parameter name.
+  map<string, TypedValue> args = 14;
+
+  // [task] Ordered list of normalized argument names present in args.
+  repeated string arg_keys = 15;
+
+  // [task] Bounded lexical command/shell analysis (for command/shell/raw tasks).
+  CommandInfo command = 16;
+
+  // [play, task] True when the "name" key is present.
+  bool has_name = 17;
+
+  // [play, task, role_ref, var_def, galaxy_meta] Name field (TypedValue on
+  // play/task/galaxy_meta; string on role_ref/var_def).
+  google.protobuf.Value name = 18;
+
+  // [play, task] Decoded text of the "name" field (or "" when absent).
+  string name_text = 19;
+
+  // [task] True when another task in the same immediate named play shares this name.
+  bool is_duplicate_name = 20;
+
+  // [task, role_ref] Normalized list of "when" conditional expressions.
+  repeated TypedValue when = 21;
+
+  // [task] Normalized list of "changed_when" expressions.
+  repeated TypedValue changed_when = 22;
+
+  // [task] Normalized list of "failed_when" expressions.
+  repeated TypedValue failed_when = 23;
+
+  // [task] Normalized list of "until" expressions.
+  repeated TypedValue until = 24;
+
+  // [task] True when "changed_when" is present.
+  bool has_changed_when = 25;
+
+  // [task] True when "failed_when" is present.
+  bool has_failed_when = 26;
+
+  // [task] True when "ignore_errors" is present.
+  bool has_ignore_errors = 27;
+
+  // [task] Typed value of "ignore_errors".
+  TypedValue ignore_errors = 28;
+
+  // [task] True when "register" is present.
+  bool has_register = 29;
+
+  // [task] Typed value of "register".
+  TypedValue register = 30;
+
+  // [task] True when "no_log" is present.
+  bool has_no_log = 31;
+
+  // [task] Typed value of "no_log".
+  TypedValue no_log = 32;
+
+  // [play, task] True when "become" is present at this mapping level.
+  bool has_become = 33;
+
+  // [play, task] True when "become_user" is present at this mapping level.
+  bool has_become_user = 34;
+
+  // [task] True when "delegate_to" is present.
+  bool has_delegate_to = 35;
+
+  // [task] Typed value of "delegate_to".
+  TypedValue delegate_to = 36;
+
+  // [play, task] True when "run_once" is present.
+  bool has_run_once = 37;
+
+  // [play, task] Typed value of "run_once".
+  TypedValue run_once = 38;
+
+  // [task] True when "async" is present.
+  bool has_async = 39;
+
+  // [task] Typed value of "async".
+  TypedValue async = 40;
+
+  // [task] True when "poll" is present.
+  bool has_poll = 41;
+
+  // [task] Typed value of "poll".
+  TypedValue poll = 42;
+
+  // [task] True when raw "local_action" keyword was used.
+  bool has_local_action = 43;
+
+  // [task] Loop keyword name ("loop", "with_items", etc., or "").
+  string loop_key = 44;
+
+  // [task] Typed value of the loop expression.
+  TypedValue loop = 45;
+
+  // [task] True when the task is inside a handlers section or handlers file.
+  bool in_handlers = 46;
+
+  // [task] True when the task is nested inside a block/rescue/always section.
+  bool in_block = 47;
+
+  // [task] Block nesting depth (0 for top-level tasks).
+  int64 nesting_depth = 48;
+
+  // [task] Containing section name ("tasks", "pre_tasks", "post_tasks", "handlers", "block", "rescue", "always", "recovered").
+  string section = 49;
+
+  // [task] Enclosing play strategy string (e.g. "free", "linear", or "").
+  string play_strategy = 50;
+
+  // [task] Enclosing play name string (or "").
+  string play_name = 51;
+
+  // [task] Nested scalar strings inside the task (for lexical rules like no-tabs).
+  repeated StringLeaf string_leaves = 52;
+
+  // [play] 0-based play index in the document.
+  int64 index = 53;
+
+  // [play] Typed value of "hosts".
+  TypedValue hosts = 54;
+
+  // [play] Typed value of "strategy".
+  TypedValue strategy = 55;
+
+  // [play] Decoded text of play "strategy".
+  string strategy_text = 56;
+
+  // [play] True when the play defines "vars_prompt".
+  bool has_vars_prompt = 57;
+
+  // [play] Total task count inside the play.
+  int64 task_count = 58;
+
+  // [play] True when the play entry is an import_playbook statement.
+  bool is_import_playbook = 59;
+
+  // [play] Raw key used for import_playbook.
+  string import_playbook_key = 60;
+
+  // [role_ref, var_def] True when the name contains Jinja delimiters.
+  bool is_templated = 61;
+
+  // [role_ref, var_def] Origin site (e.g. "roles", "include_role", "play_vars", "set_fact", "register", "vars_file").
+  string site = 62;
+
+  // [var_def] Scalar kind of the variable key ("string", "int", "bool", "null", "float", "template").
+  string key_kind = 63;
+
+  // [var_def] True when the variable key was quoted in YAML.
+  bool is_quoted = 64;
+
+  // [var_def] True when the variable name contains only ASCII bytes.
+  bool is_ascii = 65;
+
+  // [role_meta] True when meta/main.yml defines a galaxy_info mapping.
+  bool has_galaxy_info = 66;
+
+  // [role_meta] galaxy_info.author value.
+  TypedValue author = 67;
+
+  // [role_meta] galaxy_info.description value.
+  TypedValue description = 68;
+
+  // [role_meta] galaxy_info.company value.
+  TypedValue company = 69;
+
+  // [role_meta, galaxy_meta] License value.
+  TypedValue license = 70;
+
+  // [role_meta] galaxy_info.min_ansible_version value.
+  TypedValue min_ansible_version = 71;
+
+  // [role_meta] True when galaxy_info.galaxy_tags is present.
+  bool has_galaxy_tags = 72;
+
+  // [role_meta] galaxy_info.galaxy_tags value.
+  TypedValue galaxy_tags = 73;
+
+  // [role_meta] True when deprecated galaxy_info.categories is present.
+  bool has_categories = 74;
+
+  // [role_meta] galaxy_info.categories value.
+  TypedValue categories = 75;
+
+  // [role_meta] True when galaxy_info.platforms is present.
+  bool has_platforms = 76;
+
+  // [role_meta] galaxy_info.platforms value.
+  TypedValue platforms = 77;
+
+  // [role_meta] Parsed galaxy_info.video_links entries.
+  repeated VideoLink video_links = 78;
+
+  // [galaxy_meta] Collection namespace in galaxy.yml.
+  TypedValue namespace = 79;
+
+  // [galaxy_meta] True when galaxy.yml defines "version".
+  bool has_version = 80;
+
+  // [galaxy_meta] Collection version in galaxy.yml.
+  TypedValue version = 81;
+
+  // [galaxy_meta] True when galaxy.yml defines "tags".
+  bool has_tags = 82;
+
+  // [galaxy_meta] Collection tags list in galaxy.yml.
+  TypedValue tags = 83;
+
+  // [galaxy_meta] Collection dependencies map lowered to entries.
+  repeated GalaxyDep dependencies = 84;
+
+  // [galaxy_meta] True when galaxy.yml defines "repository".
+  bool has_repository = 85;
+
+  // [galaxy_meta] Collection repository URL in galaxy.yml.
+  TypedValue repository = 86;
+
+  // [galaxy_meta] True when galaxy.yml defines "license".
+  bool has_license = 87;
+
+  // [galaxy_meta] True when galaxy.yml defines "license_file".
+  bool has_license_file = 88;
+
+  // [galaxy_meta] Collection license_file in galaxy.yml.
+  TypedValue license_file = 89;
+
+  // [parse_issue, document] Issue kind ("yaml_syntax" | "ansible_structure") or document kind.
+  string kind = 90;
+
+  // [parse_issue] Human-readable parse or structural failure explanation.
+  string message = 91;
+
+  // [document] Workspace-relative display path.
+  string path = 92;
+
+  // [document] Base filename.
+  string filename = 93;
+
+  // [document] File extension.
+  string extension = 94;
+
+  // [document] Play count in the document.
+  int64 play_count = 95;
+
+  // [document] Parse issue count in the document.
+  int64 parse_issue_count = 96;
+}
