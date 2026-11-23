@@ -255,3 +255,206 @@ test "stdio native cel diagnostics cover unopened files, unsaved edits, suppress
 
     try std.testing.expectError(error.FileNotFound, std.fs.openFileAbsolute(marker_path, .{}));
 }
+
+fn hasSource(diags: Value, expected: []const u8) bool {
+    if (diags != .array) return false;
+    for (diags.array.items) |item| {
+        const src = field(item, "source") orelse continue;
+        if (src == .string and std.mem.eql(u8, src.string, expected)) return true;
+    }
+    return false;
+}
+
+fn hasCustomPing(diags: Value) bool {
+    return hasCode(diags, "custom/no-ping");
+}
+
+fn hasNoCustomPing(diags: Value) bool {
+    return diags == .array and !hasCode(diags, "custom/no-ping");
+}
+
+fn hasRuleFileError(diags: Value) bool {
+    return hasSource(diags, "zals-cel-rule");
+}
+
+fn hasBothProviders(diags: Value) bool {
+    return hasSource(diags, "zals-cel") and hasSource(diags, "ansible-lint");
+}
+
+fn hasOnlyExternalProvider(diags: Value) bool {
+    return !hasSource(diags, "zals-cel") and hasSource(diags, "ansible-lint");
+}
+
+test "stdio custom workspace rule trust, invalid-save deactivation, reload, and deletion lifecycle" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.makePath("ws/.git");
+    try tmp.dir.makePath("ws/rules");
+    try tmp.dir.makePath("bin");
+
+    const ws_root = try tmp.dir.realpathAlloc(a, "ws");
+    const bin_dir = try tmp.dir.realpathAlloc(a, "bin");
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "ws/.ansible-lint",
+        .data = "skip_list:\n  - name[play]\n  - no-changed-when\n",
+    });
+    const valid_rule =
+        \\zals.Rule{
+        \\  id: "custom/no-ping",
+        \\  target: "task",
+        \\  severity: "warning",
+        \\  field: "action",
+        \\  condition: node.short_action == "ping",
+        \\  message: "Avoid ping in production."
+        \\}
+    ;
+    try tmp.dir.writeFile(.{ .sub_path = "ws/rules/no_ping.cel", .data = valid_rule });
+    const site_src =
+        \\- hosts: all
+        \\  tasks:
+        \\    - name: check host
+        \\      ansible.builtin.ping:
+        \\      tags:
+        \\        - skip_ansible_lint
+        \\
+    ;
+    try tmp.dir.writeFile(.{ .sub_path = "ws/site.yml", .data = site_src });
+
+    const site_path = try std.fs.path.join(a, &.{ ws_root, "site.yml" });
+    const rule_path = try std.fs.path.join(a, &.{ ws_root, "rules/no_ping.cel" });
+    const site_uri = try std.fmt.allocPrint(a, "file://{s}", .{site_path});
+    const rule_uri = try std.fmt.allocPrint(a, "file://{s}", .{rule_path});
+    const root_uri = try std.fmt.allocPrint(a, "file://{s}", .{ws_root});
+    const binary = try std.fs.cwd().realpathAlloc(a, "zig-out/bin/zals");
+
+    var client = try DiagClient.start(a, binary, bin_dir, ws_root);
+    defer client.deinit();
+
+    _ = try client.request("initialize", .{
+        .processId = @as(?i64, null),
+        .rootUri = root_uri,
+        .capabilities = .{},
+        .initializationOptions = .{ .ansible = .{
+            .validation = .{ .cel = .{
+                .workspaceRuleFiles = &[_][]const u8{"rules/no_ping.cel"},
+                .allowWorkspaceRules = false,
+            } },
+        } },
+    });
+    try client.notify("initialized", .{});
+
+    const denied = try client.pumpUntil(site_uri, hasOnlyNamePlay);
+    try std.testing.expect(hasCode(denied, "name[play]"));
+    try std.testing.expect(!hasCode(denied, "custom/no-ping"));
+
+    try client.notify("workspace/didChangeConfiguration", .{
+        .settings = .{ .ansible = .{ .validation = .{ .cel = .{
+            .workspaceRuleFiles = &[_][]const u8{"rules/no_ping.cel"},
+            .allowWorkspaceRules = true,
+        } } } },
+    });
+    const allowed = try client.pumpUntil(site_uri, hasCustomPing);
+    try std.testing.expect(hasCode(allowed, "name[play]"));
+    try std.testing.expect(hasCode(allowed, "custom/no-ping"));
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "ws/rules/no_ping.cel",
+        .data = "zals.Rule{ id: \"custom/no-ping\", target: \"task\", severity: \"warning\", condition: bad_ident, message: \"x\" }",
+    });
+    try client.notify("textDocument/didSave", .{
+        .textDocument = .{ .uri = rule_uri },
+    });
+    _ = try client.pumpUntil(rule_uri, hasRuleFileError);
+    const after_invalid = try client.pumpUntil(site_uri, hasNoCustomPing);
+    try std.testing.expect(hasCode(after_invalid, "name[play]"));
+
+    try tmp.dir.writeFile(.{ .sub_path = "ws/rules/no_ping.cel", .data = valid_rule });
+    try client.notify("textDocument/didSave", .{
+        .textDocument = .{ .uri = rule_uri },
+    });
+    _ = try client.pumpUntil(rule_uri, hasNoFindings);
+    _ = try client.pumpUntil(site_uri, hasCustomPing);
+
+    try tmp.dir.deleteFile("ws/site.yml");
+    try client.notify("workspace/didChangeWatchedFiles", .{
+        .changes = &[_]struct { uri: []const u8, type: i64 }{.{ .uri = site_uri, .type = 3 }},
+    });
+    _ = try client.pumpUntil(site_uri, hasNoFindings);
+}
+
+test "stdio multi-provider independence keeps both cel and external findings without deduplication" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.makePath("ws/.git");
+    try tmp.dir.makePath("bin");
+
+    const ws_root = try tmp.dir.realpathAlloc(a, "ws");
+    const bin_dir = try tmp.dir.realpathAlloc(a, "bin");
+    const site_path = try std.fs.path.join(a, &.{ ws_root, "site.yml" });
+    const site_uri = try std.fmt.allocPrint(a, "file://{s}", .{site_path});
+    const root_uri = try std.fmt.allocPrint(a, "file://{s}", .{ws_root});
+
+    const fake_lint = try std.fmt.allocPrint(
+        a,
+        "#!/bin/sh\necho '[{{\"description\":\"external unnamed play\",\"check_name\":\"name[play]\",\"severity\":\"major\",\"location\":{{\"path\":\"{s}\",\"lines\":{{\"begin\":1}}}}}}]'\nexit 2\n",
+        .{site_path},
+    );
+    try tmp.dir.writeFile(.{ .sub_path = "bin/ansible-lint", .data = fake_lint });
+    {
+        var f = try tmp.dir.openFile("bin/ansible-lint", .{});
+        defer f.close();
+        try f.chmod(0o755);
+    }
+
+    const site_src = "- hosts: all\n  tasks: []\n";
+    try tmp.dir.writeFile(.{ .sub_path = "ws/site.yml", .data = site_src });
+
+    const binary = try std.fs.cwd().realpathAlloc(a, "zig-out/bin/zals");
+    var client = try DiagClient.start(a, binary, bin_dir, ws_root);
+    defer client.deinit();
+
+    _ = try client.request("initialize", .{
+        .processId = @as(?i64, null),
+        .rootUri = root_uri,
+        .capabilities = .{},
+        .initializationOptions = .{ .ansible = .{
+            .validation = .{
+                .enabled = true,
+                .cel = .{ .enabled = true },
+                .lint = .{ .enabled = true },
+            },
+        } },
+    });
+    try client.notify("initialized", .{});
+    try client.notify("textDocument/didOpen", .{
+        .textDocument = .{
+            .uri = site_uri,
+            .languageId = "ansible",
+            .version = @as(i64, 1),
+            .text = site_src,
+        },
+    });
+
+    const both = try client.pumpUntil(site_uri, hasBothProviders);
+    try std.testing.expect(both.array.items.len >= 2);
+
+    try client.notify("workspace/didChangeConfiguration", .{
+        .settings = .{ .ansible = .{ .validation = .{
+            .enabled = true,
+            .cel = .{ .enabled = false },
+            .lint = .{ .enabled = true },
+        } } },
+    });
+    const ext_only = try client.pumpUntil(site_uri, hasOnlyExternalProvider);
+    try std.testing.expect(hasSource(ext_only, "ansible-lint"));
+    try std.testing.expect(!hasSource(ext_only, "zals-cel"));
+}

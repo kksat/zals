@@ -143,30 +143,88 @@
         },
         "ansible.validation.lint.enabled": {
           "type": "boolean",
-          "default": true,
-          "markdownDescription": "Enables `ansible-lint`. If disabled only `ansible-playbook --syntax-check` will run. Requires `#ansible.validation.enabled#` to be enabled.",
+          "default": false,
+          "markdownDescription": "Enables external `ansible-lint` diagnostics (falling back to `ansible-playbook --syntax-check` only when enabled and `ansible-lint` is unavailable). When disabled, neither external tool runs. Requires `#ansible.validation.enabled#` to be enabled.",
           "order": 1,
+          "scope": "resource"
+        },
+        "ansible.validation.schema.enabled": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Enables native JSON Schema validation for supported Ansible metadata files. Requires `#ansible.validation.enabled#` to be enabled.",
+          "order": 2,
+          "scope": "resource"
+        },
+        "ansible.validation.cel.enabled": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Enables native in-process CEL diagnostics across eligible Workspace files. Requires `#ansible.validation.enabled#` to be enabled.",
+          "order": 3,
+          "scope": "resource"
+        },
+        "ansible.validation.cel.globalRuleFiles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "markdownDescription": "Explicit absolute paths to custom `.cel` rule files applied across Workspaces.",
+          "order": 4,
+          "scope": "application"
+        },
+        "ansible.validation.cel.workspaceRuleFiles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "markdownDescription": "Explicit Workspace-relative paths to custom `.cel` rule files. Requires `#ansible.validation.cel.allowWorkspaceRules#` to be enabled in user settings.",
+          "order": 5,
+          "scope": "resource"
+        },
+        "ansible.validation.cel.allowWorkspaceRules": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Explicit user opt-in required before loading Workspace-relative `.cel` rule files from `#ansible.validation.cel.workspaceRuleFiles#`.",
+          "order": 6,
+          "scope": "application"
+        },
+        "ansible.validation.cel.disabledRules": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "markdownDescription": "Rule or rule-family IDs to disable for native CEL diagnostics.",
+          "order": 7,
+          "scope": "resource"
+        },
+        "ansible.validation.cel.rules": {
+          "type": "object",
+          "default": {},
+          "markdownDescription": "Per-rule overrides (`enabled`, `severity`, and `options`) keyed by rule ID or rule family.",
+          "order": 8,
           "scope": "resource"
         },
         "ansible.validation.lint.path": {
           "type": "string",
           "default": "ansible-lint",
           "markdownDescription": "Path to the ansible-lint executable.",
-          "order": 2,
+          "order": 9,
           "scope": "machine-overridable"
         },
         "ansible.validation.lint.arguments": {
           "type": "string",
           "default": "",
           "markdownDescription": "Command line arguments to be passed to ansible-lint.",
-          "order": 3,
+          "order": 10,
           "scope": "resource"
         },
         "ansible.validation.lint.autoFixOnSave": {
           "type": "boolean",
           "default": false,
           "markdownDescription": "Specifies whether `ansible-lint --fix` should run automatically when you save a file.",
-          "order": 4,
+          "order": 11,
           "scope": "resource"
         }
       }
