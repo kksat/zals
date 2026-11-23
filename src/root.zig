@@ -29,6 +29,7 @@ pub const roles = @import("roles/root.zig");
 pub const paths = @import("paths.zig");
 pub const concurrency = @import("concurrency/root.zig");
 pub const cel_rules = @import("cel/root.zig");
+pub const ast = @import("ast/root.zig");
 
 test {
     @import("std").testing.refAllDecls(@This());
@@ -64,4 +65,5 @@ test {
     _ = @import("paths.zig");
     _ = @import("concurrency/pool.zig");
     _ = @import("cel/root.zig");
+    _ = @import("ast/root.zig");
 }
