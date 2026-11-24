@@ -1,0 +1,17 @@
+zals.Rule{
+  id: "argument-specs[default-template-mismatch]",
+  target: "argument_spec",
+  severity: "info",
+  field: "default",
+  condition: node.is_map &&
+    node.is_top_level &&
+    node.has_default &&
+    node.default != null &&
+    context.role.present &&
+    node.entry_point in context.role.defaults &&
+    node.name in context.role.defaults[node.entry_point].vars &&
+    (node.default.is_templated != context.role.defaults[node.entry_point].vars[node.name].is_templated),
+  message: "Default value for option '" + node.name + "' in entry point '" +
+    node.entry_point + "' uses a Jinja template in only one of argument_specs.yml " +
+    "or defaults/" + node.entry_point + "; literal comparison skipped."
+}

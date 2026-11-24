@@ -1,0 +1,25 @@
+zals.Rule{
+  id: "argument-specs[default-value-mismatch]",
+  target: "argument_spec",
+  severity: "error",
+  field: "default",
+  condition: node.is_map &&
+    node.is_top_level &&
+    node.has_default &&
+    node.default != null &&
+    !node.default.is_templated &&
+    context.role.present &&
+    node.entry_point in context.role.defaults &&
+    node.name in context.role.defaults[node.entry_point].vars &&
+    !context.role.defaults[node.entry_point].vars[node.name].is_templated &&
+    (node.default.kind != context.role.defaults[node.entry_point].vars[node.name].kind ||
+      node.default.value != context.role.defaults[node.entry_point].vars[node.name].value),
+  message: "Default value mismatch for option '" + node.name + "' in entry point '" +
+    node.entry_point + "': argument_specs.yml defines " +
+    (node.default.raw == "" ? "null" : node.default.raw) + " (" + node.default.kind +
+    ") but defaults/" + node.entry_point + " defines " +
+    (context.role.defaults[node.entry_point].vars[node.name].raw == ""
+      ? "null"
+      : context.role.defaults[node.entry_point].vars[node.name].raw) +
+    " (" + context.role.defaults[node.entry_point].vars[node.name].kind + ")."
+}

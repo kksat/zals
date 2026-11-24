@@ -38,29 +38,48 @@ zals.Rule{
   - `docs/cel/zals.proto` — documented protobuf definitions for `zals.Rule`,
     `zals.Node`, per-target messages (`zals.Task`, `zals.Play`, `zals.RoleRef`,
     `zals.VarDef`, `zals.RoleMeta`, `zals.GalaxyMeta`, `zals.ArgumentSpecEntry`,
-    `zals.ArgumentSpec`, `zals.ParseIssue`), `zals.Location`, `zals.Document`,
-    `zals.Metadata`, `zals.TypedValue`, and `zals.CommandInfo`.
+    `zals.ArgumentSpec`, `zals.ParseIssue`), `zals.Context` (`zals.RoleContext`,
+    `zals.CollectionContext`, `zals.PlayContext`, `zals.BlockContext`),
+    `zals.Location`, `zals.Document`, `zals.Metadata`, `zals.TypedValue`, and
+    `zals.CommandInfo`.
   - `docs/cel/zals.binpb` — compiled `FileDescriptorSet` with source comments
     (`protoc --include_imports --include_source_info -I docs/cel --descriptor_set_out=docs/cel/zals.binpb docs/cel/zals.proto`).
   - CLI check: `cells check --config=docs/cel/cel.yaml --descriptor-set=docs/cel/zals.binpb path/to/rule.cel`.
   - To narrow `node` strictly to one target in a folder of rules (for example,
     task-only rules), drop a local `cel.yaml` in that folder setting
     `node`'s `type_name` to `zals.Task` (or `zals.Play`, `zals.RoleMeta`, etc.).
+- The `context` binding is namespaced into four always-present sub-maps, each
+  gated by a `.present` boolean: `context.role` (enclosing role identity,
+  entry point, sibling existence flags, parsed `argument_specs`, and merged
+  `defaults` across single-file and directory-style `defaults/<entry>/*.yml`),
+  `context.collection` (enclosing `galaxy.yml` identity and sibling metadata
+  flags), `context.play` (enclosing play facts for tasks, role refs, and var
+  defs inside a play), and `context.block` (enclosing `block`/`rescue`/`always`
+  facts for nested tasks, role refs, and var defs).
 - Rule targets for `meta/argument_specs.yml` are `argument_spec_entry` (one
   node per role entry point) and `argument_spec` (one node per option, with
   nested suboptions flattened into dotted `path` values such as `conf.mode`);
   `document.has_argument_specs` reports whether the file defines an
   `argument_specs` mapping with at least one entry point.
-- The built-in `argument-specs[...]` rules port the single-file checks of
+- The built-in `argument-specs[...]` rules port the YAML checks of
   [`ansible-docsmith validate`](https://github.com/foundata/ansible-docsmith):
-  missing `argument_specs` mapping, non-mapping entry points and options,
-  unknown entry-point and option keys, `default` combined with
-  `required: true`, secret-looking option names without `no_log: true`
-  (info severity, matching docsmith's notice), and `M(...)` module references
-  without a fully qualified collection name in descriptions. Docsmith's
-  cross-file checks (defaults-file consistency, README markers and ToC) need
-  multi-file or Markdown analysis and are out of scope for per-document CEL
-  rules.
+  - Single-file checks: missing `argument_specs` mapping, non-mapping entry
+    points and options, unknown entry-point and option keys, `default` combined
+    with `required: true`, secret-looking option names without `no_log: true`
+    (`info`), and `M(...)` module references without a FQCN in descriptions.
+  - Cross-file role checks (via `context.role`, supporting both single-file and
+    directory-style `defaults/`): missing `meta/argument_specs.yml` file
+    (`warning`), extra `defaults/<entry>` entry points not declared in
+    `argument_specs.yml` (`warning`), variables in `defaults/` missing from
+    `argument_specs.yml` (`error`), explicit spec `default:` missing from
+    `defaults/` (`error`), `required: true` options assigned in `defaults/`
+    (`warning`), non-required spec options absent from populated `defaults/`
+    (`info`), literal default value mismatches including cross-type mismatches
+    (`error`), and template-vs-literal default mismatches including nested
+    templates (`info`).
+  - Docsmith's Markdown checks (README `MAIN`/`TOC`/`TOC-FULL` markers,
+    anchorless ToC headings, and comment-flattening notices) stay out of scope
+    for YAML CEL diagnostics.
 
 ## Configuration and migration notes
 

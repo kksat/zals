@@ -11,6 +11,9 @@ const Case = struct {
     good: []const u8,
     bad_options: []const registry.RuleOptionOverride = &.{},
     good_options: []const registry.RuleOptionOverride = &.{},
+    use_context: bool = false,
+    bad_overlays: []const ast.SourceOverlay = &.{},
+    good_overlays: []const ast.SourceOverlay = &.{},
 };
 
 fn evalCodes(
@@ -18,6 +21,8 @@ fn evalCodes(
     path: []const u8,
     source: []const u8,
     rule_options: []const registry.RuleOptionOverride,
+    use_context: bool,
+    overlays: []const ast.SourceOverlay,
 ) !struct { codes: []const []const u8, runtime_error_count: usize } {
     var doc = try ast.build(alloc, path, std.fs.path.basename(path), source);
     defer doc.deinit();
@@ -32,7 +37,12 @@ fn evalCodes(
     var wrs = try rs.cloneForWorker(alloc);
     defer wrs.deinit();
 
-    const res = try evaluator.evaluateDocument(alloc, &doc, &wrs, .{}, .{}, .utf16, null);
+    const doc_ctx: ast.DocumentContext = if (use_context or overlays.len > 0)
+        try ast.context.build(alloc, path, "/ws", overlays)
+    else
+        .{};
+
+    const res = try evaluator.evaluateDocument(alloc, &doc, &wrs, .{}, doc_ctx, .utf16, null);
     for (res.runtime_errors) |re| {
         std.debug.print("RUNTIME ERROR in rule '{s}': {s}\n", .{ re.rule_id, re.message });
     }
@@ -53,8 +63,8 @@ fn containsCode(codes: []const []const u8, expected: []const u8) bool {
     return false;
 }
 
-test "all 69 builtin rules load without errors and have unique ids" {
-    try std.testing.expectEqual(@as(usize, 69), builtins.all.len);
+test "all 77 builtin rules load without errors and have unique ids" {
+    try std.testing.expectEqual(@as(usize, 77), builtins.all.len);
     var rs = try registry.buildRuleSet(std.testing.allocator, 1, .{ .include_builtins = true });
     defer rs.deinit();
     try std.testing.expectEqual(@as(usize, 0), rs.errors.len);
@@ -73,6 +83,20 @@ test "rule conformance matrix positive and negative fixtures for every approved 
             .path = "/ws/roles/demo/meta/argument_specs.yml",
             .bad = "other_key: 1\n",
             .good = "argument_specs:\n  main:\n    options:\n      port:\n        type: int\n",
+        },
+        .{
+            .rule_id = "argument-specs[missing-file]",
+            .path = "/ws/roles/demo/meta/main.yml",
+            .use_context = true,
+            .bad = "galaxy_info:\n  author: Jane\n  description: Demo\n  license: MIT\n  galaxy_tags: [web]\n",
+            .good = "galaxy_info:\n  author: Jane\n  description: Demo\n  license: MIT\n  galaxy_tags: [web]\n",
+            .bad_overlays = &.{
+                .{ .path = "/ws/roles/demo/meta/main.yml", .bytes = "galaxy_info:\n  author: Jane\n" },
+            },
+            .good_overlays = &.{
+                .{ .path = "/ws/roles/demo/meta/main.yml", .bytes = "galaxy_info:\n  author: Jane\n" },
+                .{ .path = "/ws/roles/demo/meta/argument_specs.yml", .bytes = "argument_specs:\n  main:\n    options: {}\n" },
+            },
         },
         .{
             .rule_id = "argument-specs[entry-not-mapping]",
@@ -115,6 +139,95 @@ test "rule conformance matrix positive and negative fixtures for every approved 
             .path = "/ws/roles/demo/meta/argument_specs.yml",
             .bad = "argument_specs:\n  main:\n    description: Broken M(copy) reference.\n    options: {}\n",
             .good = "argument_specs:\n  main:\n    description: Uses M(ansible.builtin.copy) and C(code).\n    options: {}\n",
+        },
+        .{
+            .rule_id = "argument-specs[defaults-extra-entry-point]",
+            .path = "/ws/roles/demo/defaults/extra.yml",
+            .bad = "extra_var: 1\n",
+            .good = "extra_var: 1\n",
+            .bad_overlays = &.{
+                .{ .path = "/ws/roles/demo/meta/argument_specs.yml", .bytes = "argument_specs:\n  main:\n    options: {}\n" },
+                .{ .path = "/ws/roles/demo/defaults/extra.yml", .bytes = "extra_var: 1\n" },
+            },
+            .good_overlays = &.{
+                .{ .path = "/ws/roles/demo/meta/argument_specs.yml", .bytes = "argument_specs:\n  extra:\n    options:\n      extra_var:\n        type: int\n" },
+                .{ .path = "/ws/roles/demo/defaults/extra.yml", .bytes = "extra_var: 1\n" },
+            },
+        },
+        .{
+            .rule_id = "argument-specs[defaults-var-not-in-spec]",
+            .path = "/ws/roles/demo/defaults/main.yml",
+            .bad = "undocumented_var: 1\n",
+            .good = "port: 80\n",
+            .bad_overlays = &.{
+                .{ .path = "/ws/roles/demo/meta/argument_specs.yml", .bytes = "argument_specs:\n  main:\n    options:\n      port:\n        type: int\n" },
+                .{ .path = "/ws/roles/demo/defaults/main.yml", .bytes = "undocumented_var: 1\n" },
+            },
+            .good_overlays = &.{
+                .{ .path = "/ws/roles/demo/meta/argument_specs.yml", .bytes = "argument_specs:\n  main:\n    options:\n      port:\n        type: int\n" },
+                .{ .path = "/ws/roles/demo/defaults/main.yml", .bytes = "port: 80\n" },
+            },
+        },
+        .{
+            .rule_id = "argument-specs[spec-default-not-in-defaults]",
+            .path = "/ws/roles/demo/meta/argument_specs.yml",
+            .use_context = true,
+            .bad = "argument_specs:\n  main:\n    options:\n      port:\n        type: int\n        default: 80\n",
+            .good = "argument_specs:\n  main:\n    options:\n      port:\n        type: int\n        default: 80\n",
+            .bad_overlays = &.{
+                .{ .path = "/ws/roles/demo/defaults/main.yml", .bytes = "other: 1\n" },
+            },
+            .good_overlays = &.{
+                .{ .path = "/ws/roles/demo/defaults/main.yml", .bytes = "port: 80\n" },
+            },
+        },
+        .{
+            .rule_id = "argument-specs[required-with-default]",
+            .path = "/ws/roles/demo/meta/argument_specs.yml",
+            .bad = "argument_specs:\n  main:\n    options:\n      token:\n        type: str\n        required: true\n",
+            .good = "argument_specs:\n  main:\n    options:\n      token:\n        type: str\n        required: true\n",
+            .bad_overlays = &.{
+                .{ .path = "/ws/roles/demo/defaults/main.yml", .bytes = "token: null\n" },
+            },
+            .good_overlays = &.{
+                .{ .path = "/ws/roles/demo/defaults/main.yml", .bytes = "other: 1\n" },
+            },
+        },
+        .{
+            .rule_id = "argument-specs[spec-var-not-in-defaults]",
+            .path = "/ws/roles/demo/meta/argument_specs.yml",
+            .bad = "argument_specs:\n  main:\n    options:\n      opt_var:\n        type: str\n",
+            .good = "argument_specs:\n  main:\n    options:\n      opt_var:\n        type: str\n",
+            .bad_overlays = &.{
+                .{ .path = "/ws/roles/demo/defaults/main.yml", .bytes = "other: 1\n" },
+            },
+            .good_overlays = &.{
+                .{ .path = "/ws/roles/demo/defaults/main.yml", .bytes = "opt_var: hello\n" },
+            },
+        },
+        .{
+            .rule_id = "argument-specs[default-value-mismatch]",
+            .path = "/ws/roles/demo/meta/argument_specs.yml",
+            .bad = "argument_specs:\n  main:\n    options:\n      port:\n        type: int\n        default: 80\n",
+            .good = "argument_specs:\n  main:\n    options:\n      port:\n        type: int\n        default: 80\n",
+            .bad_overlays = &.{
+                .{ .path = "/ws/roles/demo/defaults/main.yml", .bytes = "port: \"80\"\n" },
+            },
+            .good_overlays = &.{
+                .{ .path = "/ws/roles/demo/defaults/main.yml", .bytes = "port: 80\n" },
+            },
+        },
+        .{
+            .rule_id = "argument-specs[default-template-mismatch]",
+            .path = "/ws/roles/demo/meta/argument_specs.yml",
+            .bad = "argument_specs:\n  main:\n    options:\n      cfg:\n        type: dict\n        default:\n          host: localhost\n",
+            .good = "argument_specs:\n  main:\n    options:\n      cfg:\n        type: dict\n        default:\n          host: \"{{ ansible_host }}\"\n",
+            .bad_overlays = &.{
+                .{ .path = "/ws/roles/demo/defaults/main.yml", .bytes = "cfg:\n  host: \"{{ ansible_host }}\"\n" },
+            },
+            .good_overlays = &.{
+                .{ .path = "/ws/roles/demo/defaults/main.yml", .bytes = "cfg:\n  host: \"{{ other_host }}\"\n" },
+            },
         },
         .{
             .rule_id = "avoid-implicit",
@@ -459,7 +572,7 @@ test "rule conformance matrix positive and negative fixtures for every approved 
     for (cases) |c| {
         var bad_arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer bad_arena.deinit();
-        const bad_res = try evalCodes(bad_arena.allocator(), c.path, c.bad, c.bad_options);
+        const bad_res = try evalCodes(bad_arena.allocator(), c.path, c.bad, c.bad_options, c.use_context, c.bad_overlays);
         try std.testing.expectEqual(@as(usize, 0), bad_res.runtime_error_count);
         if (!containsCode(bad_res.codes, c.rule_id)) {
             std.debug.print("EXPECTED rule '{s}' to fire on bad fixture, got {d} codes\n", .{ c.rule_id, bad_res.codes.len });
@@ -468,11 +581,120 @@ test "rule conformance matrix positive and negative fixtures for every approved 
 
         var good_arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer good_arena.deinit();
-        const good_res = try evalCodes(good_arena.allocator(), c.path, c.good, c.good_options);
+        const good_res = try evalCodes(good_arena.allocator(), c.path, c.good, c.good_options, c.use_context, c.good_overlays);
         try std.testing.expectEqual(@as(usize, 0), good_res.runtime_error_count);
         if (containsCode(good_res.codes, c.rule_id)) {
             std.debug.print("EXPECTED rule '{s}' NOT to fire on good fixture\n", .{c.rule_id});
             return error.TestUnexpectedResult;
         }
     }
+}
+
+test "cross-file argument-specs edge cases: literals, cross-type, nested templates, directory defaults, missing spec" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const spec_path = "/ws/roles/demo/meta/argument_specs.yml";
+    const spec_src =
+        \\argument_specs:
+        \\  main:
+        \\    options:
+        \\      same_quoted:
+        \\        type: str
+        \\        default: "present"
+        \\      same_null:
+        \\        type: str
+        \\        default: null
+        \\      cross_int_float:
+        \\        type: int
+        \\        default: 1
+        \\      cross_bool_str:
+        \\        type: bool
+        \\        default: true
+        \\      nested_tpl_vs_lit:
+        \\        type: list
+        \\        default:
+        \\          - a
+        \\          - "{{ dyn }}"
+        \\      both_tpl:
+        \\        type: str
+        \\        default: "{{ a }}"
+        \\      dir_merged:
+        \\        type: int
+        \\        default: 8080
+        \\      nested_parent:
+        \\        type: dict
+        \\        default:
+        \\          inner: ok
+        \\        options:
+        \\          inner:
+        \\            type: str
+        \\            default: ok
+        \\            required: false
+        \\
+    ;
+    const overlays = [_]ast.SourceOverlay{
+        .{ .path = spec_path, .bytes = spec_src },
+        .{
+            .path = "/ws/roles/demo/defaults/main/01_base.yml",
+            .bytes =
+            \\same_quoted: present
+            \\same_null: ~
+            \\cross_int_float: 1.0
+            \\cross_bool_str: "true"
+            \\nested_tpl_vs_lit:
+            \\  - a
+            \\  - b
+            \\both_tpl: "{{ b }}"
+            \\dir_merged: 80
+            \\nested_parent:
+            \\  inner: ok
+            \\
+            ,
+        },
+        .{
+            .path = "/ws/roles/demo/defaults/main/02_override.yml",
+            .bytes = "dir_merged: 8080\n",
+        },
+    };
+
+    var doc = try ast.build(a, spec_path, "roles/demo/meta/argument_specs.yml", spec_src);
+    defer doc.deinit();
+    var rs = try registry.buildRuleSet(a, 1, .{ .include_builtins = true });
+    defer rs.deinit();
+    var wrs = try rs.cloneForWorker(a);
+    defer wrs.deinit();
+    const doc_ctx = try ast.context.build(a, spec_path, "/ws", &overlays);
+
+    const res = try evaluator.evaluateDocument(a, &doc, &wrs, .{}, doc_ctx, .utf16, null);
+    try std.testing.expectEqual(@as(usize, 0), res.runtime_errors.len);
+
+    var val_mismatch_count: usize = 0;
+    var tpl_mismatch_count: usize = 0;
+    var missing_default_count: usize = 0;
+    for (res.diagnostics) |d| {
+        const code = d.code orelse continue;
+        if (std.mem.eql(u8, code, "argument-specs[default-value-mismatch]")) {
+            val_mismatch_count += 1;
+            try std.testing.expectEqual(@import("../lsp/types.zig").DiagnosticSeverity.err, d.severity.?);
+        } else if (std.mem.eql(u8, code, "argument-specs[default-template-mismatch]")) {
+            tpl_mismatch_count += 1;
+            try std.testing.expectEqual(@import("../lsp/types.zig").DiagnosticSeverity.information, d.severity.?);
+        } else if (std.mem.eql(u8, code, "argument-specs[spec-default-not-in-defaults]")) {
+            missing_default_count += 1;
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 2), val_mismatch_count);
+    try std.testing.expectEqual(@as(usize, 1), tpl_mismatch_count);
+    try std.testing.expectEqual(@as(usize, 0), missing_default_count);
+
+    const legacy_defaults_path = "/ws/roles/legacy/defaults/main.yml";
+    const legacy_res = try evalCodes(a, legacy_defaults_path, "legacy_var: 1\n", &.{}, true, &.{
+        .{ .path = legacy_defaults_path, .bytes = "legacy_var: 1\n" },
+    });
+    try std.testing.expectEqual(@as(usize, 0), legacy_res.runtime_error_count);
+    try std.testing.expect(!containsCode(legacy_res.codes, "argument-specs[defaults-var-not-in-spec]"));
+    try std.testing.expect(!containsCode(legacy_res.codes, "argument-specs[defaults-extra-entry-point]"));
+    try std.testing.expect(containsCode(legacy_res.codes, "argument-specs[missing-file]"));
 }
