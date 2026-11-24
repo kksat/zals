@@ -68,7 +68,68 @@
         "has_argument_specs": "bool"
       }
     },
-    "context": { "type": "map" },
+    "context": {
+      "type": "map",
+      "fields": {
+        "role": {
+          "type": "map",
+          "fields": {
+            "present": "bool",
+            "name": "string",
+            "path": "string",
+            "entry_point": "string",
+            "has_argument_specs_file": "bool",
+            "has_argument_specs": "bool",
+            "has_meta": "bool",
+            "has_defaults": "bool",
+            "has_tasks": "bool",
+            "has_handlers": "bool",
+            "argument_specs": "map<string, map>",
+            "defaults": "map<string, map>"
+          }
+        },
+        "collection": {
+          "type": "map",
+          "fields": {
+            "present": "bool",
+            "namespace": "string",
+            "name": "string",
+            "fqcn": "string",
+            "path": "string",
+            "has_meta_runtime": "bool",
+            "has_changelog": "bool"
+          }
+        },
+        "play": {
+          "type": "map",
+          "fields": {
+            "present": "bool",
+            "index": "int",
+            "name": "string",
+            "hosts": "string",
+            "strategy": "string",
+            "has_become": "bool",
+            "has_become_user": "bool",
+            "collections": "list<string>",
+            "handler_names": "list<string>",
+            "var_names": "list<string>"
+          }
+        },
+        "block": {
+          "type": "map",
+          "fields": {
+            "present": "bool",
+            "nesting_depth": "int",
+            "section": "string",
+            "has_become": "bool",
+            "has_become_user": "bool",
+            "has_no_log": "bool",
+            "has_ignore_errors": "bool",
+            "when": "list<TypedValue>"
+          }
+        }
+      }
+    },
     "metadata": {
       "type": "map",
       "fields": {
@@ -197,7 +258,8 @@
         "is_quoted": "bool",
         "is_templated": "bool",
         "is_ascii": "bool",
-        "site": "string"
+        "site": "string",
+        "value": "TypedValue | null"
       }
     },
     "role_meta": {
@@ -253,9 +315,11 @@
         "entry_point": "string",
         "name": "string",
         "path": "string",
+        "is_top_level": "bool",
         "is_map": "bool",
         "keys": "list<string>",
         "has_default": "bool",
+        "default": "TypedValue | null",
         "has_required": "bool",
         "required": "TypedValue | null",
         "no_log": "TypedValue | null",

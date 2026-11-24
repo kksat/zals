@@ -14,11 +14,10 @@ variables:
     type_name: zals.Document
     description: Read-only facts for the Ansible document being evaluated.
   - name: context
-    type_name: map
-    params:
-      - type_name: string
-      - type_name: dyn
-    description: Read-only enclosing/sibling AST context map.
+    type_name: zals.Context
+    description: >-
+      Namespaced read-only enclosing and sibling AST context
+      (context.role, context.collection, context.play, context.block).
   - name: metadata
     type_name: zals.Metadata
     description: Read-only collected Ansible environment metadata snapshot.

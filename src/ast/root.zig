@@ -5,6 +5,7 @@ pub const command = @import("command.zig");
 pub const yaml_recover = @import("yaml_recover.zig");
 pub const value = @import("value.zig");
 pub const ansible = @import("ansible.zig");
+pub const context = @import("context.zig");
 
 pub const Span = span.Span;
 pub const DocumentAst = ansible.DocumentAst;
@@ -18,6 +19,8 @@ pub const GalaxyMeta = ansible.GalaxyMeta;
 pub const ArgumentSpecEntry = ansible.ArgumentSpecEntry;
 pub const ArgumentSpec = ansible.ArgumentSpec;
 pub const BlockContextData = ansible.BlockContextData;
+pub const DocumentContext = context.DocumentContext;
+pub const SourceOverlay = context.SourceOverlay;
 pub const ParseIssue = ansible.ParseIssue;
 pub const MetadataSnapshot = metadata.MetadataSnapshot;
 pub const build = ansible.build;
@@ -30,4 +33,5 @@ test {
     _ = @import("yaml_recover.zig");
     _ = @import("value.zig");
     _ = @import("ansible.zig");
+    _ = @import("context.zig");
 }
