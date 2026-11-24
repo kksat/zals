@@ -72,6 +72,31 @@ pub const StringLeaf = struct {
     span: Span,
 };
 
+pub const BlockContextData = struct {
+    present: bool = false,
+    nesting_depth: usize = 0,
+    section: []const u8 = "",
+    has_become: bool = false,
+    has_become_user: bool = false,
+    has_no_log: bool = false,
+    has_ignore_errors: bool = false,
+    when_list: []const TypedValue = &.{},
+
+    pub fn toCel(self: BlockContextData, alloc: Allocator) !cel_env.Value {
+        var b = cel_env.MapBuilder.init();
+        errdefer b.deinit(alloc);
+        try b.putBool(alloc, "present", self.present);
+        try b.putInt(alloc, "nesting_depth", @intCast(self.nesting_depth));
+        try b.putString(alloc, "section", self.section);
+        try b.putBool(alloc, "has_become", self.has_become);
+        try b.putBool(alloc, "has_become_user", self.has_become_user);
+        try b.putBool(alloc, "has_no_log", self.has_no_log);
+        try b.putBool(alloc, "has_ignore_errors", self.has_ignore_errors);
+        try b.put(alloc, "when", try typedListToCel(alloc, self.when_list));
+        return b.finish(alloc);
+    }
+};
+
 pub const Play = struct {
     index: usize,
     span: Span,
@@ -89,6 +114,38 @@ pub const Play = struct {
     task_count: usize = 0,
     is_import_playbook: bool = false,
     import_playbook_key: []const u8 = "",
+    collections: []const []const u8 = &.{},
+    handler_names: []const []const u8 = &.{},
+    var_names: []const []const u8 = &.{},
+
+    pub fn toPlayContextCel(play_opt: ?*const Play, alloc: Allocator) !cel_env.Value {
+        var b = cel_env.MapBuilder.init();
+        errdefer b.deinit(alloc);
+        if (play_opt) |self| {
+            try b.putBool(alloc, "present", true);
+            try b.putInt(alloc, "index", @intCast(self.index));
+            try b.putString(alloc, "name", if (self.name) |n| n.str_v else "");
+            try b.putString(alloc, "hosts", if (self.hosts) |h| h.str_v else "");
+            try b.putString(alloc, "strategy", if (self.strategy) |s| s.str_v else "");
+            try b.putBool(alloc, "has_become", self.has_become);
+            try b.putBool(alloc, "has_become_user", self.has_become_user);
+            try b.putStringList(alloc, "collections", self.collections);
+            try b.putStringList(alloc, "handler_names", self.handler_names);
+            try b.putStringList(alloc, "var_names", self.var_names);
+        } else {
+            try b.putBool(alloc, "present", false);
+            try b.putInt(alloc, "index", -1);
+            try b.putString(alloc, "name", "");
+            try b.putString(alloc, "hosts", "");
+            try b.putString(alloc, "strategy", "");
+            try b.putBool(alloc, "has_become", false);
+            try b.putBool(alloc, "has_become_user", false);
+            try b.putStringList(alloc, "collections", &.{});
+            try b.putStringList(alloc, "handler_names", &.{});
+            try b.putStringList(alloc, "var_names", &.{});
+        }
+        return b.finish(alloc);
+    }
 
     pub fn toCel(self: *const Play, alloc: Allocator) !cel_env.Value {
         var b = cel_env.MapBuilder.init();
@@ -183,6 +240,8 @@ pub const Task = struct {
     section: []const u8 = "tasks",
     play_strategy: []const u8 = "",
     play_name: []const u8 = "",
+    play_index: ?usize = null,
+    block_ctx: BlockContextData = .{},
     string_leaves: []const StringLeaf = &.{},
 
     pub fn toCel(self: *const Task, alloc: Allocator) !cel_env.Value {
@@ -290,6 +349,8 @@ pub const RoleRef = struct {
     field_spans: []const FieldSpan,
     when_list: []const TypedValue = &.{},
     site: []const u8,
+    play_index: ?usize = null,
+    block_ctx: BlockContextData = .{},
 
     pub fn toCel(self: *const RoleRef, alloc: Allocator) !cel_env.Value {
         var b = cel_env.MapBuilder.init();
@@ -309,6 +370,9 @@ pub const VarDef = struct {
     is_templated: bool,
     is_ascii: bool,
     site: []const u8,
+    value: ?TypedValue = null,
+    play_index: ?usize = null,
+    block_ctx: BlockContextData = .{},
     span: Span,
     field_spans: []const FieldSpan,
 
@@ -321,6 +385,7 @@ pub const VarDef = struct {
         try b.putBool(alloc, "is_templated", self.is_templated);
         try b.putBool(alloc, "is_ascii", self.is_ascii);
         try b.putString(alloc, "site", self.site);
+        try putOptTyped(&b, alloc, "value", self.value);
         return b.finish(alloc);
     }
 };
@@ -411,9 +476,11 @@ pub const ArgumentSpec = struct {
     entry_point: []const u8,
     name: []const u8,
     path: []const u8,
+    is_top_level: bool = true,
     is_map: bool,
     keys: []const []const u8 = &.{},
     has_default: bool = false,
+    default_val: ?TypedValue = null,
     has_required: bool = false,
     required: ?TypedValue = null,
     no_log: ?TypedValue = null,
@@ -430,9 +497,11 @@ pub const ArgumentSpec = struct {
         try b.putString(alloc, "entry_point", self.entry_point);
         try b.putString(alloc, "name", self.name);
         try b.putString(alloc, "path", self.path);
+        try b.putBool(alloc, "is_top_level", self.is_top_level);
         try b.putBool(alloc, "is_map", self.is_map);
         try b.putStringList(alloc, "keys", self.keys);
         try b.putBool(alloc, "has_default", self.has_default);
+        try putOptTyped(&b, alloc, "default", self.default_val);
         try b.putBool(alloc, "has_required", self.has_required);
         try putOptTyped(&b, alloc, "required", self.required);
         try putOptTyped(&b, alloc, "no_log", self.no_log);
@@ -741,7 +810,7 @@ const AstBuilder = struct {
                 },
                 .vars_file, .defaults => {
                     if (root.kind == .map) {
-                        try self.collectMapVarDefs(root, if (doc_kind == .defaults) "role_defaults" else "vars_file");
+                        try self.collectMapVarDefs(root, if (doc_kind == .defaults) "role_defaults" else "vars_file", null, .{});
                     }
                 },
                 .playbook => {
@@ -767,6 +836,9 @@ const AstBuilder = struct {
                             if (doc_kind == .handlers) "handlers" else "tasks",
                             "",
                             "",
+                            null,
+                            null,
+                            .{},
                             null,
                         );
                     }
@@ -815,6 +887,9 @@ const AstBuilder = struct {
                     "",
                     "",
                     null,
+                    null,
+                    .{},
+                    null,
                 );
             }
         }
@@ -823,8 +898,12 @@ const AstBuilder = struct {
     fn lowerPlay(self: *AstBuilder, map: *const yaml_recover.YamlNode) !void {
         var keys = std.ArrayList([]const u8).empty;
         var fspans = std.ArrayList(FieldSpan).empty;
+        var collections = std.ArrayList([]const u8).empty;
+        var handler_names = std.ArrayList([]const u8).empty;
+        var var_names = std.ArrayList([]const u8).empty;
+        const play_idx = self.plays.items.len;
         var play = Play{
-            .index = self.plays.items.len,
+            .index = play_idx,
             .span = .{ .start = map.start, .end = map.end },
             .field_spans = &.{},
             .keys = &.{},
@@ -850,6 +929,18 @@ const AstBuilder = struct {
                 play.has_become = true;
             } else if (std.mem.eql(u8, kname, "become_user")) {
                 play.has_become_user = true;
+            } else if (std.mem.eql(u8, kname, "collections")) {
+                if (pair.val) |cv| {
+                    if (cv.kind == .seq) {
+                        for (cv.items) |entry| {
+                            if (entry.kind == .scalar) {
+                                if (entry.value) |s| {
+                                    if (s.len > 0) try collections.append(self.alloc, s);
+                                }
+                            }
+                        }
+                    }
+                }
             } else if (std.mem.eql(u8, kname, "vars_prompt")) {
                 play.has_vars_prompt = true;
                 if (pair.val) |vp| {
@@ -857,7 +948,7 @@ const AstBuilder = struct {
                         for (vp.items) |entry| {
                             if (entry.kind == .map) {
                                 if (entry.findPair("name")) |np| {
-                                    if (np.val) |nv| try self.addVarDefFromScalar(nv, "vars_prompt");
+                                    if (np.val) |nv| try self.addVarDefFromScalar(nv, "vars_prompt", play_idx, .{});
                                 }
                             }
                         }
@@ -868,7 +959,14 @@ const AstBuilder = struct {
                 play.run_once = try value_mod.fromYaml(self.alloc, pair.val);
             } else if (std.mem.eql(u8, kname, "vars")) {
                 if (pair.val) |v| {
-                    if (v.kind == .map) try self.collectMapVarDefs(v, "play_vars");
+                    if (v.kind == .map) {
+                        for (v.items) |vp| {
+                            const vk = vp.key orelse continue;
+                            const vname = vk.value orelse vk.raw;
+                            if (vname.len > 0) try var_names.append(self.alloc, vname);
+                        }
+                        try self.collectMapVarDefs(v, "play_vars", play_idx, .{});
+                    }
                 }
             } else if (std.mem.eql(u8, kname, "import_playbook") or
                 std.mem.eql(u8, kname, "ansible.builtin.import_playbook") or
@@ -891,16 +989,20 @@ const AstBuilder = struct {
                 std.mem.eql(u8, kname, "post_tasks") or
                 std.mem.eql(u8, kname, "handlers"))
             {
+                const is_handlers = std.mem.eql(u8, kname, "handlers");
                 if (val.kind == .seq) {
                     try self.lowerTaskList(
                         val.items,
-                        std.mem.eql(u8, kname, "handlers"),
+                        is_handlers,
                         false,
                         0,
                         kname,
                         play_strategy,
                         play_name,
-                        if (play.has_name and !std.mem.eql(u8, kname, "handlers")) &immediate_names else null,
+                        if (play.has_name and !is_handlers) &immediate_names else null,
+                        play_idx,
+                        .{},
+                        if (is_handlers) &handler_names else null,
                     );
                 } else if (!(val.kind == .scalar and val.scalar_style == .empty)) {
                     try self.addStructureIssue(val, "task section must be a list of tasks");
@@ -908,7 +1010,7 @@ const AstBuilder = struct {
             } else if (std.mem.eql(u8, kname, "roles")) {
                 if (val.kind == .seq) {
                     for (val.items) |entry| {
-                        try self.lowerRoleEntry(entry);
+                        try self.lowerRoleEntry(entry, play_idx);
                     }
                 }
             }
@@ -917,6 +1019,9 @@ const AstBuilder = struct {
         play.task_count = self.tasks.items.len - tasks_before;
         play.keys = try keys.toOwnedSlice(self.alloc);
         play.field_spans = try fspans.toOwnedSlice(self.alloc);
+        play.collections = try collections.toOwnedSlice(self.alloc);
+        play.handler_names = try handler_names.toOwnedSlice(self.alloc);
+        play.var_names = try var_names.toOwnedSlice(self.alloc);
         try self.plays.append(self.alloc, play);
     }
 
@@ -930,6 +1035,9 @@ const AstBuilder = struct {
         play_strategy: []const u8,
         play_name: []const u8,
         immediate_names: ?*std.StringHashMapUnmanaged(void),
+        play_index: ?usize,
+        block_ctx: BlockContextData,
+        handler_names_out: ?*std.ArrayList([]const u8),
     ) anyerror!void {
         for (items) |item| {
             if (item.kind != .map) {
@@ -945,6 +1053,9 @@ const AstBuilder = struct {
                 play_strategy,
                 play_name,
                 immediate_names,
+                play_index,
+                block_ctx,
+                handler_names_out,
             );
         }
     }
@@ -959,6 +1070,9 @@ const AstBuilder = struct {
         play_strategy: []const u8,
         play_name: []const u8,
         immediate_names: ?*std.StringHashMapUnmanaged(void),
+        play_index: ?usize,
+        block_ctx: BlockContextData,
+        handler_names_out: ?*std.ArrayList([]const u8),
     ) anyerror!void {
         const block_pair = map.findPair("block");
         const rescue_pair = map.findPair("rescue");
@@ -1011,6 +1125,8 @@ const AstBuilder = struct {
             .section = section,
             .play_strategy = play_strategy,
             .play_name = play_name,
+            .play_index = play_index,
+            .block_ctx = block_ctx,
         };
 
         var args_list = std.ArrayList(ArgEntry).empty;
@@ -1025,6 +1141,11 @@ const AstBuilder = struct {
             if (std.mem.eql(u8, kname, "name")) {
                 task.has_name = true;
                 task.name = try value_mod.fromYaml(self.alloc, pair.val);
+                if (handler_names_out) |hnames| {
+                    if (task.name) |tv| {
+                        if (tv.str_v.len > 0) try hnames.append(self.alloc, tv.str_v);
+                    }
+                }
                 if (immediate_names) |seen| {
                     if (task.name) |tv| {
                         if (tv.str_v.len > 0) {
@@ -1032,6 +1153,24 @@ const AstBuilder = struct {
                                 task.is_duplicate_name = true;
                             } else {
                                 try seen.put(self.alloc, tv.str_v, {});
+                            }
+                        }
+                    }
+                }
+            } else if (std.mem.eql(u8, kname, "listen")) {
+                if (handler_names_out) |hnames| {
+                    if (pair.val) |lv| {
+                        if (lv.kind == .scalar) {
+                            if (lv.value) |s| {
+                                if (s.len > 0) try hnames.append(self.alloc, s);
+                            }
+                        } else if (lv.kind == .seq) {
+                            for (lv.items) |entry| {
+                                if (entry.kind == .scalar) {
+                                    if (entry.value) |s| {
+                                        if (s.len > 0) try hnames.append(self.alloc, s);
+                                    }
+                                }
                             }
                         }
                     }
@@ -1052,7 +1191,7 @@ const AstBuilder = struct {
             } else if (std.mem.eql(u8, kname, "register")) {
                 task.has_register = true;
                 task.register_val = try value_mod.fromYaml(self.alloc, pair.val);
-                if (pair.val) |rv| try self.addVarDefFromScalar(rv, "register");
+                if (pair.val) |rv| try self.addVarDefFromScalar(rv, "register", play_index, block_ctx);
             } else if (std.mem.eql(u8, kname, "no_log")) {
                 task.has_no_log = true;
                 task.no_log = try value_mod.fromYaml(self.alloc, pair.val);
@@ -1084,7 +1223,7 @@ const AstBuilder = struct {
                 task.args_val_kind = tv.kind;
             } else if (std.mem.eql(u8, kname, "vars")) {
                 if (pair.val) |v| {
-                    if (v.kind == .map) try self.collectMapVarDefs(v, "task_vars");
+                    if (v.kind == .map) try self.collectMapVarDefs(v, "task_vars", play_index, block_ctx);
                 }
             }
         }
@@ -1117,6 +1256,9 @@ const AstBuilder = struct {
                     .is_templated = value_mod.hasJinjaDelimiters(entry.name),
                     .is_ascii = isAscii(entry.name),
                     .site = "set_fact",
+                    .value = entry.val,
+                    .play_index = play_index,
+                    .block_ctx = block_ctx,
                     .span = entry.span,
                     .field_spans = &.{},
                 });
@@ -1133,6 +1275,8 @@ const AstBuilder = struct {
                         .field_spans = &.{},
                         .when_list = task.when_list,
                         .site = task.short_action,
+                        .play_index = play_index,
+                        .block_ctx = block_ctx,
                     });
                 }
             }
@@ -1162,6 +1306,11 @@ const AstBuilder = struct {
         try self.tasks.append(self.alloc, task);
 
         if (is_block) {
+            var merged_when = std.ArrayList(TypedValue).empty;
+            try merged_when.appendSlice(self.alloc, block_ctx.when_list);
+            try merged_when.appendSlice(self.alloc, task.when_list);
+            const merged_when_slice = try merged_when.toOwnedSlice(self.alloc);
+
             const sub_sections = [_]struct { name: []const u8, pair: ?*const yaml_recover.YamlNode }{
                 .{ .name = "block", .pair = block_pair },
                 .{ .name = "rescue", .pair = rescue_pair },
@@ -1170,6 +1319,16 @@ const AstBuilder = struct {
             for (sub_sections) |sec| {
                 const sp = sec.pair orelse continue;
                 const sv = sp.val orelse continue;
+                const child_block_ctx = BlockContextData{
+                    .present = true,
+                    .nesting_depth = nesting_depth + 1,
+                    .section = sec.name,
+                    .has_become = block_ctx.has_become or task.has_become,
+                    .has_become_user = block_ctx.has_become_user or task.has_become_user,
+                    .has_no_log = block_ctx.has_no_log or task.has_no_log,
+                    .has_ignore_errors = block_ctx.has_ignore_errors or task.has_ignore_errors,
+                    .when_list = merged_when_slice,
+                };
                 if (sv.kind == .seq) {
                     try self.lowerTaskList(
                         sv.items,
@@ -1180,6 +1339,9 @@ const AstBuilder = struct {
                         play_strategy,
                         play_name,
                         null,
+                        play_index,
+                        child_block_ctx,
+                        handler_names_out,
                     );
                 } else if (!(sv.kind == .scalar and sv.scalar_style == .empty)) {
                     try self.addStructureIssue(sv, "block section must be a list of tasks");
@@ -1244,7 +1406,7 @@ const AstBuilder = struct {
         }
     }
 
-    fn lowerRoleEntry(self: *AstBuilder, entry: *const yaml_recover.YamlNode) !void {
+    fn lowerRoleEntry(self: *AstBuilder, entry: *const yaml_recover.YamlNode, play_index: ?usize) !void {
         if (entry.kind == .scalar) {
             const name = entry.value orelse "";
             try self.role_refs.append(self.alloc, .{
@@ -1253,6 +1415,7 @@ const AstBuilder = struct {
                 .span = .{ .start = entry.start, .end = entry.end },
                 .field_spans = &.{},
                 .site = "roles",
+                .play_index = play_index,
             });
             return;
         }
@@ -1276,7 +1439,7 @@ const AstBuilder = struct {
                 when_list = try extractConditionList(self.alloc, pair.val);
             } else if (std.mem.eql(u8, kname, "vars")) {
                 if (pair.val) |v| {
-                    if (v.kind == .map) try self.collectMapVarDefs(v, "role_vars");
+                    if (v.kind == .map) try self.collectMapVarDefs(v, "role_vars", play_index, .{});
                 }
             }
         }
@@ -1287,13 +1450,21 @@ const AstBuilder = struct {
             .field_spans = try fspans.toOwnedSlice(self.alloc),
             .when_list = when_list,
             .site = "roles",
+            .play_index = play_index,
         });
     }
 
-    fn collectMapVarDefs(self: *AstBuilder, map: *const yaml_recover.YamlNode, site: []const u8) !void {
+    fn collectMapVarDefs(
+        self: *AstBuilder,
+        map: *const yaml_recover.YamlNode,
+        site: []const u8,
+        play_index: ?usize,
+        block_ctx: BlockContextData,
+    ) !void {
         for (map.items) |pair| {
             const k = pair.key orelse continue;
             const kt = try value_mod.fromYaml(self.alloc, k);
+            const vt = try value_mod.fromYaml(self.alloc, pair.val);
             const name = k.value orelse k.raw;
             try self.var_defs.append(self.alloc, .{
                 .name = name,
@@ -1302,13 +1473,22 @@ const AstBuilder = struct {
                 .is_templated = kt.is_templated,
                 .is_ascii = isAscii(name),
                 .site = site,
+                .value = vt,
+                .play_index = play_index,
+                .block_ctx = block_ctx,
                 .span = .{ .start = k.start, .end = k.end },
                 .field_spans = &.{},
             });
         }
     }
 
-    fn addVarDefFromScalar(self: *AstBuilder, node: *const yaml_recover.YamlNode, site: []const u8) !void {
+    fn addVarDefFromScalar(
+        self: *AstBuilder,
+        node: *const yaml_recover.YamlNode,
+        site: []const u8,
+        play_index: ?usize,
+        block_ctx: BlockContextData,
+    ) !void {
         if (node.kind != .scalar) return;
         const tv = try value_mod.fromYaml(self.alloc, node);
         const name = node.value orelse node.raw;
@@ -1320,6 +1500,8 @@ const AstBuilder = struct {
             .is_templated = tv.is_templated,
             .is_ascii = isAscii(name),
             .site = site,
+            .play_index = play_index,
+            .block_ctx = block_ctx,
             .span = .{ .start = node.start, .end = node.end },
             .field_spans = &.{},
         });
@@ -1335,7 +1517,7 @@ const AstBuilder = struct {
         if (root.findPair("dependencies")) |dp| {
             if (dp.val) |dv| {
                 if (dv.kind == .seq) {
-                    for (dv.items) |entry| try self.lowerRoleEntry(entry);
+                    for (dv.items) |entry| try self.lowerRoleEntry(entry, null);
                 }
             }
         }
@@ -1531,6 +1713,7 @@ const AstBuilder = struct {
                 .entry_point = entry_point,
                 .name = opt_name,
                 .path = opt_path,
+                .is_top_level = prefix.len == 0,
                 .is_map = false,
                 .span = .{ .start = k.start, .end = k.end },
                 .field_spans = &.{},
@@ -1549,6 +1732,7 @@ const AstBuilder = struct {
                         try fspans.append(self.alloc, .{ .name = ok_name, .span = .{ .start = ok.start, .end = ok.end } });
                         if (std.mem.eql(u8, ok_name, "default")) {
                             spec.has_default = true;
+                            spec.default_val = try value_mod.fromYaml(self.alloc, op.val);
                         } else if (std.mem.eql(u8, ok_name, "required")) {
                             spec.has_required = true;
                             spec.required = try value_mod.fromYaml(self.alloc, op.val);
@@ -1944,22 +2128,27 @@ test "argument specs lowering produces entry and option nodes with dotted paths"
     try std.testing.expectEqualStrings("demo_password", password.name);
     try std.testing.expectEqualStrings("demo_password", password.path);
     try std.testing.expectEqualStrings("main", password.entry_point);
+    try std.testing.expect(password.is_top_level);
     try std.testing.expect(password.is_map);
     try std.testing.expectEqualStrings("str", password.type_val.?.str_v);
     try std.testing.expectEqualStrings("Unmarked secret.", password.description_text);
     try std.testing.expect(!password.has_default);
+    try std.testing.expect(password.default_val == null);
     try std.testing.expect(!password.has_required);
 
     const conf = doc.argument_specs[1];
     try std.testing.expectEqualStrings("demo_conf", conf.name);
+    try std.testing.expect(conf.is_top_level);
 
     const nested = doc.argument_specs[2];
     try std.testing.expectEqualStrings("smtp_secret", nested.name);
     try std.testing.expectEqualStrings("demo_conf.smtp_secret", nested.path);
+    try std.testing.expect(!nested.is_top_level);
     try std.testing.expect(nested.no_log != null and nested.no_log.?.bool_v);
 
     const conflict = doc.argument_specs[3];
     try std.testing.expect(conflict.has_default);
+    try std.testing.expectEqualStrings("present", conflict.default_val.?.str_v);
     try std.testing.expect(conflict.has_required);
     try std.testing.expect(conflict.required.?.bool_v);
 
@@ -1975,6 +2164,82 @@ test "argument specs lowering produces entry and option nodes with dotted paths"
     defer missing_doc.deinit();
     try std.testing.expectEqual(DocumentKind.argument_specs, missing_doc.kind);
     try std.testing.expect(!missing_doc.has_argument_specs);
+}
+
+test "enclosing play and block metadata propagate to nested tasks and vars" {
+    const src =
+        \\- name: web play
+        \\  hosts: web
+        \\  become: true
+        \\  collections:
+        \\    - community.general
+        \\  vars:
+        \\    app_port: 8080
+        \\  handlers:
+        \\    - name: restart web
+        \\      listen:
+        \\        - web reload
+        \\      ansible.builtin.debug:
+        \\        msg: reload
+        \\  tasks:
+        \\    - name: outer block
+        \\      become: true
+        \\      no_log: true
+        \\      when: ansible_os_family == 'Debian'
+        \\      block:
+        \\        - name: inner task
+        \\          ansible.builtin.debug:
+        \\            msg: hi
+        \\          vars:
+        \\            inner_var: ok
+        \\
+    ;
+    var doc = try build(std.testing.allocator, "/ws/site.yml", "site.yml", src);
+    defer doc.deinit();
+
+    try std.testing.expectEqual(@as(usize, 1), doc.plays.len);
+    const p = doc.plays[0];
+    try std.testing.expectEqual(@as(usize, 1), p.collections.len);
+    try std.testing.expectEqualStrings("community.general", p.collections[0]);
+    try std.testing.expectEqual(@as(usize, 1), p.var_names.len);
+    try std.testing.expectEqualStrings("app_port", p.var_names[0]);
+    try std.testing.expectEqual(@as(usize, 2), p.handler_names.len);
+    try std.testing.expectEqualStrings("restart web", p.handler_names[0]);
+    try std.testing.expectEqualStrings("web reload", p.handler_names[1]);
+
+    var found_inner = false;
+    for (doc.tasks) |t| {
+        try std.testing.expectEqual(@as(?usize, 0), t.play_index);
+        if (t.name != null and std.mem.eql(u8, t.name.?.str_v, "inner task")) {
+            found_inner = true;
+            try std.testing.expect(t.block_ctx.present);
+            try std.testing.expectEqual(@as(usize, 1), t.block_ctx.nesting_depth);
+            try std.testing.expectEqualStrings("block", t.block_ctx.section);
+            try std.testing.expect(t.block_ctx.has_become);
+            try std.testing.expect(t.block_ctx.has_no_log);
+            try std.testing.expect(!t.block_ctx.has_ignore_errors);
+            try std.testing.expectEqual(@as(usize, 1), t.block_ctx.when_list.len);
+        }
+    }
+    try std.testing.expect(found_inner);
+
+    var found_app_port = false;
+    var found_inner_var = false;
+    for (doc.var_defs) |vd| {
+        if (std.mem.eql(u8, vd.name, "app_port")) {
+            found_app_port = true;
+            try std.testing.expectEqual(@as(i64, 8080), vd.value.?.int_v);
+            try std.testing.expectEqual(@as(?usize, 0), vd.play_index);
+            try std.testing.expect(!vd.block_ctx.present);
+        } else if (std.mem.eql(u8, vd.name, "inner_var")) {
+            found_inner_var = true;
+            try std.testing.expectEqualStrings("ok", vd.value.?.str_v);
+            try std.testing.expect(vd.block_ctx.present);
+            try std.testing.expect(vd.block_ctx.has_become);
+        }
+    }
+    try std.testing.expect(found_app_port);
+    try std.testing.expect(found_inner_var);
 }
 
 test "alternate invocation forms preserve original spelling and normalize args" {
