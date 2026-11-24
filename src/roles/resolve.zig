@@ -186,7 +186,7 @@ fn isRolePath(dir: []const u8) bool {
 fn isRoleDir(dir: []const u8) bool {
     if (isRolePath(dir)) return true;
     var buf: [std.fs.max_path_bytes]u8 = undefined;
-    for ([_][]const u8{ "main.yml", "main.yaml" }) |name| {
+    for ([_][]const u8{ "main.yml", "main.yaml", "argument_specs.yml", "argument_specs.yaml" }) |name| {
         const meta = std.fmt.bufPrint(&buf, "{s}/meta/{s}", .{ dir, name }) catch continue;
         const f = std.fs.cwd().openFile(meta, .{}) catch continue;
         f.close();

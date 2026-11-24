@@ -56,7 +56,9 @@ pub const TypedValue = struct {
                 for (self.list_v) |it| if (it.containsTemplate()) return true;
             },
             .map_val => {
-                for (self.map_v) |e| if (e.val.containsTemplate()) return true;
+                for (self.map_v) |e| {
+                    if (hasJinjaDelimiters(e.key) or e.val.containsTemplate()) return true;
+                }
             },
             else => {},
         }
@@ -133,13 +135,16 @@ fn fromYamlDepth(alloc: Allocator, n: *const yaml_recover.YamlNode, depth: usize
         },
         .seq => {
             const list = try alloc.alloc(TypedValue, n.items.len);
+            var templated = false;
             for (n.items, 0..) |it, i| {
                 list[i] = try fromYamlDepth(alloc, it, depth + 1);
+                if (list[i].is_templated) templated = true;
             }
-            return .{ .kind = .list_val, .raw = n.raw, .span = sp, .list_v = list };
+            return .{ .kind = .list_val, .is_templated = templated, .raw = n.raw, .span = sp, .list_v = list };
         },
         .map => {
             var entries = std.ArrayList(MapEntry).empty;
+            var templated = false;
             for (n.items) |pair| {
                 if (pair.kind != .pair) continue;
                 const k = pair.key orelse continue;
@@ -152,6 +157,7 @@ fn fromYamlDepth(alloc: Allocator, n: *const yaml_recover.YamlNode, depth: usize
                     .kind = .null_val,
                     .span = .{ .start = pair.end, .end = pair.end },
                 };
+                if (kt.is_templated or vt.is_templated) templated = true;
                 try entries.append(alloc, .{
                     .key = key_str,
                     .key_kind = kt.kind,
@@ -162,6 +168,7 @@ fn fromYamlDepth(alloc: Allocator, n: *const yaml_recover.YamlNode, depth: usize
             }
             return .{
                 .kind = .map_val,
+                .is_templated = templated,
                 .raw = n.raw,
                 .span = sp,
                 .map_v = try entries.toOwnedSlice(alloc),
@@ -321,4 +328,45 @@ test "quoted booleans remain strings while unquoted booleans and templates are t
     const vf = try fromYaml(a, root.findPair("f").?.val);
     try std.testing.expectEqual(ValueKind.string_val, vf.kind);
     try std.testing.expectEqualStrings("0644", vf.str_v);
+}
+
+test "nested list and map values propagate is_templated to the enclosing value" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const src =
+        \\plain_list:
+        \\  - a
+        \\  - 1
+        \\tpl_list:
+        \\  - a
+        \\  - "{{ dynamic }}"
+        \\plain_map:
+        \\  host: localhost
+        \\  port: 8080
+        \\tpl_map_val:
+        \\  nested:
+        \\    host: "{{ ansible_host }}"
+        \\tpl_map_key:
+        \\  "{{ dyn_key }}": ok
+        \\
+    ;
+    const rec = try yaml_recover.parse(a, src);
+    const root = rec.documents[0].root.?;
+
+    const plain_list = try fromYaml(a, root.findPair("plain_list").?.val);
+    try std.testing.expect(!plain_list.is_templated);
+
+    const tpl_list = try fromYaml(a, root.findPair("tpl_list").?.val);
+    try std.testing.expect(tpl_list.is_templated);
+
+    const plain_map = try fromYaml(a, root.findPair("plain_map").?.val);
+    try std.testing.expect(!plain_map.is_templated);
+
+    const tpl_map_val = try fromYaml(a, root.findPair("tpl_map_val").?.val);
+    try std.testing.expect(tpl_map_val.is_templated);
+
+    const tpl_map_key = try fromYaml(a, root.findPair("tpl_map_key").?.val);
+    try std.testing.expect(tpl_map_key.is_templated);
 }

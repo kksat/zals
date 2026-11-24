@@ -17,6 +17,7 @@ pub const RoleMeta = ansible.RoleMeta;
 pub const GalaxyMeta = ansible.GalaxyMeta;
 pub const ArgumentSpecEntry = ansible.ArgumentSpecEntry;
 pub const ArgumentSpec = ansible.ArgumentSpec;
+pub const BlockContextData = ansible.BlockContextData;
 pub const ParseIssue = ansible.ParseIssue;
 pub const MetadataSnapshot = metadata.MetadataSnapshot;
 pub const build = ansible.build;
