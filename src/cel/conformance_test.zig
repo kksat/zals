@@ -32,7 +32,7 @@ fn evalCodes(
     var wrs = try rs.cloneForWorker(alloc);
     defer wrs.deinit();
 
-    const res = try evaluator.evaluateDocument(alloc, &doc, &wrs, .{}, .utf16, null);
+    const res = try evaluator.evaluateDocument(alloc, &doc, &wrs, .{}, .{}, .utf16, null);
     for (res.runtime_errors) |re| {
         std.debug.print("RUNTIME ERROR in rule '{s}': {s}\n", .{ re.rule_id, re.message });
     }

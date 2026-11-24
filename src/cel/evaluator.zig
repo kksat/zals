@@ -25,6 +25,7 @@ pub fn evaluateDocument(
     doc: *const ast.DocumentAst,
     ruleset: *registry.WorkerRuleSet,
     metadata: ast.MetadataSnapshot,
+    doc_ctx: ast.DocumentContext,
     encoding: doc_mod.PositionEncoding,
     cancel: ?*const std.atomic.Value(bool),
 ) !EvalResult {
@@ -40,6 +41,9 @@ pub fn evaluateDocument(
 
     const doc_cel = try doc.documentToCel(sa);
     const meta_cel = try metadata.toCel(sa);
+    const role_cel = try doc_ctx.role.toCel(sa);
+    const collection_cel = try doc_ctx.collection.toCel(sa);
+    const base_ctx_cel = try ast.DocumentContext.makeTargetContextCel(sa, role_cel, collection_cel, null, .{});
 
     for (ruleset.rules) |*entry| {
         if (isCancelled(cancel)) {
@@ -68,7 +72,7 @@ pub fn evaluateDocument(
                 entry,
                 doc_cel,
                 doc_cel,
-                env.emptyMapValue(),
+                base_ctx_cel,
                 meta_cel,
                 opts_cel,
                 sp,
@@ -92,7 +96,7 @@ pub fn evaluateDocument(
                     entry,
                     node_cel,
                     doc_cel,
-                    env.emptyMapValue(),
+                    base_ctx_cel,
                     meta_cel,
                     opts_cel,
                     play.span,
@@ -109,6 +113,7 @@ pub fn evaluateDocument(
         if (targets.contains(.task)) {
             for (doc.tasks) |*task| {
                 const node_cel = try task.toCel(ea);
+                const ctx_cel = try targetContextCel(ea, doc, role_cel, collection_cel, base_ctx_cel, task.play_index, task.block_ctx);
                 const cancelled = try evalSingleTarget(
                     out_alloc,
                     ea,
@@ -117,7 +122,7 @@ pub fn evaluateDocument(
                     entry,
                     node_cel,
                     doc_cel,
-                    env.emptyMapValue(),
+                    ctx_cel,
                     meta_cel,
                     opts_cel,
                     task.span,
@@ -134,6 +139,7 @@ pub fn evaluateDocument(
         if (targets.contains(.role_ref)) {
             for (doc.role_refs) |*rr| {
                 const node_cel = try rr.toCel(ea);
+                const ctx_cel = try targetContextCel(ea, doc, role_cel, collection_cel, base_ctx_cel, rr.play_index, rr.block_ctx);
                 const cancelled = try evalSingleTarget(
                     out_alloc,
                     ea,
@@ -142,7 +148,7 @@ pub fn evaluateDocument(
                     entry,
                     node_cel,
                     doc_cel,
-                    env.emptyMapValue(),
+                    ctx_cel,
                     meta_cel,
                     opts_cel,
                     rr.span,
@@ -159,6 +165,7 @@ pub fn evaluateDocument(
         if (targets.contains(.var_def)) {
             for (doc.var_defs) |*vd| {
                 const node_cel = try vd.toCel(ea);
+                const ctx_cel = try targetContextCel(ea, doc, role_cel, collection_cel, base_ctx_cel, vd.play_index, vd.block_ctx);
                 const cancelled = try evalSingleTarget(
                     out_alloc,
                     ea,
@@ -167,7 +174,7 @@ pub fn evaluateDocument(
                     entry,
                     node_cel,
                     doc_cel,
-                    env.emptyMapValue(),
+                    ctx_cel,
                     meta_cel,
                     opts_cel,
                     vd.span,
@@ -192,7 +199,7 @@ pub fn evaluateDocument(
                     entry,
                     node_cel,
                     doc_cel,
-                    env.emptyMapValue(),
+                    base_ctx_cel,
                     meta_cel,
                     opts_cel,
                     rm.span,
@@ -217,7 +224,7 @@ pub fn evaluateDocument(
                     entry,
                     node_cel,
                     doc_cel,
-                    env.emptyMapValue(),
+                    base_ctx_cel,
                     meta_cel,
                     opts_cel,
                     gm.span,
@@ -242,7 +249,7 @@ pub fn evaluateDocument(
                     entry,
                     node_cel,
                     doc_cel,
-                    env.emptyMapValue(),
+                    base_ctx_cel,
                     meta_cel,
                     opts_cel,
                     spec_entry.span,
@@ -267,7 +274,7 @@ pub fn evaluateDocument(
                     entry,
                     node_cel,
                     doc_cel,
-                    env.emptyMapValue(),
+                    base_ctx_cel,
                     meta_cel,
                     opts_cel,
                     spec.span,
@@ -292,7 +299,7 @@ pub fn evaluateDocument(
                     entry,
                     node_cel,
                     doc_cel,
-                    env.emptyMapValue(),
+                    base_ctx_cel,
                     meta_cel,
                     opts_cel,
                     iss.span,
@@ -312,6 +319,23 @@ pub fn evaluateDocument(
         .runtime_errors = try runtime_errors.toOwnedSlice(out_alloc),
         .cancelled = false,
     };
+}
+
+fn targetContextCel(
+    alloc: Allocator,
+    doc: *const ast.DocumentAst,
+    role_cel: env.Value,
+    collection_cel: env.Value,
+    base_ctx_cel: env.Value,
+    play_index: ?usize,
+    block_ctx: ast.BlockContextData,
+) !env.Value {
+    if (play_index == null and !block_ctx.present) return base_ctx_cel;
+    const play_ptr: ?*const ast.Play = if (play_index) |idx|
+        (if (idx < doc.plays.len) &doc.plays[idx] else null)
+    else
+        null;
+    return ast.DocumentContext.makeTargetContextCel(alloc, role_cel, collection_cel, play_ptr, block_ctx);
 }
 
 fn evalSingleTarget(
@@ -421,7 +445,7 @@ test "vertical slice evaluates parse issues, tasks, plays, field selectors, and 
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-    const res = try evaluateDocument(arena.allocator(), &doc, &worker_rs, .{}, .utf16, null);
+    const res = try evaluateDocument(arena.allocator(), &doc, &worker_rs, .{}, .{}, .utf16, null);
 
     var saw_play_name = false;
     var saw_task_missing = false;
@@ -444,4 +468,75 @@ test "vertical slice evaluates parse issues, tasks, plays, field selectors, and 
     try std.testing.expect(saw_partial_become);
     try std.testing.expect(saw_parse_issue);
     try std.testing.expectEqual(@as(usize, 2), no_changed_when_count);
+}
+
+test "evaluator populates namespaced role, collection, play, and block context" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.makePath("ws/roles/demo/tasks");
+    try tmp.dir.writeFile(.{ .sub_path = "ws/galaxy.yml", .data = "namespace: acme\nname: web\n" });
+    try tmp.dir.writeFile(.{
+        .sub_path = "ws/rule.cel",
+        .data =
+        \\zals.Rule{
+        \\  id: "custom/context-check",
+        \\  target: "task",
+        \\  severity: "info",
+        \\  condition: context.collection.present &&
+        \\    context.collection.fqcn == "acme.web" &&
+        \\    context.play.present &&
+        \\    context.play.name == "web play" &&
+        \\    "restart web" in context.play.handler_names &&
+        \\    "community.general" in context.play.collections &&
+        \\    context.block.present &&
+        \\    context.block.has_become &&
+        \\    !context.role.present,
+        \\  message: "matched all context namespaces"
+        \\}
+        ,
+    });
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const ws_root = try tmp.dir.realpathAlloc(a, "ws");
+    const rule_path = try std.fs.path.join(a, &.{ ws_root, "rule.cel" });
+    const site_path = try std.fs.path.join(a, &.{ ws_root, "site.yml" });
+
+    const src =
+        \\- name: web play
+        \\  hosts: web
+        \\  collections:
+        \\    - community.general
+        \\  handlers:
+        \\    - name: restart web
+        \\      ansible.builtin.debug:
+        \\        msg: reload
+        \\  tasks:
+        \\    - name: outer
+        \\      become: true
+        \\      block:
+        \\        - name: inner
+        \\          ansible.builtin.ping:
+        \\
+    ;
+    var doc = try ast.build(std.testing.allocator, site_path, "site.yml", src);
+    defer doc.deinit();
+
+    const doc_ctx = try ast.context.build(a, site_path, ws_root, &.{});
+    var rs = try registry.buildRuleSet(std.testing.allocator, 1, .{
+        .include_builtins = false,
+        .global_rule_files = &.{rule_path},
+    });
+    defer rs.deinit();
+    try std.testing.expectEqual(@as(usize, 0), rs.errors.len);
+
+    var wrs = try rs.cloneForWorker(std.testing.allocator);
+    defer wrs.deinit();
+
+    const res = try evaluateDocument(a, &doc, &wrs, .{}, doc_ctx, .utf16, null);
+    try std.testing.expectEqual(@as(usize, 0), res.runtime_errors.len);
+    try std.testing.expectEqual(@as(usize, 1), res.diagnostics.len);
+    try std.testing.expectEqualStrings("custom/context-check", res.diagnostics[0].code.?);
 }

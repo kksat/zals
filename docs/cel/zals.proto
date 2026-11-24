@@ -251,6 +251,180 @@ message ArgumentSpec {
 
   // Always null on options; present so shared rules can reference it.
   TypedValue short_description = 13;
+
+  // True when the option is a top-level entry-point option (not a nested suboption).
+  bool is_top_level = 14;
+
+  // Typed value of "default", if present.
+  TypedValue default = 15;
+}
+
+// Top-level option summary inside context.role.argument_specs[entry].options.
+message RoleSpecOptionContext {
+  // True when the option spec defines "default" (even an explicit null).
+  bool has_default = 1;
+
+  // Typed value of "default", if present.
+  TypedValue default = 2;
+
+  // True when the option spec defines "required".
+  bool has_required = 3;
+
+  // True when the option spec sets "required: true".
+  bool required = 4;
+}
+
+// Entry-point summary inside context.role.argument_specs[entry].
+message RoleSpecEntryContext {
+  // Top-level options declared for this entry point.
+  map<string, RoleSpecOptionContext> options = 1;
+}
+
+// Defaults summary inside context.role.defaults[entry].
+message RoleDefaultsEntryContext {
+  // True when one or more defaults files exist for this entry point.
+  bool has_files = 1;
+
+  // Merged top-level variables in Ansible precedence order.
+  map<string, TypedValue> vars = 2;
+}
+
+// Enclosing role context (context.role).
+message RoleContext {
+  // True when the document belongs to an Ansible role.
+  bool present = 1;
+
+  // Role directory name (or "" outside a role).
+  string name = 2;
+
+  // Workspace-relative (or absolute) role directory path.
+  string path = 3;
+
+  // Entry point name derived from defaults/tasks/vars/handlers paths, or "".
+  string entry_point = 4;
+
+  // True when meta/argument_specs.yml or .yaml exists.
+  bool has_argument_specs_file = 5;
+
+  // True when meta/argument_specs.* defines an argument_specs mapping with at least one entry point.
+  bool has_argument_specs = 6;
+
+  // True when meta/main.yml or .yaml exists.
+  bool has_meta = 7;
+
+  // True when any YAML file exists under defaults/.
+  bool has_defaults = 8;
+
+  // True when any YAML file exists under tasks/.
+  bool has_tasks = 9;
+
+  // True when any YAML file exists under handlers/.
+  bool has_handlers = 10;
+
+  // Parsed argument specs keyed by entry point name.
+  map<string, RoleSpecEntryContext> argument_specs = 11;
+
+  // Merged role defaults keyed by entry point name.
+  map<string, RoleDefaultsEntryContext> defaults = 12;
+}
+
+// Enclosing collection context (context.collection).
+message CollectionContext {
+  // True when the document belongs to an Ansible collection (galaxy.yml ancestor).
+  bool present = 1;
+
+  // Collection namespace from galaxy.yml.
+  string namespace = 2;
+
+  // Collection name from galaxy.yml.
+  string name = 3;
+
+  // Fully qualified collection name ("namespace.name"), or "".
+  string fqcn = 4;
+
+  // Workspace-relative (or absolute) collection directory path.
+  string path = 5;
+
+  // True when meta/runtime.yml or .yaml exists.
+  bool has_meta_runtime = 6;
+
+  // True when CHANGELOG.{rst,md} or changelogs/changelog.{yaml,yml} exists.
+  bool has_changelog = 7;
+}
+
+// Enclosing play context (context.play) for tasks, role_refs, and var_defs inside a play.
+message PlayContext {
+  // True when the target node belongs to a play.
+  bool present = 1;
+
+  // 0-based play index in the document (-1 when not inside a play).
+  int64 index = 2;
+
+  // Play name text (or "").
+  string name = 3;
+
+  // Play hosts text (or "").
+  string hosts = 4;
+
+  // Play strategy text (or "").
+  string strategy = 5;
+
+  // True when the play sets "become".
+  bool has_become = 6;
+
+  // True when the play sets "become_user".
+  bool has_become_user = 7;
+
+  // Collections declared under play "collections:".
+  repeated string collections = 8;
+
+  // Handler names and listen topics defined in the play.
+  repeated string handler_names = 9;
+
+  // Variable names defined in play "vars:".
+  repeated string var_names = 10;
+}
+
+// Enclosing block context (context.block) for nested tasks, role_refs, and var_defs.
+message BlockContext {
+  // True when the target node is nested inside a block/rescue/always container.
+  bool present = 1;
+
+  // Enclosing block nesting depth (0 outside a block).
+  int64 nesting_depth = 2;
+
+  // Enclosing block section: "block", "rescue", "always", or "".
+  string section = 3;
+
+  // True when any enclosing block sets "become".
+  bool has_become = 4;
+
+  // True when any enclosing block sets "become_user".
+  bool has_become_user = 5;
+
+  // True when any enclosing block sets "no_log".
+  bool has_no_log = 6;
+
+  // True when any enclosing block sets "ignore_errors".
+  bool has_ignore_errors = 7;
+
+  // Accumulated "when" expressions from enclosing blocks.
+  repeated TypedValue when = 8;
+}
+
+// Namespaced read-only enclosing and sibling AST context (binding: context).
+message Context {
+  // Enclosing Ansible role context (present == false outside a role).
+  RoleContext role = 1;
+
+  // Enclosing Ansible collection context (present == false outside a collection).
+  CollectionContext collection = 2;
+
+  // Enclosing play context (present == false outside a play).
+  PlayContext play = 3;
+
+  // Enclosing block context (present == false outside a block).
+  BlockContext block = 4;
 }
 
 // Play AST target (target: "play").
@@ -345,6 +519,7 @@ message VarDef {
   bool is_templated = 4;
   bool is_ascii = 5;
   string site = 6;
+  TypedValue value = 7;
 }
 
 // Role metadata AST target for meta/main.yml (target: "role_meta").
@@ -718,4 +893,13 @@ message Node {
 
   // [argument_spec] Typed value of the option's "type" field.
   TypedValue type = 105;
+
+  // [argument_spec] True when the option is a top-level entry-point option.
+  bool is_top_level = 106;
+
+  // [argument_spec] Typed value of the option's "default" field, if present.
+  TypedValue default = 107;
+
+  // [var_def] Typed value bound to this variable, if available.
+  TypedValue value = 108;
 }

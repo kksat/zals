@@ -375,11 +375,14 @@ pub const Queue = struct {
         };
         defer doc_ast.deinit();
 
+        const doc_ctx: ast.DocumentContext = ast.context.build(ja, job.path, job.workspace_root, job.overlays) catch .{};
+
         const res = cel_rules.evaluator.evaluateDocument(
             ja,
             &doc_ast,
             wrs,
             job.metadata,
+            doc_ctx,
             job.encoding,
             &self.shutdown,
         ) catch {
@@ -417,6 +420,8 @@ const NativeJob = struct {
     uri: []const u8,
     path: []const u8,
     display_path: []const u8,
+    workspace_root: ?[]const u8 = null,
+    overlays: []const ast.SourceOverlay = &.{},
     bytes_override: ?[]const u8,
     encoding: doc_mod.PositionEncoding,
     metadata: ast.MetadataSnapshot,
@@ -538,6 +543,8 @@ pub fn publish(self: *Server, a: Allocator, uri: []const u8) !void {
     const doc = self.documents.get(uri) orelse return;
     if (self.settings.cel_enabled) {
         try scheduleNativeForOpenDoc(self, a, doc);
+        const path = paths.uriToPath(a, uri) catch "";
+        if (path.len > 0) try scheduleContextSiblings(self, a, path);
     } else {
         try clearProviderBucket(self, a, uri, .cel);
     }
@@ -553,6 +560,8 @@ pub fn onChange(self: *Server, a: Allocator, uri: []const u8) !void {
     if (!self.settings.validation_enabled or !self.settings.cel_enabled) return;
     const doc = self.documents.get(uri) orelse return;
     try scheduleNativeForOpenDoc(self, a, doc);
+    const path = paths.uriToPath(a, uri) catch "";
+    if (path.len > 0) try scheduleContextSiblings(self, a, path);
 }
 
 pub fn onSave(self: *Server, a: Allocator, uri: []const u8) !void {
@@ -576,9 +585,13 @@ pub fn onClose(self: *Server, a: Allocator, uri: []const u8) !void {
         try clearProviderBucket(self, a, uri, .schema);
         try clearProviderBucket(self, a, uri, .external);
         try scheduleNativeFromDisk(self, a, uri, path);
+        try scheduleContextSiblings(self, a, path);
         return;
     }
     try clearUri(self, a, uri);
+    if (path.len > 0 and self.settings.validation_enabled and self.settings.cel_enabled) {
+        try scheduleContextSiblings(self, a, path);
+    }
 }
 
 pub fn onWatchedFile(self: *Server, a: Allocator, path: []const u8, deleted: bool) !void {
@@ -591,13 +604,17 @@ pub fn onWatchedFile(self: *Server, a: Allocator, path: []const u8, deleted: boo
     const uri = paths.pathToUri(a, path) catch return;
     if (deleted) {
         try clearUri(self, a, uri);
+        if (self.settings.validation_enabled and self.settings.cel_enabled) {
+            try scheduleContextSiblings(self, a, path);
+        }
         return;
     }
     if (!self.settings.validation_enabled or !self.settings.cel_enabled) return;
-    if (self.documents.get(uri) != null) return;
     if (self.session.snapshot().member(path) == null) return;
-    if (!isEligibleNativeYaml(path)) return;
-    try scheduleNativeFromDisk(self, a, uri, path);
+    if (self.documents.get(uri) == null and isEligibleNativeYaml(path)) {
+        try scheduleNativeFromDisk(self, a, uri, path);
+    }
+    try scheduleContextSiblings(self, a, path);
 }
 
 pub fn onWorkspaceIndexReady(self: *Server, a: Allocator) !void {
@@ -705,9 +722,12 @@ fn scheduleNativeForOpenDoc(self: *Server, a: Allocator, doc: *const doc_mod.Doc
     errdefer job.arena.deinit();
 
     const ja = job.arena.allocator();
+    const ws_root = self.session.snapshot().member(path);
     job.uri = try ja.dupe(u8, doc.uri);
     job.path = try ja.dupe(u8, path);
     job.display_path = try ja.dupe(u8, display);
+    job.workspace_root = if (ws_root) |ws| try ja.dupe(u8, ws) else null;
+    job.overlays = try collectContextOverlays(self, ja, path, ws_root);
     job.bytes_override = try ja.dupe(u8, doc.bytes());
 
     try self.validation.enqueueNative(self.pool, job);
@@ -737,11 +757,145 @@ fn scheduleNativeFromDisk(self: *Server, a: Allocator, uri: []const u8, path: []
     errdefer job.arena.deinit();
 
     const ja = job.arena.allocator();
+    const ws_root = self.session.snapshot().member(path);
     job.uri = try ja.dupe(u8, uri);
     job.path = try ja.dupe(u8, path);
     job.display_path = try ja.dupe(u8, display);
+    job.workspace_root = if (ws_root) |ws| try ja.dupe(u8, ws) else null;
+    job.overlays = try collectContextOverlays(self, ja, path, ws_root);
 
     try self.validation.enqueueNative(self.pool, job);
+}
+
+fn snapshotOpenOverlays(self: *Server, a: Allocator) ![]const ast.SourceOverlay {
+    var list = std.ArrayList(ast.SourceOverlay).empty;
+    var it = self.documents.docs.iterator();
+    while (it.next()) |entry| {
+        const doc = entry.value_ptr.*;
+        const p = paths.uriToPath(a, doc.uri) catch continue;
+        try list.append(a, .{ .path = p, .bytes = doc.bytes() });
+    }
+    return list.toOwnedSlice(a);
+}
+
+fn collectContextOverlays(
+    self: *Server,
+    ja: Allocator,
+    target_path: []const u8,
+    ws_root: ?[]const u8,
+) ![]const ast.SourceOverlay {
+    var scratch = std.heap.ArenaAllocator.init(self.validation.gpa);
+    defer scratch.deinit();
+    const sa = scratch.allocator();
+
+    const open = try snapshotOpenOverlays(self, sa);
+    if (open.len == 0) return &.{};
+
+    const role_dir = ast.context.findEnclosingRole(target_path, open);
+    const coll_dir = ast.context.findEnclosingCollection(sa, target_path, ws_root, open) catch null;
+    if (role_dir == null and coll_dir == null) return &.{};
+
+    var out_list = std.ArrayList(ast.SourceOverlay).empty;
+    for (open) |ov| {
+        const in_role = if (role_dir) |rd| isUnderDir(ov.path, rd) else false;
+        const in_coll = if (coll_dir) |cd| isUnderDir(ov.path, cd) else false;
+        if (!in_role and !in_coll) continue;
+        try out_list.append(ja, .{
+            .path = try ja.dupe(u8, ov.path),
+            .bytes = try ja.dupe(u8, ov.bytes),
+        });
+    }
+    return out_list.toOwnedSlice(ja);
+}
+
+fn scheduleContextSiblings(self: *Server, a: Allocator, changed_path: []const u8) !void {
+    const open = try snapshotOpenOverlays(self, a);
+    const ws_root = self.session.snapshot().member(changed_path);
+
+    if (ast.context.findEnclosingRole(changed_path, open)) |role_dir| {
+        if (isRoleContextTrigger(changed_path, role_dir)) {
+            var candidates = std.ArrayList([]const u8).empty;
+            var seen = std.StringHashMapUnmanaged(void).empty;
+
+            const fixed = [_][]const []const u8{
+                &.{ role_dir, "meta", "argument_specs.yml" },
+                &.{ role_dir, "meta", "argument_specs.yaml" },
+                &.{ role_dir, "meta", "main.yml" },
+                &.{ role_dir, "meta", "main.yaml" },
+                &.{ role_dir, "tasks", "main.yml" },
+                &.{ role_dir, "tasks", "main.yaml" },
+            };
+            for (fixed) |parts| {
+                const p = try std.fs.path.join(a, parts);
+                if (!seen.contains(p)) {
+                    try seen.put(a, p, {});
+                    try candidates.append(a, p);
+                }
+            }
+
+            const defaults_dir = try std.fs.path.join(a, &.{ role_dir, "defaults" });
+            const def_files = try ast.context.collectYamlFilesUnder(a, defaults_dir, open);
+            for (def_files) |p| {
+                if (!seen.contains(p)) {
+                    try seen.put(a, p, {});
+                    try candidates.append(a, p);
+                }
+            }
+
+            for (candidates.items) |sib_path| {
+                if (std.mem.eql(u8, sib_path, changed_path)) continue;
+                try scheduleSiblingPath(self, a, sib_path);
+            }
+        }
+    }
+
+    if (ast.context.findEnclosingCollection(a, changed_path, ws_root, open) catch null) |coll_dir| {
+        if (isCollectionContextTrigger(changed_path, coll_dir)) {
+            for ([_][]const u8{ "galaxy.yml", "galaxy.yaml" }) |name| {
+                const p = try std.fs.path.join(a, &.{ coll_dir, name });
+                if (std.mem.eql(u8, p, changed_path)) continue;
+                try scheduleSiblingPath(self, a, p);
+            }
+        }
+    }
+}
+
+fn scheduleSiblingPath(self: *Server, a: Allocator, sib_path: []const u8) !void {
+    const sib_uri = paths.pathToUri(a, sib_path) catch return;
+    if (self.documents.get(sib_uri)) |sib_doc| {
+        try scheduleNativeForOpenDoc(self, a, sib_doc);
+    } else if (paths.isFile(sib_path) and self.session.snapshot().member(sib_path) != null and isEligibleNativeYaml(sib_path)) {
+        try scheduleNativeFromDisk(self, a, sib_uri, sib_path);
+    }
+}
+
+fn isUnderDir(path: []const u8, dir: []const u8) bool {
+    return path.len > dir.len and std.mem.startsWith(u8, path, dir) and std.fs.path.isSep(path[dir.len]);
+}
+
+fn isRoleContextTrigger(path: []const u8, role_dir: []const u8) bool {
+    if (!isUnderDir(path, role_dir)) return false;
+    const rel = path[role_dir.len + 1 ..];
+    if (std.mem.startsWith(u8, rel, "defaults/") or std.mem.startsWith(u8, rel, "defaults\\")) return true;
+    return std.mem.eql(u8, rel, "meta/argument_specs.yml") or
+        std.mem.eql(u8, rel, "meta/argument_specs.yaml") or
+        std.mem.eql(u8, rel, "meta/main.yml") or
+        std.mem.eql(u8, rel, "meta/main.yaml") or
+        std.mem.eql(u8, rel, "meta\\argument_specs.yml") or
+        std.mem.eql(u8, rel, "meta\\argument_specs.yaml") or
+        std.mem.eql(u8, rel, "meta\\main.yml") or
+        std.mem.eql(u8, rel, "meta\\main.yaml");
+}
+
+fn isCollectionContextTrigger(path: []const u8, coll_dir: []const u8) bool {
+    if (!isUnderDir(path, coll_dir)) return false;
+    const rel = path[coll_dir.len + 1 ..];
+    return std.mem.eql(u8, rel, "meta/runtime.yml") or
+        std.mem.eql(u8, rel, "meta/runtime.yaml") or
+        std.mem.eql(u8, rel, "CHANGELOG.rst") or
+        std.mem.eql(u8, rel, "CHANGELOG.md") or
+        std.mem.eql(u8, rel, "changelogs/changelog.yaml") or
+        std.mem.eql(u8, rel, "changelogs/changelog.yml");
 }
 
 fn scheduleSchemaAndExternal(self: *Server, uri: []const u8, doc: *const doc_mod.Document) !void {
