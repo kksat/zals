@@ -1,0 +1,7 @@
+zals.Rule{
+  id: "argument-specs[missing]",
+  target: "document",
+  severity: "error",
+  condition: document.kind == "argument_specs" && !document.has_argument_specs,
+  message: "argument_specs.yml must define an 'argument_specs' mapping with at least one entry point."
+}

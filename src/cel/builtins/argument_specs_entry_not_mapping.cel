@@ -1,0 +1,7 @@
+zals.Rule{
+  id: "argument-specs[entry-not-mapping]",
+  target: "argument_spec_entry",
+  severity: "error",
+  condition: !node.is_map,
+  message: "Entry point '" + node.name + "' in argument_specs.yml must be a mapping."
+}

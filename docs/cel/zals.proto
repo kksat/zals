@@ -248,6 +248,9 @@ message ArgumentSpec {
 
   // Description normalized to text: list items joined with blank lines.
   string description_text = 12;
+
+  // Always null on options; present so shared rules can reference it.
+  TypedValue short_description = 13;
 }
 
 // Play AST target (target: "play").
@@ -694,7 +697,8 @@ message Node {
   string description_text = 99;
 
   // [argument_spec_entry] Typed value of the entry point's
-  // "short_description" field, if present.
+  // "short_description" field, if present. Always null on argument_spec
+  // option nodes so shared rules can reference it.
   TypedValue short_description = 100;
 
   // [argument_spec] Name of the enclosing entry point (for example "main").

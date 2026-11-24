@@ -1,0 +1,15 @@
+zals.Rule{
+  id: "argument-specs[markup-fqcn]",
+  target: ["argument_spec_entry", "argument_spec"],
+  severity: "warning",
+  field: "description",
+  condition: node.description_text.matches(
+      ".*(\\bM\\([^.)]*\\)|\\bM\\([^.)]*\\.[^.)]*\\))"
+    ) ||
+    (node.short_description != null && node.short_description.kind == "string" &&
+      node.short_description.value.matches(
+        ".*(\\bM\\([^.)]*\\)|\\bM\\([^.)]*\\.[^.)]*\\))"
+      )),
+  message: "Description contains an M() module reference without a fully " +
+    "qualified collection name; use e.g. M(ansible.builtin.copy)."
+}

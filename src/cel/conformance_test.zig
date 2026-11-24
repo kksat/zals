@@ -53,8 +53,8 @@ fn containsCode(codes: []const []const u8, expected: []const u8) bool {
     return false;
 }
 
-test "all 61 builtin rules load without errors and have unique ids" {
-    try std.testing.expectEqual(@as(usize, 61), builtins.all.len);
+test "all 69 builtin rules load without errors and have unique ids" {
+    try std.testing.expectEqual(@as(usize, 69), builtins.all.len);
     var rs = try registry.buildRuleSet(std.testing.allocator, 1, .{ .include_builtins = true });
     defer rs.deinit();
     try std.testing.expectEqual(@as(usize, 0), rs.errors.len);
@@ -67,6 +67,54 @@ test "rule conformance matrix positive and negative fixtures for every approved 
             .rule_id = "zals/parse-issue",
             .bad = "- hosts: all\n  tasks:\n    - name: missing action\n",
             .good = "- name: ok\n  hosts: all\n  tasks:\n    - name: ping\n      ansible.builtin.ping:\n",
+        },
+        .{
+            .rule_id = "argument-specs[missing]",
+            .path = "/ws/roles/demo/meta/argument_specs.yml",
+            .bad = "other_key: 1\n",
+            .good = "argument_specs:\n  main:\n    options:\n      port:\n        type: int\n",
+        },
+        .{
+            .rule_id = "argument-specs[entry-not-mapping]",
+            .path = "/ws/roles/demo/meta/argument_specs.yml",
+            .bad = "argument_specs:\n  main: just a string\n",
+            .good = "argument_specs:\n  main:\n    options:\n      port:\n        type: int\n",
+        },
+        .{
+            .rule_id = "argument-specs[option-not-mapping]",
+            .path = "/ws/roles/demo/meta/argument_specs.yml",
+            .bad = "argument_specs:\n  main:\n    options:\n      port: oops\n",
+            .good = "argument_specs:\n  main:\n    options:\n      port:\n        type: int\n",
+        },
+        .{
+            .rule_id = "argument-specs[unknown-entry-keys]",
+            .path = "/ws/roles/demo/meta/argument_specs.yml",
+            .bad = "argument_specs:\n  main:\n    short_description: Demo\n    unknown_key: oops\n    options: {}\n",
+            .good = "argument_specs:\n  main:\n    short_description: Demo\n    description: Valid.\n    author: Jane Doe\n    options: {}\n",
+        },
+        .{
+            .rule_id = "argument-specs[unknown-option-keys]",
+            .path = "/ws/roles/demo/meta/argument_specs.yml",
+            .bad = "argument_specs:\n  main:\n    options:\n      conf:\n        type: dict\n        options:\n          mode:\n            tpyo_key: oops\n",
+            .good = "argument_specs:\n  main:\n    options:\n      conf:\n        type: dict\n        options:\n          mode:\n            type: str\n            choices: [a, b]\n",
+        },
+        .{
+            .rule_id = "argument-specs[default-and-required]",
+            .path = "/ws/roles/demo/meta/argument_specs.yml",
+            .bad = "argument_specs:\n  main:\n    options:\n      conflict:\n        type: str\n        default: present\n        required: true\n",
+            .good = "argument_specs:\n  main:\n    options:\n      ok:\n        type: str\n        default: present\n        required: false\n",
+        },
+        .{
+            .rule_id = "argument-specs[secret-no-log]",
+            .path = "/ws/roles/demo/meta/argument_specs.yml",
+            .bad = "argument_specs:\n  main:\n    options:\n      demo_password:\n        type: str\n",
+            .good = "argument_specs:\n  main:\n    options:\n      demo_password:\n        type: str\n        no_log: true\n",
+        },
+        .{
+            .rule_id = "argument-specs[markup-fqcn]",
+            .path = "/ws/roles/demo/meta/argument_specs.yml",
+            .bad = "argument_specs:\n  main:\n    description: Broken M(copy) reference.\n    options: {}\n",
+            .good = "argument_specs:\n  main:\n    description: Uses M(ansible.builtin.copy) and C(code).\n    options: {}\n",
         },
         .{
             .rule_id = "avoid-implicit",

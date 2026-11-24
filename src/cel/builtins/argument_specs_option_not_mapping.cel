@@ -1,0 +1,7 @@
+zals.Rule{
+  id: "argument-specs[option-not-mapping]",
+  target: "argument_spec",
+  severity: "error",
+  condition: !node.is_map,
+  message: "Option '" + node.path + "' in argument_specs.yml must be a mapping."
+}

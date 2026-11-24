@@ -418,6 +418,7 @@ pub const ArgumentSpec = struct {
     required: ?TypedValue = null,
     no_log: ?TypedValue = null,
     type_val: ?TypedValue = null,
+    short_description: ?TypedValue = null,
     description: ?TypedValue = null,
     description_text: []const u8 = "",
     span: Span,
@@ -436,6 +437,7 @@ pub const ArgumentSpec = struct {
         try putOptTyped(&b, alloc, "required", self.required);
         try putOptTyped(&b, alloc, "no_log", self.no_log);
         try putOptTyped(&b, alloc, "type", self.type_val);
+        try putOptTyped(&b, alloc, "short_description", self.short_description);
         try putOptTyped(&b, alloc, "description", self.description);
         try b.putString(alloc, "description_text", self.description_text);
         return b.finish(alloc);

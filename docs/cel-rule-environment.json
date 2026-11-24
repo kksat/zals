@@ -260,6 +260,7 @@
         "required": "TypedValue | null",
         "no_log": "TypedValue | null",
         "type": "TypedValue | null",
+        "short_description": "TypedValue | null",
         "description": "TypedValue | null",
         "description_text": "string"
       }

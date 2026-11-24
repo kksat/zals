@@ -51,6 +51,16 @@ zals.Rule{
   nested suboptions flattened into dotted `path` values such as `conf.mode`);
   `document.has_argument_specs` reports whether the file defines an
   `argument_specs` mapping with at least one entry point.
+- The built-in `argument-specs[...]` rules port the single-file checks of
+  [`ansible-docsmith validate`](https://github.com/foundata/ansible-docsmith):
+  missing `argument_specs` mapping, non-mapping entry points and options,
+  unknown entry-point and option keys, `default` combined with
+  `required: true`, secret-looking option names without `no_log: true`
+  (info severity, matching docsmith's notice), and `M(...)` module references
+  without a fully qualified collection name in descriptions. Docsmith's
+  cross-file checks (defaults-file consistency, README markers and ToC) need
+  multi-file or Markdown analysis and are out of scope for per-document CEL
+  rules.
 
 ## Configuration and migration notes
 
