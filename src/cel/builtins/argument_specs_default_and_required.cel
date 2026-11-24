@@ -1,0 +1,11 @@
+zals.Rule{
+  id: "argument-specs[default-and-required]",
+  target: "argument_spec",
+  severity: "error",
+  field: "required",
+  condition: node.is_map && node.has_default && node.has_required &&
+    node.required != null && node.required.kind == "bool" && node.required.value,
+  message: "Option '" + node.path + "' has both 'default' and 'required: true', " +
+    "which are mutually exclusive. Remove either the default value or set " +
+    "required to false."
+}

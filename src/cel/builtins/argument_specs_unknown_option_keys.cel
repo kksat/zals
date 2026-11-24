@@ -1,0 +1,31 @@
+zals.Rule{
+  id: "argument-specs[unknown-option-keys]",
+  target: "argument_spec",
+  severity: "warning",
+  condition: node.is_map && node.keys.exists(k, !(k in [
+    "aliases",
+    "apply_defaults",
+    "choices",
+    "context",
+    "default",
+    "deprecated_aliases",
+    "description",
+    "elements",
+    "mutually_exclusive",
+    "no_log",
+    "options",
+    "removed_at_date",
+    "removed_from_collection",
+    "removed_in_version",
+    "required",
+    "required_by",
+    "required_if",
+    "required_one_of",
+    "required_together",
+    "type",
+    "version_added",
+    "version_added_collection"
+  ])),
+  message: "Option '" + node.path + "' uses unknown keys; " +
+    "this might be an error in your role."
+}

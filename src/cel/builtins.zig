@@ -5,6 +5,14 @@ pub const BuiltinSource = struct {
 
 pub const all = [_]BuiltinSource{
     .{ .name = "parse_issue.cel", .source = @embedFile("builtins/parse_issue.cel") },
+    .{ .name = "argument_specs_missing.cel", .source = @embedFile("builtins/argument_specs_missing.cel") },
+    .{ .name = "argument_specs_entry_not_mapping.cel", .source = @embedFile("builtins/argument_specs_entry_not_mapping.cel") },
+    .{ .name = "argument_specs_option_not_mapping.cel", .source = @embedFile("builtins/argument_specs_option_not_mapping.cel") },
+    .{ .name = "argument_specs_unknown_entry_keys.cel", .source = @embedFile("builtins/argument_specs_unknown_entry_keys.cel") },
+    .{ .name = "argument_specs_unknown_option_keys.cel", .source = @embedFile("builtins/argument_specs_unknown_option_keys.cel") },
+    .{ .name = "argument_specs_default_and_required.cel", .source = @embedFile("builtins/argument_specs_default_and_required.cel") },
+    .{ .name = "argument_specs_secret_no_log.cel", .source = @embedFile("builtins/argument_specs_secret_no_log.cel") },
+    .{ .name = "argument_specs_markup_fqcn.cel", .source = @embedFile("builtins/argument_specs_markup_fqcn.cel") },
     .{ .name = "avoid_implicit.cel", .source = @embedFile("builtins/avoid_implicit.cel") },
     .{ .name = "command_instead_of_module.cel", .source = @embedFile("builtins/command_instead_of_module.cel") },
     .{ .name = "command_instead_of_shell.cel", .source = @embedFile("builtins/command_instead_of_shell.cel") },

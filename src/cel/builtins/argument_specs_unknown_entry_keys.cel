@@ -1,0 +1,21 @@
+zals.Rule{
+  id: "argument-specs[unknown-entry-keys]",
+  target: "argument_spec_entry",
+  severity: "warning",
+  condition: node.is_map && node.keys.exists(k, !(k in [
+    "author",
+    "attributes",
+    "deprecated",
+    "description",
+    "examples",
+    "notes",
+    "options",
+    "requirements",
+    "seealso",
+    "short_description",
+    "todo",
+    "version_added"
+  ])),
+  message: "Entry point '" + node.name + "' uses unknown argument spec keys; " +
+    "this might be an error in your role."
+}
