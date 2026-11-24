@@ -23,6 +23,7 @@ pub const DocumentKind = enum(u8) {
     handlers,
     role_meta,
     galaxy_meta,
+    argument_specs,
     vars_file,
     defaults,
     other,
@@ -34,6 +35,7 @@ pub const DocumentKind = enum(u8) {
             .handlers => "handlers",
             .role_meta => "role_meta",
             .galaxy_meta => "galaxy_meta",
+            .argument_specs => "argument_specs",
             .vars_file => "vars_file",
             .defaults => "defaults",
             .other => "other",
@@ -382,6 +384,64 @@ pub const GalaxyDep = struct {
     version: TypedValue,
 };
 
+pub const ArgumentSpecEntry = struct {
+    name: []const u8,
+    is_map: bool,
+    keys: []const []const u8 = &.{},
+    short_description: ?TypedValue = null,
+    description: ?TypedValue = null,
+    description_text: []const u8 = "",
+    span: Span,
+    field_spans: []const FieldSpan,
+
+    pub fn toCel(self: *const ArgumentSpecEntry, alloc: Allocator) !cel_env.Value {
+        var b = cel_env.MapBuilder.init();
+        errdefer b.deinit(alloc);
+        try b.putString(alloc, "name", self.name);
+        try b.putBool(alloc, "is_map", self.is_map);
+        try b.putStringList(alloc, "keys", self.keys);
+        try putOptTyped(&b, alloc, "short_description", self.short_description);
+        try putOptTyped(&b, alloc, "description", self.description);
+        try b.putString(alloc, "description_text", self.description_text);
+        return b.finish(alloc);
+    }
+};
+
+pub const ArgumentSpec = struct {
+    entry_point: []const u8,
+    name: []const u8,
+    path: []const u8,
+    is_map: bool,
+    keys: []const []const u8 = &.{},
+    has_default: bool = false,
+    has_required: bool = false,
+    required: ?TypedValue = null,
+    no_log: ?TypedValue = null,
+    type_val: ?TypedValue = null,
+    description: ?TypedValue = null,
+    description_text: []const u8 = "",
+    span: Span,
+    field_spans: []const FieldSpan,
+
+    pub fn toCel(self: *const ArgumentSpec, alloc: Allocator) !cel_env.Value {
+        var b = cel_env.MapBuilder.init();
+        errdefer b.deinit(alloc);
+        try b.putString(alloc, "entry_point", self.entry_point);
+        try b.putString(alloc, "name", self.name);
+        try b.putString(alloc, "path", self.path);
+        try b.putBool(alloc, "is_map", self.is_map);
+        try b.putStringList(alloc, "keys", self.keys);
+        try b.putBool(alloc, "has_default", self.has_default);
+        try b.putBool(alloc, "has_required", self.has_required);
+        try putOptTyped(&b, alloc, "required", self.required);
+        try putOptTyped(&b, alloc, "no_log", self.no_log);
+        try putOptTyped(&b, alloc, "type", self.type_val);
+        try putOptTyped(&b, alloc, "description", self.description);
+        try b.putString(alloc, "description_text", self.description_text);
+        return b.finish(alloc);
+    }
+};
+
 pub const GalaxyMeta = struct {
     span: Span,
     field_spans: []const FieldSpan,
@@ -457,6 +517,9 @@ pub const DocumentAst = struct {
     var_defs: []const VarDef,
     role_meta: ?RoleMeta,
     galaxy_meta: ?GalaxyMeta,
+    argument_spec_entries: []const ArgumentSpecEntry,
+    argument_specs: []const ArgumentSpec,
+    has_argument_specs: bool,
     parse_issues: []const ParseIssue,
     noqa_directives: []const noqa_mod.Directive,
 
@@ -475,6 +538,7 @@ pub const DocumentAst = struct {
         try b.putInt(alloc, "play_count", @intCast(self.plays.len));
         try b.putInt(alloc, "task_count", @intCast(self.tasks.len));
         try b.putInt(alloc, "parse_issue_count", @intCast(self.parse_issues.len));
+        try b.putBool(alloc, "has_argument_specs", self.has_argument_specs);
         return b.finish(alloc);
     }
 };
@@ -530,6 +594,8 @@ pub fn build(
         .issues = .empty,
         .role_meta = null,
         .galaxy_meta = null,
+        .argument_spec_entries = .empty,
+        .argument_specs = .empty,
     };
 
     for (recovered.issues) |raw_issue| {
@@ -561,6 +627,9 @@ pub fn build(
         .var_defs = try builder.var_defs.toOwnedSlice(a),
         .role_meta = builder.role_meta,
         .galaxy_meta = builder.galaxy_meta,
+        .has_argument_specs = builder.argument_spec_entries.items.len > 0,
+        .argument_spec_entries = try builder.argument_spec_entries.toOwnedSlice(a),
+        .argument_specs = try builder.argument_specs.toOwnedSlice(a),
         .parse_issues = try builder.issues.toOwnedSlice(a),
         .noqa_directives = noqa_dirs,
     };
@@ -569,6 +638,9 @@ pub fn build(
 fn classifyDocument(path: []const u8, filename: []const u8, docs: []const yaml_recover.YamlDoc) DocumentKind {
     if (std.mem.eql(u8, filename, "galaxy.yml") or std.mem.eql(u8, filename, "galaxy.yaml")) {
         return .galaxy_meta;
+    }
+    if (std.mem.eql(u8, filename, "argument_specs.yml") or std.mem.eql(u8, filename, "argument_specs.yaml")) {
+        return .argument_specs;
     }
     const role_root = role_resolve.enclosingRole(path);
     const fk = scope.fileKind(path, role_root);
@@ -636,6 +708,8 @@ const AstBuilder = struct {
     issues: std.ArrayList(ParseIssue),
     role_meta: ?RoleMeta,
     galaxy_meta: ?GalaxyMeta,
+    argument_spec_entries: std.ArrayList(ArgumentSpecEntry),
+    argument_specs: std.ArrayList(ArgumentSpec),
 
     fn addStructureIssue(self: *AstBuilder, node: *const yaml_recover.YamlNode, msg: []const u8) !void {
         try self.issues.append(self.alloc, .{
@@ -656,6 +730,11 @@ const AstBuilder = struct {
                 .role_meta => {
                     if (root.kind == .map) {
                         self.role_meta = try self.lowerRoleMeta(root);
+                    }
+                },
+                .argument_specs => {
+                    if (root.kind == .map) {
+                        try self.lowerArgumentSpecs(root);
                     }
                 },
                 .vars_file, .defaults => {
@@ -1382,7 +1461,141 @@ const AstBuilder = struct {
         meta.field_spans = try fspans.toOwnedSlice(self.alloc);
         return meta;
     }
+    fn lowerArgumentSpecs(self: *AstBuilder, root: *const yaml_recover.YamlNode) !void {
+        const specs_pair = root.findPair("argument_specs") orelse return;
+        const specs = specs_pair.val orelse return;
+        if (specs.kind != .map) return;
+
+        for (specs.items) |pair| {
+            const k = pair.key orelse continue;
+            const entry_name = k.value orelse k.raw;
+            var entry = ArgumentSpecEntry{
+                .name = entry_name,
+                .is_map = false,
+                .span = .{ .start = k.start, .end = k.end },
+                .field_spans = &.{},
+            };
+
+            if (pair.val) |v| {
+                if (v.kind == .map) {
+                    entry.is_map = true;
+                    var keys = std.ArrayList([]const u8).empty;
+                    var fspans = std.ArrayList(FieldSpan).empty;
+                    for (v.items) |ep| {
+                        const ek = ep.key orelse continue;
+                        const ek_name = ek.value orelse ek.raw;
+                        try keys.append(self.alloc, ek_name);
+                        try fspans.append(self.alloc, .{ .name = ek_name, .span = .{ .start = ek.start, .end = ek.end } });
+                        if (std.mem.eql(u8, ek_name, "short_description")) {
+                            entry.short_description = try value_mod.fromYaml(self.alloc, ep.val);
+                        } else if (std.mem.eql(u8, ek_name, "description")) {
+                            entry.description = try value_mod.fromYaml(self.alloc, ep.val);
+                        }
+                    }
+                    entry.keys = try keys.toOwnedSlice(self.alloc);
+                    entry.field_spans = try fspans.toOwnedSlice(self.alloc);
+                    if (entry.description) |d| {
+                        entry.description_text = try joinDescriptionText(self.alloc, d);
+                    }
+
+                    if (v.findPair("options")) |op| {
+                        if (op.val) |ov| {
+                            if (ov.kind == .map) {
+                                try self.lowerArgumentSpecOptions(entry_name, "", ov);
+                            }
+                        }
+                    }
+                }
+            }
+            try self.argument_spec_entries.append(self.alloc, entry);
+        }
+    }
+
+    fn lowerArgumentSpecOptions(
+        self: *AstBuilder,
+        entry_point: []const u8,
+        prefix: []const u8,
+        options_map: *const yaml_recover.YamlNode,
+    ) !void {
+        for (options_map.items) |pair| {
+            const k = pair.key orelse continue;
+            const opt_name = k.value orelse k.raw;
+            const opt_path = if (prefix.len == 0)
+                opt_name
+            else
+                try std.fmt.allocPrint(self.alloc, "{s}.{s}", .{ prefix, opt_name });
+
+            var spec = ArgumentSpec{
+                .entry_point = entry_point,
+                .name = opt_name,
+                .path = opt_path,
+                .is_map = false,
+                .span = .{ .start = k.start, .end = k.end },
+                .field_spans = &.{},
+            };
+            var nested_options: ?*const yaml_recover.YamlNode = null;
+
+            if (pair.val) |v| {
+                if (v.kind == .map) {
+                    spec.is_map = true;
+                    var keys = std.ArrayList([]const u8).empty;
+                    var fspans = std.ArrayList(FieldSpan).empty;
+                    for (v.items) |op| {
+                        const ok = op.key orelse continue;
+                        const ok_name = ok.value orelse ok.raw;
+                        try keys.append(self.alloc, ok_name);
+                        try fspans.append(self.alloc, .{ .name = ok_name, .span = .{ .start = ok.start, .end = ok.end } });
+                        if (std.mem.eql(u8, ok_name, "default")) {
+                            spec.has_default = true;
+                        } else if (std.mem.eql(u8, ok_name, "required")) {
+                            spec.has_required = true;
+                            spec.required = try value_mod.fromYaml(self.alloc, op.val);
+                        } else if (std.mem.eql(u8, ok_name, "no_log")) {
+                            spec.no_log = try value_mod.fromYaml(self.alloc, op.val);
+                        } else if (std.mem.eql(u8, ok_name, "type")) {
+                            spec.type_val = try value_mod.fromYaml(self.alloc, op.val);
+                        } else if (std.mem.eql(u8, ok_name, "description")) {
+                            spec.description = try value_mod.fromYaml(self.alloc, op.val);
+                        } else if (std.mem.eql(u8, ok_name, "options")) {
+                            nested_options = op.val;
+                        }
+                    }
+                    spec.keys = try keys.toOwnedSlice(self.alloc);
+                    spec.field_spans = try fspans.toOwnedSlice(self.alloc);
+                    if (spec.description) |d| {
+                        spec.description_text = try joinDescriptionText(self.alloc, d);
+                    }
+                }
+            }
+
+            try self.argument_specs.append(self.alloc, spec);
+
+            if (nested_options) |nested| {
+                if (nested.kind == .map) {
+                    try self.lowerArgumentSpecOptions(entry_point, opt_path, nested);
+                }
+            }
+        }
+    }
 };
+
+fn joinDescriptionText(alloc: Allocator, description: TypedValue) ![]const u8 {
+    switch (description.kind) {
+        .string_val, .template_val => return description.str_v,
+        .list_val => {
+            var out = std.ArrayList(u8).empty;
+            for (description.list_v, 0..) |item, i| {
+                if (i > 0) try out.appendSlice(alloc, "\n\n");
+                switch (item.kind) {
+                    .string_val, .template_val => try out.appendSlice(alloc, item.str_v),
+                    else => {},
+                }
+            }
+            return out.toOwnedSlice(alloc);
+        },
+        else => return "",
+    }
+}
 
 fn splitActionName(raw: []const u8, namespace_out: *[]const u8, short_out: *[]const u8) void {
     if (std.mem.startsWith(u8, raw, "ansible.builtin.")) {
@@ -1677,6 +1890,89 @@ test "role metadata and galaxy metadata lowering" {
     try std.testing.expect(gal_doc.galaxy_meta != null);
     try std.testing.expectEqualStrings("1.0.0", gal_doc.galaxy_meta.?.version.?.str_v);
     try std.testing.expectEqual(@as(usize, 1), gal_doc.galaxy_meta.?.dependencies.len);
+}
+
+test "argument specs lowering produces entry and option nodes with dotted paths" {
+    const src =
+        \\argument_specs:
+        \\  main:
+        \\    short_description: Demo role
+        \\    description:
+        \\      - First paragraph.
+        \\      - Second paragraph.
+        \\    unknown_key: oops
+        \\    options:
+        \\      demo_password:
+        \\        type: str
+        \\        description: Unmarked secret.
+        \\      demo_conf:
+        \\        type: dict
+        \\        description: Config.
+        \\        options:
+        \\          smtp_secret:
+        \\            type: str
+        \\            no_log: true
+        \\      conflict:
+        \\        type: str
+        \\        default: present
+        \\        required: true
+        \\      not_a_map: oops
+        \\  broken: just a string
+        \\
+    ;
+    var doc = try build(std.testing.allocator, "/ws/roles/demo/meta/argument_specs.yml", "roles/demo/meta/argument_specs.yml", src);
+    defer doc.deinit();
+    try std.testing.expectEqual(DocumentKind.argument_specs, doc.kind);
+    try std.testing.expect(doc.has_argument_specs);
+    try std.testing.expectEqual(@as(usize, 2), doc.argument_spec_entries.len);
+
+    const main_entry = doc.argument_spec_entries[0];
+    try std.testing.expectEqualStrings("main", main_entry.name);
+    try std.testing.expect(main_entry.is_map);
+    try std.testing.expectEqual(@as(usize, 4), main_entry.keys.len);
+    try std.testing.expectEqualStrings("Demo role", main_entry.short_description.?.str_v);
+    try std.testing.expectEqualStrings("First paragraph.\n\nSecond paragraph.", main_entry.description_text);
+
+    const broken_entry = doc.argument_spec_entries[1];
+    try std.testing.expectEqualStrings("broken", broken_entry.name);
+    try std.testing.expect(!broken_entry.is_map);
+
+    try std.testing.expectEqual(@as(usize, 5), doc.argument_specs.len);
+    const password = doc.argument_specs[0];
+    try std.testing.expectEqualStrings("demo_password", password.name);
+    try std.testing.expectEqualStrings("demo_password", password.path);
+    try std.testing.expectEqualStrings("main", password.entry_point);
+    try std.testing.expect(password.is_map);
+    try std.testing.expectEqualStrings("str", password.type_val.?.str_v);
+    try std.testing.expectEqualStrings("Unmarked secret.", password.description_text);
+    try std.testing.expect(!password.has_default);
+    try std.testing.expect(!password.has_required);
+
+    const conf = doc.argument_specs[1];
+    try std.testing.expectEqualStrings("demo_conf", conf.name);
+
+    const nested = doc.argument_specs[2];
+    try std.testing.expectEqualStrings("smtp_secret", nested.name);
+    try std.testing.expectEqualStrings("demo_conf.smtp_secret", nested.path);
+    try std.testing.expect(nested.no_log != null and nested.no_log.?.bool_v);
+
+    const conflict = doc.argument_specs[3];
+    try std.testing.expect(conflict.has_default);
+    try std.testing.expect(conflict.has_required);
+    try std.testing.expect(conflict.required.?.bool_v);
+
+    const not_a_map = doc.argument_specs[4];
+    try std.testing.expectEqualStrings("not_a_map", not_a_map.name);
+    try std.testing.expect(!not_a_map.is_map);
+    try std.testing.expectEqual(@as(usize, 0), not_a_map.keys.len);
+
+    const plain = doc.argument_specs[0];
+    try std.testing.expect(plain.field_spans.len > 0);
+
+    var missing_doc = try build(std.testing.allocator, "/ws/roles/demo/meta/argument_specs.yml", "roles/demo/meta/argument_specs.yml", "other_key: 1\n");
+    defer missing_doc.deinit();
+    try std.testing.expectEqual(DocumentKind.argument_specs, missing_doc.kind);
+    try std.testing.expect(!missing_doc.has_argument_specs);
 }
 
 test "alternate invocation forms preserve original spelling and normalize args" {

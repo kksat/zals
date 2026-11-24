@@ -10,6 +10,8 @@ pub const TargetKind = enum(u8) {
     var_def,
     role_meta,
     galaxy_meta,
+    argument_spec_entry,
+    argument_spec,
     parse_issue,
 
     pub fn name(self: TargetKind) []const u8 {
@@ -21,6 +23,8 @@ pub const TargetKind = enum(u8) {
             .var_def => "var_def",
             .role_meta => "role_meta",
             .galaxy_meta => "galaxy_meta",
+            .argument_spec_entry => "argument_spec_entry",
+            .argument_spec => "argument_spec",
             .parse_issue => "parse_issue",
         };
     }
@@ -120,6 +124,46 @@ pub const TargetKind = enum(u8) {
                 "license",
                 "license_file",
             },
+            .argument_spec_entry => &.{
+                "self",
+                "author",
+                "attributes",
+                "deprecated",
+                "description",
+                "examples",
+                "notes",
+                "options",
+                "requirements",
+                "seealso",
+                "short_description",
+                "todo",
+                "version_added",
+            },
+            .argument_spec => &.{
+                "self",
+                "aliases",
+                "apply_defaults",
+                "choices",
+                "context",
+                "default",
+                "deprecated_aliases",
+                "description",
+                "elements",
+                "mutually_exclusive",
+                "no_log",
+                "options",
+                "removed_at_date",
+                "removed_from_collection",
+                "removed_in_version",
+                "required",
+                "required_by",
+                "required_if",
+                "required_one_of",
+                "required_together",
+                "type",
+                "version_added",
+                "version_added_collection",
+            },
             .parse_issue => &.{
                 "self",
             },
@@ -134,7 +178,7 @@ pub const TargetKind = enum(u8) {
     }
 };
 
-pub const TargetMask = packed struct(u8) {
+pub const TargetMask = packed struct(u10) {
     document: bool = false,
     play: bool = false,
     task: bool = false,
@@ -142,6 +186,8 @@ pub const TargetMask = packed struct(u8) {
     var_def: bool = false,
     role_meta: bool = false,
     galaxy_meta: bool = false,
+    argument_spec_entry: bool = false,
+    argument_spec: bool = false,
     parse_issue: bool = false,
 
     pub fn add(self: *TargetMask, kind: TargetKind) void {
@@ -153,6 +199,8 @@ pub const TargetMask = packed struct(u8) {
             .var_def => self.var_def = true,
             .role_meta => self.role_meta = true,
             .galaxy_meta => self.galaxy_meta = true,
+            .argument_spec_entry => self.argument_spec_entry = true,
+            .argument_spec => self.argument_spec = true,
             .parse_issue => self.parse_issue = true,
         }
     }
@@ -166,12 +214,14 @@ pub const TargetMask = packed struct(u8) {
             .var_def => self.var_def,
             .role_meta => self.role_meta,
             .galaxy_meta => self.galaxy_meta,
+            .argument_spec_entry => self.argument_spec_entry,
+            .argument_spec => self.argument_spec,
             .parse_issue => self.parse_issue,
         };
     }
 
     pub fn isEmpty(self: TargetMask) bool {
-        return @as(u8, @bitCast(self)) == 0;
+        return @as(u10, @bitCast(self)) == 0;
     }
 };
 
