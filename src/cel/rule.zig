@@ -70,6 +70,7 @@ pub const EvalOutcome = union(enum) {
     message_error: []const u8,
     message_type_error: []const u8,
     limit_error: []const u8,
+    cancelled: void,
 };
 
 pub const CompiledRule = struct {
@@ -92,8 +93,9 @@ pub const CompiledRule = struct {
         self: *CompiledRule,
         eval_alloc: std.mem.Allocator,
         bindings: []const env.Binding,
+        cancel: ?*cel.vm.Cancel,
     ) std.mem.Allocator.Error!EvalOutcome {
-        return evalPrograms(self.condition_prog, self.message_prog, eval_alloc, bindings);
+        return evalPrograms(self.condition_prog, self.message_prog, eval_alloc, bindings, cancel);
     }
 
     pub fn cloneForWorker(self: *const CompiledRule, backing: std.mem.Allocator) error{ Compile, OutOfMemory }!WorkerRule {
@@ -140,8 +142,9 @@ pub const WorkerRule = struct {
         self: *WorkerRule,
         eval_alloc: std.mem.Allocator,
         bindings: []const env.Binding,
+        cancel: ?*cel.vm.Cancel,
     ) std.mem.Allocator.Error!EvalOutcome {
-        return evalPrograms(self.condition_prog, self.message_prog, eval_alloc, bindings);
+        return evalPrograms(self.condition_prog, self.message_prog, eval_alloc, bindings, cancel);
     }
 };
 
@@ -150,10 +153,16 @@ fn evalPrograms(
     message_prog: *cel.vm.Program,
     eval_alloc: std.mem.Allocator,
     bindings: []const env.Binding,
+    cancel: ?*cel.vm.Cancel,
 ) std.mem.Allocator.Error!EvalOutcome {
-    const cond_res = condition_prog.run(eval_alloc, bindings, "", .{}) catch |err| switch (err) {
+    const run_opts = cel.vm.RunOptions{
+        .max_steps = limits.max_run_steps,
+        .cancel = cancel,
+    };
+    const cond_res = condition_prog.run(eval_alloc, bindings, "", run_opts) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
-        error.BudgetExceeded, error.Canceled => return .{ .limit_error = "condition evaluation was aborted" },
+        error.BudgetExceeded => return .{ .limit_error = "condition exceeded the run-step budget" },
+        error.Canceled => return .cancelled,
     };
     switch (cond_res) {
         .err => |msg| return .{ .condition_error = msg },
@@ -172,9 +181,10 @@ fn evalPrograms(
         },
     }
 
-    const msg_res = message_prog.run(eval_alloc, bindings, "", .{}) catch |err| switch (err) {
+    const msg_res = message_prog.run(eval_alloc, bindings, "", run_opts) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
-        error.BudgetExceeded, error.Canceled => return .{ .limit_error = "message evaluation was aborted" },
+        error.BudgetExceeded => return .{ .limit_error = "message exceeded the run-step budget" },
+        error.Canceled => return .cancelled,
     };
     switch (msg_res) {
         .err => |msg| return .{ .message_error = msg },
@@ -733,7 +743,7 @@ test "load and evaluate typed parse-issue rule with dynamic message" {
             const loc_val = try (env.LocationValue{ .path = "playbooks/site.yml", .line = 14, .column = 3 }).toCel(a);
             const bindings = env.makeBindings(node_val, loc_val, env.emptyMapValue(), env.emptyMapValue(), env.emptyMapValue(), env.emptyMapValue());
 
-            const out = try rule.evaluate(a, &bindings);
+            const out = try rule.evaluate(a, &bindings, null);
             try std.testing.expectEqualStrings(
                 "Cannot parse playbooks/site.yml on line 14, column 3: unexpected indentation",
                 out.match,
@@ -771,7 +781,7 @@ test "false condition skips message evaluation even if message would error" {
     try node_b.putString(a, "action", "debug");
     const bindings = env.makeBindings(try node_b.finish(a), env.emptyMapValue(), env.emptyMapValue(), env.emptyMapValue(), env.emptyMapValue(), env.emptyMapValue());
 
-    const out = try rule.evaluate(a, &bindings);
+    const out = try rule.evaluate(a, &bindings, null);
     try std.testing.expect(out == .no_match);
 }
 
@@ -875,7 +885,7 @@ test "runtime type mismatch returns error outcome instead of violation" {
     try node_b.putString(a, "value", "not-a-bool");
     const bindings = env.makeBindings(try node_b.finish(a), env.emptyMapValue(), env.emptyMapValue(), env.emptyMapValue(), env.emptyMapValue(), env.emptyMapValue());
 
-    const out = try rule.evaluate(a, &bindings);
+    const out = try rule.evaluate(a, &bindings, null);
     try std.testing.expect(out == .condition_type_error);
 }
 
@@ -910,7 +920,7 @@ test "worker clone evaluates independently from main rule" {
     try node_b.putInt(a, "count", 5);
     const bindings = env.makeBindings(try node_b.finish(a), env.emptyMapValue(), env.emptyMapValue(), env.emptyMapValue(), env.emptyMapValue(), env.emptyMapValue());
 
-    const out = try worker.evaluate(a, &bindings);
+    const out = try worker.evaluate(a, &bindings, null);
     try std.testing.expectEqualStrings("count=5", out.match);
 }
 
@@ -1001,4 +1011,76 @@ test "load rejects constant-foldable metadata as non-literal" {
             try std.testing.expectEqual(LoadErrorKind.invalid_metadata, e.info.kind);
         },
     }
+}
+
+test "run-step budget caps runaway comprehension work" {
+    const src =
+        \\zals.Rule{
+        \\  id: "test/budget",
+        \\  target: "task",
+        \\  severity: "warning",
+        \\  condition: node.items.all(a, node.items.all(b, a >= b)),
+        \\  message: "m"
+        \\}
+    ;
+    var loaded = try load(std.testing.allocator, src, .{ .kind = .builtin });
+    var rule = switch (loaded) {
+        .ok => |r| r,
+        .err => |*e| {
+            defer e.deinit();
+            return error.TestUnexpectedResult;
+        },
+    };
+    defer rule.deinit();
+
+    var eval_arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer eval_arena.deinit();
+    const a = eval_arena.allocator();
+
+    const n: usize = 600;
+    const items = try a.alloc(env.Value, n);
+    for (items) |*v| v.* = .{ .int_t = 7 };
+    var node_b = env.MapBuilder.init();
+    try node_b.put(a, "items", .{ .list_t = items });
+    const bindings = env.makeBindings(try node_b.finish(a), env.emptyMapValue(), env.emptyMapValue(), env.emptyMapValue(), env.emptyMapValue(), env.emptyMapValue());
+
+    const out = try rule.evaluate(a, &bindings, null);
+    try std.testing.expect(out == .limit_error);
+}
+
+test "requested cancellation aborts evaluation as cancelled outcome" {
+    const src =
+        \\zals.Rule{
+        \\  id: "test/cancel",
+        \\  target: "task",
+        \\  severity: "warning",
+        \\  condition: node.items.all(a, node.items.all(b, a >= b)),
+        \\  message: "m"
+        \\}
+    ;
+    var loaded = try load(std.testing.allocator, src, .{ .kind = .builtin });
+    var rule = switch (loaded) {
+        .ok => |r| r,
+        .err => |*e| {
+            defer e.deinit();
+            return error.TestUnexpectedResult;
+        },
+    };
+    defer rule.deinit();
+
+    var eval_arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer eval_arena.deinit();
+    const a = eval_arena.allocator();
+
+    const n: usize = 600;
+    const items = try a.alloc(env.Value, n);
+    for (items) |*v| v.* = .{ .int_t = 7 };
+    var node_b = env.MapBuilder.init();
+    try node_b.put(a, "items", .{ .list_t = items });
+    const bindings = env.makeBindings(try node_b.finish(a), env.emptyMapValue(), env.emptyMapValue(), env.emptyMapValue(), env.emptyMapValue(), env.emptyMapValue());
+
+    var cancel = cel.vm.Cancel{};
+    cancel.request();
+    const out = try rule.evaluate(a, &bindings, &cancel);
+    try std.testing.expect(out == .cancelled);
 }

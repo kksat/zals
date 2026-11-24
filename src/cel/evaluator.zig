@@ -1,5 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const cel = @import("cel");
 const ast = @import("../ast/root.zig");
 const lsp_types = @import("../lsp/types.zig");
 const doc_mod = @import("../workspace/document.zig");
@@ -27,7 +28,7 @@ pub fn evaluateDocument(
     metadata: ast.MetadataSnapshot,
     doc_ctx: ast.DocumentContext,
     encoding: doc_mod.PositionEncoding,
-    cancel: ?*const std.atomic.Value(bool),
+    cancel: ?*cel.vm.Cancel,
 ) !EvalResult {
     var line_index = try doc_mod.LineIndex.init(out_alloc, doc.source, encoding);
     defer line_index.deinit(out_alloc);
@@ -354,7 +355,7 @@ fn evalSingleTarget(
     diags: *std.ArrayList(lsp_types.Diagnostic),
     runtime_errors: *std.ArrayList(RuntimeError),
     per_rule_count: *usize,
-    cancel: ?*const std.atomic.Value(bool),
+    cancel: ?*cel.vm.Cancel,
 ) !bool {
     if (isCancelled(cancel)) return true;
     if (diags.items.len >= limits.max_diagnostics_per_document) return false;
@@ -371,9 +372,10 @@ fn evalSingleTarget(
     }).toCel(eval_alloc);
 
     const bindings = env.makeBindings(node_cel, loc_cel, doc_cel, ctx_cel, meta_cel, opts_cel);
-    const outcome = try entry.rule.evaluate(eval_alloc, &bindings);
+    const outcome = try entry.rule.evaluate(eval_alloc, &bindings, cancel);
     switch (outcome) {
         .no_match => {},
+        .cancelled => return true,
         .match => |msg| {
             if (ast.noqa.isSuppressed(doc.noqa_directives, entry.rule.meta.id, node_lc.line, field_lc.line)) {
                 return false;
@@ -415,9 +417,9 @@ fn toLspSeverity(sev: schema.Severity) lsp_types.DiagnosticSeverity {
     };
 }
 
-fn isCancelled(cancel: ?*const std.atomic.Value(bool)) bool {
+fn isCancelled(cancel: ?*cel.vm.Cancel) bool {
     const flag = cancel orelse return false;
-    return flag.load(.acquire);
+    return flag.isCanceled();
 }
 
 test "vertical slice evaluates parse issues, tasks, plays, field selectors, and noqa" {

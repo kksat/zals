@@ -90,6 +90,7 @@ pub const Server = struct {
         self.docs_service.shutdown.store(true, .release);
         self.index.shutdown.store(true, .release);
         self.validation.shutdown.store(true, .release);
+        self.validation.cel_cancel.request();
         self.pool.deinit();
         self.validation.deinit();
         self.index.destroy();

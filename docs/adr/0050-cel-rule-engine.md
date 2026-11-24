@@ -49,6 +49,10 @@ pinned Zig 0.15.1 toolchain ([ADR-0019](0019-toolchain-build-and-platforms.md)).
 - Evaluation is data-only and deterministic; any bounded lexical or structural
   facts needed by rules are computed by the host and passed as immutable CEL
   map/list values rather than via custom side-effectful host functions.
+- Each run is bounded by the engine-level instruction budget
+  (`cel.vm.RunOptions.max_steps`, from `src/cel/limits.zig`) and supports
+  mid-evaluation cancellation (`cel.vm.Cancel`, requested on server shutdown);
+  a budget overrun isolates the rule as a limit error, never a violation.
 - Updating `zig-cel` requires only updating the pinned archive `url` and
   content `hash` in `build.zig.zon`.
 - Upstream `zig-cel` at commit `445a967` has a regex codegen defect in `regex.zig`
