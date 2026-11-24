@@ -61,7 +61,7 @@ message Document {
   string extension = 3;
 
   // Classified document kind: "playbook", "tasks", "handlers", "role_meta",
-  // "galaxy_meta", "vars_file", "defaults", or "other".
+  // "galaxy_meta", "argument_specs", "vars_file", "defaults", or "other".
   string kind = 4;
 
   // Number of recovered plays in the document.
@@ -72,6 +72,10 @@ message Document {
 
   // Number of observed YAML syntax or Ansible structural parse issues.
   int64 parse_issue_count = 7;
+
+  // True when meta/argument_specs.yml defines an "argument_specs" mapping
+  // with at least one entry point.
+  bool has_argument_specs = 8;
 }
 
 // Static module metadata fact collected outside CEL evaluation.
@@ -183,6 +187,67 @@ message GalaxyDep {
 
   // Typed version constraint value.
   TypedValue version = 2;
+}
+
+// Role entry point in meta/argument_specs.yml (target: "argument_spec_entry").
+message ArgumentSpecEntry {
+  // Entry point name (for example "main").
+  string name = 1;
+
+  // True when the entry point's value is a YAML mapping.
+  bool is_map = 2;
+
+  // Keys present in the entry point mapping as written in source.
+  repeated string keys = 3;
+
+  // Typed value of the "short_description" field, if present.
+  TypedValue short_description = 4;
+
+  // Typed value of the "description" field, if present.
+  TypedValue description = 5;
+
+  // Description normalized to text: list items joined with blank lines.
+  string description_text = 6;
+}
+
+// Option (or nested suboption) in meta/argument_specs.yml
+// (target: "argument_spec").
+message ArgumentSpec {
+  // Name of the enclosing entry point (for example "main").
+  string entry_point = 1;
+
+  // Option name as written in source.
+  string name = 2;
+
+  // Dotted option path including parent options ("conf.mode").
+  string path = 3;
+
+  // True when the option's spec value is a YAML mapping.
+  bool is_map = 4;
+
+  // Keys present in the option spec mapping as written in source.
+  repeated string keys = 5;
+
+  // True when the option spec defines "default" (even an explicit null).
+  bool has_default = 6;
+
+  // True when the option spec defines "required".
+  bool has_required = 7;
+
+  // Typed value of "required".
+  TypedValue required = 8;
+
+  // Typed value of "no_log".
+  TypedValue no_log = 9;
+
+  // Typed value of "type".
+  TypedValue type = 10;
+
+  // Typed value of "description".
+  TypedValue description = 11;
+
+  // Description normalized to text: list items joined with blank lines.
+  string description_text = 12;
 }
 
 // Play AST target (target: "play").
@@ -615,4 +680,38 @@ message Node {
 
   // [document] Parse issue count in the document.
   int64 parse_issue_count = 96;
+
+  // [document] True when meta/argument_specs.yml defines an "argument_specs"
+  // mapping with at least one entry point.
+  bool has_argument_specs = 97;
+
+  // [argument_spec_entry, argument_spec] True when the entry point or option
+  // spec value is a YAML mapping.
+  bool is_map = 98;
+
+  // [argument_spec_entry, argument_spec] Description normalized to text:
+  // list items joined with blank lines.
+  string description_text = 99;
+
+  // [argument_spec_entry] Typed value of the entry point's
+  // "short_description" field, if present.
+  TypedValue short_description = 100;
+
+  // [argument_spec] Name of the enclosing entry point (for example "main").
+  string entry_point = 101;
+
+  // [argument_spec] True when the option spec defines "default"
+  // (even an explicit null). The dotted option path reuses the string-typed
+  // "path" field 92; "no_log" (32), "description" (68), "keys" (1), and
+  // "name" (18) are likewise shared with other targets.
+  bool has_default = 102;
+
+  // [argument_spec] True when the option spec defines "required".
+  bool has_required = 103;
+
+  // [argument_spec] Typed value of "required".
+  TypedValue required = 104;
+
+  // [argument_spec] Typed value of the option's "type" field.
+  TypedValue type = 105;
 }

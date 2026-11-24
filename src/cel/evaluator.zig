@@ -231,6 +231,56 @@ pub fn evaluateDocument(
             }
         }
 
+        if (targets.contains(.argument_spec_entry)) {
+            for (doc.argument_spec_entries) |*spec_entry| {
+                const node_cel = try spec_entry.toCel(ea);
+                const cancelled = try evalSingleTarget(
+                    out_alloc,
+                    ea,
+                    doc,
+                    line_index,
+                    entry,
+                    node_cel,
+                    doc_cel,
+                    env.emptyMapValue(),
+                    meta_cel,
+                    opts_cel,
+                    spec_entry.span,
+                    spec_entry.field_spans,
+                    &diags,
+                    &runtime_errors,
+                    &per_rule_count,
+                    cancel,
+                );
+                if (cancelled) return .{ .diagnostics = &.{}, .runtime_errors = &.{}, .cancelled = true };
+            }
+        }
+
+        if (targets.contains(.argument_spec)) {
+            for (doc.argument_specs) |*spec| {
+                const node_cel = try spec.toCel(ea);
+                const cancelled = try evalSingleTarget(
+                    out_alloc,
+                    ea,
+                    doc,
+                    line_index,
+                    entry,
+                    node_cel,
+                    doc_cel,
+                    env.emptyMapValue(),
+                    meta_cel,
+                    opts_cel,
+                    spec.span,
+                    spec.field_spans,
+                    &diags,
+                    &runtime_errors,
+                    &per_rule_count,
+                    cancel,
+                );
+                if (cancelled) return .{ .diagnostics = &.{}, .runtime_errors = &.{}, .cancelled = true };
+            }
+        }
+
         if (targets.contains(.parse_issue)) {
             for (doc.parse_issues) |*iss| {
                 const node_cel = try iss.toCel(ea);

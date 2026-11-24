@@ -5,7 +5,8 @@ variables:
     type_name: zals.Node
     description: >-
       Selected Ansible AST target node (task, play, role_ref, var_def,
-      role_meta, galaxy_meta, parse_issue, or document).
+      role_meta, galaxy_meta, argument_spec_entry, argument_spec,
+      parse_issue, or document).
   - name: location
     type_name: zals.Location
     description: 1-based source path, line, and column of the diagnostic range.

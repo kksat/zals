@@ -64,7 +64,8 @@
         "kind": "string",
         "play_count": "int",
         "task_count": "int",
-        "parse_issue_count": "int"
+        "parse_issue_count": "int",
+        "has_argument_specs": "bool"
       }
     },
     "context": { "type": "map" },
@@ -97,7 +98,8 @@
         "kind": "string",
         "play_count": "int",
         "task_count": "int",
-        "parse_issue_count": "int"
+        "parse_issue_count": "int",
+        "has_argument_specs": "bool"
       }
     },
     "play": {
@@ -232,6 +234,34 @@
         "license": "TypedValue | null",
         "has_license_file": "bool",
         "license_file": "TypedValue | null"
+      }
+    },
+    "argument_spec_entry": {
+      "fields": ["self", "author", "attributes", "deprecated", "description", "examples", "notes", "options", "requirements", "seealso", "short_description", "todo", "version_added"],
+      "node_fields": {
+        "name": "string",
+        "is_map": "bool",
+        "keys": "list<string>",
+        "short_description": "TypedValue | null",
+        "description": "TypedValue | null",
+        "description_text": "string"
+      }
+    },
+    "argument_spec": {
+      "fields": ["self", "aliases", "apply_defaults", "choices", "context", "default", "deprecated_aliases", "description", "elements", "mutually_exclusive", "no_log", "options", "removed_at_date", "removed_from_collection", "removed_in_version", "required", "required_by", "required_if", "required_one_of", "required_together", "type", "version_added", "version_added_collection"],
+      "node_fields": {
+        "entry_point": "string",
+        "name": "string",
+        "path": "string",
+        "is_map": "bool",
+        "keys": "list<string>",
+        "has_default": "bool",
+        "has_required": "bool",
+        "required": "TypedValue | null",
+        "no_log": "TypedValue | null",
+        "type": "TypedValue | null",
+        "description": "TypedValue | null",
+        "description_text": "string"
       }
     },
     "parse_issue": {

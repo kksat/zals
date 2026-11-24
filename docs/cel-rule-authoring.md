@@ -37,15 +37,20 @@ zals.Rule{
     `metadata`, and `options`.
   - `docs/cel/zals.proto` — documented protobuf definitions for `zals.Rule`,
     `zals.Node`, per-target messages (`zals.Task`, `zals.Play`, `zals.RoleRef`,
-    `zals.VarDef`, `zals.RoleMeta`, `zals.GalaxyMeta`, `zals.ParseIssue`),
-    `zals.Location`, `zals.Document`, `zals.Metadata`, `zals.TypedValue`, and
-    `zals.CommandInfo`.
+    `zals.VarDef`, `zals.RoleMeta`, `zals.GalaxyMeta`, `zals.ArgumentSpecEntry`,
+    `zals.ArgumentSpec`, `zals.ParseIssue`), `zals.Location`, `zals.Document`,
+    `zals.Metadata`, `zals.TypedValue`, and `zals.CommandInfo`.
   - `docs/cel/zals.binpb` — compiled `FileDescriptorSet` with source comments
     (`protoc --include_imports --include_source_info -I docs/cel --descriptor_set_out=docs/cel/zals.binpb docs/cel/zals.proto`).
   - CLI check: `cells check --config=docs/cel/cel.yaml --descriptor-set=docs/cel/zals.binpb path/to/rule.cel`.
   - To narrow `node` strictly to one target in a folder of rules (for example,
     task-only rules), drop a local `cel.yaml` in that folder setting
     `node`'s `type_name` to `zals.Task` (or `zals.Play`, `zals.RoleMeta`, etc.).
+- Rule targets for `meta/argument_specs.yml` are `argument_spec_entry` (one
+  node per role entry point) and `argument_spec` (one node per option, with
+  nested suboptions flattened into dotted `path` values such as `conf.mode`);
+  `document.has_argument_specs` reports whether the file defines an
+  `argument_specs` mapping with at least one entry point.
 
 ## Configuration and migration notes
 
