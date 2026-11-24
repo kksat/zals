@@ -31,7 +31,8 @@
       "max_regex_pattern_bytes": 512,
       "max_diagnostics_per_document": 512,
       "max_diagnostics_per_rule_per_document": 128,
-      "max_message_bytes": 2048
+      "max_message_bytes": 2048,
+      "max_run_steps": 1000000
     }
   },
   "declaration": {

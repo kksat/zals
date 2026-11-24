@@ -8,3 +8,4 @@ pub const max_diagnostics_per_document: usize = 512;
 pub const max_diagnostics_per_rule_per_document: usize = 128;
 pub const max_message_bytes: usize = 2048;
 pub const max_list_items_per_field: usize = 4096;
+pub const max_run_steps: u64 = 1_000_000;

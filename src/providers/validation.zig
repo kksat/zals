@@ -9,6 +9,7 @@ const validation = @import("../services/validation.zig");
 const exec = @import("../exec/root.zig");
 const concurrency = @import("../concurrency/root.zig");
 const cel_rules = @import("../cel/root.zig");
+const cel = @import("cel");
 const ast = @import("../ast/root.zig");
 const paths = @import("../paths.zig");
 const discover = @import("../workspace/discover.zig");
@@ -119,6 +120,7 @@ pub const Queue = struct {
     buckets: std.StringHashMapUnmanaged(ProviderBuckets) = .empty,
     rule_error_uris: std.ArrayListUnmanaged([]const u8) = .empty,
     shutdown: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+    cel_cancel: cel.vm.Cancel = .{},
 
     pub fn init(gpa: Allocator) Queue {
         return .{ .gpa = gpa };
@@ -384,7 +386,7 @@ pub const Queue = struct {
             job.metadata,
             doc_ctx,
             job.encoding,
-            &self.shutdown,
+            &self.cel_cancel,
         ) catch {
             job.failed = true;
             return;

@@ -139,10 +139,13 @@ document/workspace work, and diagnostic output. Provide cancellation that
 makes obsolete work stop promptly. A background thread alone is not a
 cancellation mechanism.
 
-zig-cel terminates every expression but exposes no run-step budget or
-mid-evaluation cancellation hook: bound inputs, expression size, and nesting
-first, and treat a library-level evaluation budget as a requested engine
-improvement rather than assuming one exists.
+zig-cel bounds each run with an engine-level instruction budget
+(`max_run_steps`, charged conservatively per entered instruction range) and a
+cooperative cancellation flag polled per comprehension iteration at worst.
+Bound inputs, expression size, and nesting first; keep the run-step budget and
+mid-evaluation cancellation as the engine-level backstop so a runaway
+comprehension deactivates its rule as a limit error or aborts promptly on
+server shutdown.
 
 Use the same bounded interface for built-ins, global custom rules, and trusted
 Workspace rules. Trust does not remove resource limits. Do not log complete
