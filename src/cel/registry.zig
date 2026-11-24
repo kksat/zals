@@ -46,6 +46,8 @@ pub const RuleFileError = struct {
     message: []const u8,
     line: u32,
     column: u32,
+    end_line: u32 = 0,
+    end_column: u32 = 0,
 };
 
 pub const ActiveRule = struct {
@@ -189,6 +191,8 @@ pub fn buildRuleSet(backing: Allocator, generation: u64, config: RegistryConfig)
                         .message = try a.dupe(u8, e.info.message),
                         .line = e.info.pos.line,
                         .column = e.info.pos.column,
+                        .end_line = e.info.end_pos.line,
+                        .end_column = e.info.end_pos.column,
                     });
                 },
             }
@@ -315,6 +319,8 @@ fn loadCustomFile(
                 .message = try a.dupe(u8, e.info.message),
                 .line = e.info.pos.line,
                 .column = e.info.pos.column,
+                .end_line = e.info.end_pos.line,
+                .end_column = e.info.end_pos.column,
             });
         },
     }

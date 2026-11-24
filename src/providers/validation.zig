@@ -505,10 +505,14 @@ fn publishRuleFileErrors(self: *Server, a: Allocator, rs: *const cel_rules.RuleS
         if (!gop.found_existing) gop.value_ptr.* = .empty;
         const line_zero: u32 = if (err_info.line > 0) err_info.line - 1 else 0;
         const col_zero: u32 = if (err_info.column > 0) err_info.column - 1 else 0;
+        const has_end = err_info.end_line > 0 and
+            (err_info.end_line > err_info.line or err_info.end_column > err_info.column);
+        const end_line_zero: u32 = if (has_end and err_info.end_line > 0) err_info.end_line - 1 else line_zero;
+        const end_col_zero: u32 = if (has_end and err_info.end_column > 0) err_info.end_column - 1 else col_zero + 1;
         try gop.value_ptr.append(a, .{
             .range = .{
                 .start = .{ .line = line_zero, .character = col_zero },
-                .end = .{ .line = line_zero, .character = col_zero + 1 },
+                .end = .{ .line = end_line_zero, .character = end_col_zero },
             },
             .severity = .err,
             .source = "zals-cel-rule",
