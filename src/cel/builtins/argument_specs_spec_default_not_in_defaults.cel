@@ -1,0 +1,15 @@
+zals.Rule{
+  id: "argument-specs[spec-default-not-in-defaults]",
+  target: "argument_spec",
+  severity: "error",
+  field: "default",
+  condition: node.is_map &&
+    node.is_top_level &&
+    node.has_default &&
+    context.role.present &&
+    (!(node.entry_point in context.role.defaults) ||
+      !(node.name in context.role.defaults[node.entry_point].vars)),
+  message: "Option '" + node.name + "' defines a default in argument_specs.yml " +
+    "for entry point '" + node.entry_point + "' but is missing from defaults/" +
+    node.entry_point + "."
+}

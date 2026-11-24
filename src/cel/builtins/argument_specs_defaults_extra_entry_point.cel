@@ -1,0 +1,12 @@
+zals.Rule{
+  id: "argument-specs[defaults-extra-entry-point]",
+  target: "document",
+  severity: "warning",
+  condition: document.kind == "defaults" &&
+    context.role.present &&
+    context.role.has_argument_specs &&
+    context.role.entry_point != "" &&
+    !(context.role.entry_point in context.role.argument_specs),
+  message: "Defaults entry point '" + context.role.entry_point +
+    "' is not declared in meta/argument_specs.yml."
+}

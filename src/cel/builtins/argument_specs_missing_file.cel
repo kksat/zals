@@ -1,0 +1,13 @@
+zals.Rule{
+  id: "argument-specs[missing-file]",
+  target: "document",
+  severity: "warning",
+  condition: context.role.present && !context.role.has_argument_specs_file && (
+    document.kind == "role_meta" ||
+    (!context.role.has_meta && document.kind == "tasks" &&
+      (document.filename == "main.yml" || document.filename == "main.yaml")) ||
+    (!context.role.has_meta && !context.role.has_tasks && document.kind == "defaults" &&
+      context.role.entry_point == "main")
+  ),
+  message: "Role '" + context.role.name + "' does not define meta/argument_specs.yml."
+}

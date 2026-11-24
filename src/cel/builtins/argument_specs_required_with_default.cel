@@ -1,0 +1,18 @@
+zals.Rule{
+  id: "argument-specs[required-with-default]",
+  target: "argument_spec",
+  severity: "warning",
+  field: "required",
+  condition: node.is_map &&
+    node.is_top_level &&
+    node.has_required &&
+    node.required != null &&
+    node.required.kind == "bool" &&
+    node.required.value &&
+    context.role.present &&
+    node.entry_point in context.role.defaults &&
+    node.name in context.role.defaults[node.entry_point].vars,
+  message: "Option '" + node.name + "' in entry point '" + node.entry_point +
+    "' is marked required but has a role default in defaults/" + node.entry_point +
+    ". The default may satisfy the required check without caller input."
+}

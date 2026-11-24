@@ -1,0 +1,17 @@
+zals.Rule{
+  id: "argument-specs[spec-var-not-in-defaults]",
+  target: "argument_spec",
+  severity: "info",
+  condition: node.is_map &&
+    node.is_top_level &&
+    !node.has_default &&
+    !(node.has_required && node.required != null &&
+      node.required.kind == "bool" && node.required.value) &&
+    context.role.present &&
+    node.entry_point in context.role.defaults &&
+    size(context.role.defaults[node.entry_point].vars) > 0 &&
+    !(node.name in context.role.defaults[node.entry_point].vars),
+  message: "Option '" + node.name + "' in entry point '" + node.entry_point +
+    "' is listed in argument_specs.yml but absent from defaults/" + node.entry_point +
+    " (may be intentional)."
+}

@@ -1,0 +1,12 @@
+zals.Rule{
+  id: "argument-specs[defaults-var-not-in-spec]",
+  target: "var_def",
+  severity: "error",
+  condition: node.site == "role_defaults" &&
+    context.role.present &&
+    context.role.has_argument_specs &&
+    context.role.entry_point in context.role.argument_specs &&
+    !(node.name in context.role.argument_specs[context.role.entry_point].options),
+  message: "Variable '" + node.name + "' is defined in defaults/" +
+    context.role.entry_point + " but missing from meta/argument_specs.yml."
+}

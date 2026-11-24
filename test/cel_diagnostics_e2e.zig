@@ -458,3 +458,131 @@ test "stdio multi-provider independence keeps both cel and external findings wit
     try std.testing.expect(hasSource(ext_only, "ansible-lint"));
     try std.testing.expect(!hasSource(ext_only, "zals-cel"));
 }
+
+fn hasSpecCrossFileFindings(diags: Value) bool {
+    return hasCode(diags, "argument-specs[default-value-mismatch]") and
+        hasCode(diags, "argument-specs[default-template-mismatch]") and
+        hasCode(diags, "argument-specs[required-with-default]") and
+        hasCode(diags, "argument-specs[spec-default-not-in-defaults]");
+}
+
+fn hasSpecFixedValueMismatch(diags: Value) bool {
+    return !hasCode(diags, "argument-specs[default-value-mismatch]") and
+        hasCode(diags, "argument-specs[default-template-mismatch]");
+}
+
+fn hasDefaultsVarNotInSpec(diags: Value) bool {
+    return hasCode(diags, "argument-specs[defaults-var-not-in-spec]");
+}
+
+fn hasDefaultsExtraEntryPoint(diags: Value) bool {
+    return hasCode(diags, "argument-specs[defaults-extra-entry-point]");
+}
+
+fn hasMissingSpecFile(diags: Value) bool {
+    return hasCode(diags, "argument-specs[missing-file]");
+}
+
+test "stdio cross-file role context checks directory-style defaults, live sibling cascade, and missing-file" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.makePath("ws/.git");
+    try tmp.dir.makePath("ws/roles/demo/meta");
+    try tmp.dir.makePath("ws/roles/demo/defaults/main");
+    try tmp.dir.makePath("ws/roles/legacy/meta");
+    try tmp.dir.makePath("ws/roles/legacy/defaults");
+    try tmp.dir.makePath("bin");
+
+    const ws_root = try tmp.dir.realpathAlloc(a, "ws");
+    const bin_dir = try tmp.dir.realpathAlloc(a, "bin");
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "ws/roles/demo/meta/argument_specs.yml",
+        .data =
+        \\argument_specs:
+        \\  main:
+        \\    options:
+        \\      port:
+        \\        type: int
+        \\        default: 80
+        \\      cfg:
+        \\        type: dict
+        \\        default:
+        \\          host: localhost
+        \\      req_var:
+        \\        type: str
+        \\        required: true
+        \\      missing_def:
+        \\        type: str
+        \\        default: abc
+        \\
+        ,
+    });
+    const base_defaults =
+        \\port: 80
+        \\cfg:
+        \\  host: "{{ ansible_host }}"
+        \\req_var: provided
+        \\undocumented_var: oops
+        \\
+    ;
+    const override_defaults = "port: \"80\"\n";
+    try tmp.dir.writeFile(.{ .sub_path = "ws/roles/demo/defaults/main/01_base.yml", .data = base_defaults });
+    try tmp.dir.writeFile(.{ .sub_path = "ws/roles/demo/defaults/main/02_override.yml", .data = override_defaults });
+    try tmp.dir.writeFile(.{ .sub_path = "ws/roles/demo/defaults/extra.yml", .data = "extra_var: 1\n" });
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "ws/roles/legacy/meta/main.yml",
+        .data = "galaxy_info:\n  author: Jane\n  description: Legacy role\n  license: MIT\n  galaxy_tags: [web]\n",
+    });
+    try tmp.dir.writeFile(.{
+        .sub_path = "ws/roles/legacy/defaults/main.yml",
+        .data = "legacy_var: 1\n",
+    });
+
+    const spec_uri = try std.fmt.allocPrint(a, "file://{s}/roles/demo/meta/argument_specs.yml", .{ws_root});
+    const base_uri = try std.fmt.allocPrint(a, "file://{s}/roles/demo/defaults/main/01_base.yml", .{ws_root});
+    const override_uri = try std.fmt.allocPrint(a, "file://{s}/roles/demo/defaults/main/02_override.yml", .{ws_root});
+    const extra_uri = try std.fmt.allocPrint(a, "file://{s}/roles/demo/defaults/extra.yml", .{ws_root});
+    const legacy_meta_uri = try std.fmt.allocPrint(a, "file://{s}/roles/legacy/meta/main.yml", .{ws_root});
+    const root_uri = try std.fmt.allocPrint(a, "file://{s}", .{ws_root});
+    const binary = try std.fs.cwd().realpathAlloc(a, "zig-out/bin/zals");
+
+    var client = try DiagClient.start(a, binary, bin_dir, ws_root);
+    defer client.deinit();
+
+    _ = try client.request("initialize", .{
+        .processId = @as(?i64, null),
+        .rootUri = root_uri,
+        .capabilities = .{},
+    });
+    try client.notify("initialized", .{});
+
+    _ = try client.pumpUntil(spec_uri, hasSpecCrossFileFindings);
+    _ = try client.pumpUntil(base_uri, hasDefaultsVarNotInSpec);
+    _ = try client.pumpUntil(extra_uri, hasDefaultsExtraEntryPoint);
+    _ = try client.pumpUntil(legacy_meta_uri, hasMissingSpecFile);
+
+    try client.notify("textDocument/didOpen", .{
+        .textDocument = .{
+            .uri = override_uri,
+            .languageId = "ansible",
+            .version = @as(i64, 1),
+            .text = override_defaults,
+        },
+    });
+    try client.notify("textDocument/didChange", .{
+        .textDocument = .{ .uri = override_uri, .version = @as(i64, 2) },
+        .contentChanges = &[_]struct { text: []const u8 }{.{ .text = "port: 80\n" }},
+    });
+    _ = try client.pumpUntil(spec_uri, hasSpecFixedValueMismatch);
+
+    try client.notify("textDocument/didClose", .{
+        .textDocument = .{ .uri = override_uri },
+    });
+    _ = try client.pumpUntil(spec_uri, hasSpecCrossFileFindings);
+}
