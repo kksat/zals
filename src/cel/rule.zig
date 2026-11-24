@@ -49,6 +49,7 @@ pub const LoadError = struct {
     kind: LoadErrorKind,
     message: []const u8,
     pos: SourcePos,
+    end_pos: SourcePos,
 };
 
 pub const RuleMeta = struct {
@@ -221,16 +222,6 @@ pub const LoadResult = union(enum) {
     },
 };
 
-fn exprStartOffset(tree: cel.ast.Ast, idx: cel.ast.NodeIndex) usize {
-    const n = tree.node(idx);
-    var best: usize = n.start;
-    for (tree.children(idx)) |c| {
-        const child_start = exprStartOffset(tree, c);
-        if (child_start < best) best = child_start;
-    }
-    return best;
-}
-
 pub fn offsetToPos(source: []const u8, raw_offset: usize) SourcePos {
     const offset = @min(raw_offset, source.len);
     var line: u32 = 1;
@@ -253,10 +244,12 @@ fn failLoad(
     source: []const u8,
     kind: LoadErrorKind,
     offset: usize,
+    end_offset: ?usize,
     comptime fmt: []const u8,
     args: anytype,
 ) std.mem.Allocator.Error!LoadResult {
     const msg = try std.fmt.allocPrint(arena.allocator(), fmt, args);
+    const resolved_end = end_offset orelse offset + 1;
     return .{
         .err = .{
             .backing = backing,
@@ -265,6 +258,7 @@ fn failLoad(
                 .kind = kind,
                 .message = msg,
                 .pos = offsetToPos(source, offset),
+                .end_pos = offsetToPos(source, resolved_end),
             },
         },
     };
@@ -288,6 +282,7 @@ pub fn load(
             source,
             .source_too_large,
             0,
+            null,
             "rule source exceeds {d} bytes",
             .{limits.max_rule_source_bytes},
         );
@@ -302,7 +297,7 @@ pub fn load(
     const parsed = try cel.parser.parseSrc(a, owned_source, .{});
     const tree = switch (parsed) {
         .ok => |t| t,
-        .err => |e| return failLoad(backing, arena, owned_source, .parse_error, e.pos, "{s}", .{e.msg}),
+        .err => |e| return failLoad(backing, arena, owned_source, .parse_error, e.pos, null, "{s}", .{e.msg}),
     };
 
     if (tree.nodes.len > limits.max_ast_nodes) {
@@ -312,6 +307,7 @@ pub fn load(
             owned_source,
             .limit_exceeded,
             0,
+            null,
             "rule AST exceeds maximum node limit ({d})",
             .{limits.max_ast_nodes},
         );
@@ -325,6 +321,7 @@ pub fn load(
             owned_source,
             .invalid_declaration,
             root_node.start,
+            root_node.end,
             "top-level rule declaration must be zals.Rule{{ ... }}",
             .{},
         );
@@ -332,7 +329,7 @@ pub fn load(
 
     const pairs = tree.children(tree.root);
     if (pairs.len % 2 != 0) {
-        return failLoad(backing, arena, owned_source, .invalid_declaration, root_node.start, "malformed zals.Rule field list", .{});
+        return failLoad(backing, arena, owned_source, .invalid_declaration, root_node.start, root_node.end, "malformed zals.Rule field list", .{});
     }
 
     var id_opt: ?[]const u8 = null;
@@ -341,6 +338,7 @@ pub fn load(
     var severity_opt: ?Severity = null;
     var field_opt: ?[]const u8 = null;
     var field_pos: usize = 0;
+    var field_end: usize = 0;
     var schema_ver_seen = false;
     var schema_ver: i64 = schema.schema_version;
     var condition_root: ?cel.ast.NodeIndex = null;
@@ -353,72 +351,73 @@ pub fn load(
         const val_node = tree.node(val_idx);
 
         if (key_node.kind != .string or key_node.payload != .str) {
-            return failLoad(backing, arena, owned_source, .invalid_declaration, key_node.start, "expected field name identifier", .{});
+            return failLoad(backing, arena, owned_source, .invalid_declaration, key_node.start, key_node.end, "expected field name identifier", .{});
         }
         const field_name = key_node.payload.str;
 
         if (std.mem.eql(u8, field_name, "id")) {
-            if (id_opt != null) return failLoad(backing, arena, owned_source, .duplicate_field, key_node.start, "duplicate field 'id'", .{});
+            if (id_opt != null) return failLoad(backing, arena, owned_source, .duplicate_field, key_node.start, key_node.end, "duplicate field 'id'", .{});
             if (val_node.kind != .string or val_node.payload != .str) {
-                return failLoad(backing, arena, owned_source, .invalid_metadata, val_node.start, "'id' must be a string literal", .{});
+                return failLoad(backing, arena, owned_source, .invalid_metadata, val_node.start, val_node.end, "'id' must be a string literal", .{});
             }
             if (!schema.isValidRuleId(val_node.payload.str)) {
-                return failLoad(backing, arena, owned_source, .invalid_metadata, val_node.start, "invalid rule id '{s}'", .{val_node.payload.str});
+                return failLoad(backing, arena, owned_source, .invalid_metadata, val_node.start, val_node.end, "invalid rule id '{s}'", .{val_node.payload.str});
             }
             id_opt = val_node.payload.str;
         } else if (std.mem.eql(u8, field_name, "target")) {
-            if (targets_seen) return failLoad(backing, arena, owned_source, .duplicate_field, key_node.start, "duplicate field 'target'", .{});
+            if (targets_seen) return failLoad(backing, arena, owned_source, .duplicate_field, key_node.start, key_node.end, "duplicate field 'target'", .{});
             targets_seen = true;
             switch (val_node.kind) {
                 .string => {
                     const kind = TargetKind.parse(val_node.payload.str) orelse {
-                        return failLoad(backing, arena, owned_source, .invalid_target, val_node.start, "unknown target '{s}'", .{val_node.payload.str});
+                        return failLoad(backing, arena, owned_source, .invalid_target, val_node.start, val_node.end, "unknown target '{s}'", .{val_node.payload.str});
                     };
                     targets.add(kind);
                 },
                 .list => {
                     const elems = tree.children(val_idx);
                     if (elems.len == 0) {
-                        return failLoad(backing, arena, owned_source, .invalid_target, val_node.start, "'target' list must not be empty", .{});
+                        return failLoad(backing, arena, owned_source, .invalid_target, val_node.start, val_node.end, "'target' list must not be empty", .{});
                     }
                     for (elems) |elem_idx| {
                         const elem = tree.node(elem_idx);
                         if (elem.kind != .string or elem.payload != .str) {
-                            return failLoad(backing, arena, owned_source, .invalid_target, elem.start, "'target' list entries must be string literals", .{});
+                            return failLoad(backing, arena, owned_source, .invalid_target, elem.start, elem.end, "'target' list entries must be string literals", .{});
                         }
                         const kind = TargetKind.parse(elem.payload.str) orelse {
-                            return failLoad(backing, arena, owned_source, .invalid_target, elem.start, "unknown target '{s}'", .{elem.payload.str});
+                            return failLoad(backing, arena, owned_source, .invalid_target, elem.start, elem.end, "unknown target '{s}'", .{elem.payload.str});
                         };
                         if (targets.contains(kind)) {
-                            return failLoad(backing, arena, owned_source, .invalid_target, elem.start, "duplicate target '{s}'", .{elem.payload.str});
+                            return failLoad(backing, arena, owned_source, .invalid_target, elem.start, elem.end, "duplicate target '{s}'", .{elem.payload.str});
                         }
                         targets.add(kind);
                     }
                 },
                 else => {
-                    return failLoad(backing, arena, owned_source, .invalid_metadata, val_node.start, "'target' must be a string literal or list of string literals", .{});
+                    return failLoad(backing, arena, owned_source, .invalid_metadata, val_node.start, val_node.end, "'target' must be a string literal or list of string literals", .{});
                 },
             }
         } else if (std.mem.eql(u8, field_name, "severity")) {
-            if (severity_opt != null) return failLoad(backing, arena, owned_source, .duplicate_field, key_node.start, "duplicate field 'severity'", .{});
+            if (severity_opt != null) return failLoad(backing, arena, owned_source, .duplicate_field, key_node.start, key_node.end, "duplicate field 'severity'", .{});
             if (val_node.kind != .string or val_node.payload != .str) {
-                return failLoad(backing, arena, owned_source, .invalid_metadata, val_node.start, "'severity' must be a string literal", .{});
+                return failLoad(backing, arena, owned_source, .invalid_metadata, val_node.start, val_node.end, "'severity' must be a string literal", .{});
             }
             severity_opt = Severity.parse(val_node.payload.str) orelse {
-                return failLoad(backing, arena, owned_source, .invalid_metadata, val_node.start, "invalid severity '{s}'", .{val_node.payload.str});
+                return failLoad(backing, arena, owned_source, .invalid_metadata, val_node.start, val_node.end, "invalid severity '{s}'", .{val_node.payload.str});
             };
         } else if (std.mem.eql(u8, field_name, "field")) {
-            if (field_opt != null) return failLoad(backing, arena, owned_source, .duplicate_field, key_node.start, "duplicate field 'field'", .{});
+            if (field_opt != null) return failLoad(backing, arena, owned_source, .duplicate_field, key_node.start, key_node.end, "duplicate field 'field'", .{});
             if (val_node.kind != .string or val_node.payload != .str) {
-                return failLoad(backing, arena, owned_source, .invalid_metadata, val_node.start, "'field' must be a string literal", .{});
+                return failLoad(backing, arena, owned_source, .invalid_metadata, val_node.start, val_node.end, "'field' must be a string literal", .{});
             }
             field_opt = val_node.payload.str;
             field_pos = val_node.start;
+            field_end = val_node.end;
         } else if (std.mem.eql(u8, field_name, "schema_version")) {
-            if (schema_ver_seen) return failLoad(backing, arena, owned_source, .duplicate_field, key_node.start, "duplicate field 'schema_version'", .{});
+            if (schema_ver_seen) return failLoad(backing, arena, owned_source, .duplicate_field, key_node.start, key_node.end, "duplicate field 'schema_version'", .{});
             schema_ver_seen = true;
             if (val_node.kind != .int or val_node.payload != .int) {
-                return failLoad(backing, arena, owned_source, .invalid_metadata, val_node.start, "'schema_version' must be an int literal", .{});
+                return failLoad(backing, arena, owned_source, .invalid_metadata, val_node.start, val_node.end, "'schema_version' must be an int literal", .{});
             }
             if (val_node.payload.int != schema.schema_version) {
                 return failLoad(
@@ -427,27 +426,28 @@ pub fn load(
                     owned_source,
                     .unsupported_schema_version,
                     val_node.start,
+                    val_node.end,
                     "unsupported schema_version {d}; expected {d}",
                     .{ val_node.payload.int, schema.schema_version },
                 );
             }
             schema_ver = val_node.payload.int;
         } else if (std.mem.eql(u8, field_name, "condition")) {
-            if (condition_root != null) return failLoad(backing, arena, owned_source, .duplicate_field, key_node.start, "duplicate field 'condition'", .{});
+            if (condition_root != null) return failLoad(backing, arena, owned_source, .duplicate_field, key_node.start, key_node.end, "duplicate field 'condition'", .{});
             condition_root = val_idx;
         } else if (std.mem.eql(u8, field_name, "message")) {
-            if (message_root != null) return failLoad(backing, arena, owned_source, .duplicate_field, key_node.start, "duplicate field 'message'", .{});
+            if (message_root != null) return failLoad(backing, arena, owned_source, .duplicate_field, key_node.start, key_node.end, "duplicate field 'message'", .{});
             message_root = val_idx;
         } else {
-            return failLoad(backing, arena, owned_source, .unknown_field, key_node.start, "unknown zals.Rule field '{s}'", .{field_name});
+            return failLoad(backing, arena, owned_source, .unknown_field, key_node.start, key_node.end, "unknown zals.Rule field '{s}'", .{field_name});
         }
     }
 
-    const id = id_opt orelse return failLoad(backing, arena, owned_source, .missing_field, root_node.start, "missing required field 'id'", .{});
-    if (!targets_seen or targets.isEmpty()) return failLoad(backing, arena, owned_source, .missing_field, root_node.start, "missing required field 'target'", .{});
-    const severity = severity_opt orelse return failLoad(backing, arena, owned_source, .missing_field, root_node.start, "missing required field 'severity'", .{});
-    const cond_idx = condition_root orelse return failLoad(backing, arena, owned_source, .missing_field, root_node.start, "missing required field 'condition'", .{});
-    const msg_idx = message_root orelse return failLoad(backing, arena, owned_source, .missing_field, root_node.start, "missing required field 'message'", .{});
+    const id = id_opt orelse return failLoad(backing, arena, owned_source, .missing_field, root_node.start, root_node.end, "missing required field 'id'", .{});
+    if (!targets_seen or targets.isEmpty()) return failLoad(backing, arena, owned_source, .missing_field, root_node.start, root_node.end, "missing required field 'target'", .{});
+    const severity = severity_opt orelse return failLoad(backing, arena, owned_source, .missing_field, root_node.start, root_node.end, "missing required field 'severity'", .{});
+    const cond_idx = condition_root orelse return failLoad(backing, arena, owned_source, .missing_field, root_node.start, root_node.end, "missing required field 'condition'", .{});
+    const msg_idx = message_root orelse return failLoad(backing, arena, owned_source, .missing_field, root_node.start, root_node.end, "missing required field 'message'", .{});
 
     if (field_opt) |field_sel| {
         inline for (std.meta.fields(TargetKind)) |f| {
@@ -459,6 +459,7 @@ pub fn load(
                     owned_source,
                     .invalid_field_selector,
                     field_pos,
+                    field_end,
                     "invalid field selector '{s}' for target '{s}'",
                     .{ field_sel, tk.name() },
                 );
@@ -467,10 +468,10 @@ pub fn load(
     }
 
     if (lintStaticRootType(tree, cond_idx, .bool_)) |err_info| {
-        return failLoad(backing, arena, owned_source, err_info.kind, err_info.offset, "{s}", .{err_info.message});
+        return failLoad(backing, arena, owned_source, err_info.kind, err_info.offset, err_info.end, "{s}", .{err_info.message});
     }
     if (lintStaticRootType(tree, msg_idx, .string_)) |err_info| {
-        return failLoad(backing, arena, owned_source, err_info.kind, err_info.offset, "{s}", .{err_info.message});
+        return failLoad(backing, arena, owned_source, err_info.kind, err_info.offset, err_info.end, "{s}", .{err_info.message});
     }
 
     var scopes = std.ArrayList([]const u8).empty;
@@ -482,10 +483,10 @@ pub fn load(
         .scopes = &scopes,
     };
     if (try linter.checkExpr(cond_idx, 0, 0)) |err_info| {
-        return failLoad(backing, arena, owned_source, err_info.kind, err_info.offset, "{s}", .{err_info.message});
+        return failLoad(backing, arena, owned_source, err_info.kind, err_info.offset, err_info.end, "{s}", .{err_info.message});
     }
     if (try linter.checkExpr(msg_idx, 0, 0)) |err_info| {
-        return failLoad(backing, arena, owned_source, err_info.kind, err_info.offset, "{s}", .{err_info.message});
+        return failLoad(backing, arena, owned_source, err_info.kind, err_info.offset, err_info.end, "{s}", .{err_info.message});
     }
 
     const cond_tree = cel.ast.Ast{
@@ -501,11 +502,11 @@ pub fn load(
 
     const cond_prog = cel.vm.Compiler.compile(a, cond_tree, .{}) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
-        error.Compile => return failLoad(backing, arena, owned_source, .compile_error, exprStartOffset(tree, cond_idx), "failed to compile condition expression", .{}),
+        error.Compile => return failLoad(backing, arena, owned_source, .compile_error, tree.node(cond_idx).start, tree.node(cond_idx).end, "failed to compile condition expression", .{}),
     };
     const msg_prog = cel.vm.Compiler.compile(a, msg_tree, .{}) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
-        error.Compile => return failLoad(backing, arena, owned_source, .compile_error, exprStartOffset(tree, msg_idx), "failed to compile message expression", .{}),
+        error.Compile => return failLoad(backing, arena, owned_source, .compile_error, tree.node(msg_idx).start, tree.node(msg_idx).end, "failed to compile message expression", .{}),
     };
 
     return .{
@@ -520,8 +521,8 @@ pub fn load(
                 .field = field_opt,
                 .schema_version = schema_ver,
                 .origin = owned_origin,
-                .condition_pos = offsetToPos(owned_source, exprStartOffset(tree, cond_idx)),
-                .message_pos = offsetToPos(owned_source, exprStartOffset(tree, msg_idx)),
+                .condition_pos = offsetToPos(owned_source, tree.node(cond_idx).start),
+                .message_pos = offsetToPos(owned_source, tree.node(msg_idx).start),
             },
             .tree = tree,
             .condition_root = cond_idx,
@@ -535,6 +536,7 @@ pub fn load(
 const LintErr = struct {
     kind: LoadErrorKind,
     offset: usize,
+    end: usize,
     message: []const u8,
 };
 
@@ -552,6 +554,7 @@ fn lintStaticRootType(tree: cel.ast.Ast, idx: cel.ast.NodeIndex, expected: Expec
             return .{
                 .kind = .type_mismatch,
                 .offset = n.start,
+                .end = n.end,
                 .message = "condition literal must be a bool",
             };
         },
@@ -559,6 +562,7 @@ fn lintStaticRootType(tree: cel.ast.Ast, idx: cel.ast.NodeIndex, expected: Expec
             return .{
                 .kind = .type_mismatch,
                 .offset = n.start,
+                .end = n.end,
                 .message = "message literal must be a string",
             };
         },
@@ -589,6 +593,7 @@ const AstLinter = struct {
             return .{
                 .kind = .limit_exceeded,
                 .offset = n.start,
+                .end = n.end,
                 .message = "expression nesting exceeds maximum allowed depth",
             };
         }
@@ -599,6 +604,7 @@ const AstLinter = struct {
                 return .{
                     .kind = .unsupported_expression,
                     .offset = n.start,
+                    .end = n.end,
                     .message = "message/struct construction is not supported inside rule expressions",
                 };
             },
@@ -611,6 +617,7 @@ const AstLinter = struct {
                 return .{
                     .kind = .unbound_identifier,
                     .offset = n.start,
+                    .end = n.end,
                     .message = msg,
                 };
             },
@@ -629,6 +636,7 @@ const AstLinter = struct {
                     return .{
                         .kind = .unknown_function,
                         .offset = n.start,
+                        .end = n.end,
                         .message = msg,
                     };
                 }
@@ -641,6 +649,7 @@ const AstLinter = struct {
                             return .{
                                 .kind = .limit_exceeded,
                                 .offset = pat_node.start,
+                                .end = pat_node.end,
                                 .message = "regex pattern exceeds maximum allowed length",
                             };
                         }
@@ -649,11 +658,13 @@ const AstLinter = struct {
                             error.InvalidPattern => return .{
                                 .kind = .invalid_regex,
                                 .offset = pat_node.start,
+                                .end = pat_node.end,
                                 .message = "invalid regular expression pattern",
                             },
                             error.TooComplex => return .{
                                 .kind = .limit_exceeded,
                                 .offset = pat_node.start,
+                                .end = pat_node.end,
                                 .message = "regular expression exceeds complexity limit",
                             },
                         };
@@ -677,6 +688,7 @@ const AstLinter = struct {
                     return .{
                         .kind = .limit_exceeded,
                         .offset = n.start,
+                        .end = n.end,
                         .message = "comprehension nesting exceeds maximum allowed depth",
                     };
                 }
@@ -685,6 +697,7 @@ const AstLinter = struct {
                     return .{
                         .kind = .unsupported_expression,
                         .offset = n.start,
+                        .end = n.end,
                         .message = "malformed comprehension macro",
                     };
                 }
@@ -806,6 +819,8 @@ test "load rejects unbound identifier with accurate cel line and column" {
             try std.testing.expectEqual(LoadErrorKind.unbound_identifier, e.info.kind);
             try std.testing.expectEqual(@as(u32, 5), e.info.pos.line);
             try std.testing.expectEqual(@as(u32, 14), e.info.pos.column);
+            try std.testing.expectEqual(@as(u32, 5), e.info.end_pos.line);
+            try std.testing.expectEqual(@as(u32, 23), e.info.end_pos.column);
         },
     }
 }
@@ -1083,4 +1098,32 @@ test "requested cancellation aborts evaluation as cancelled outcome" {
     cancel.request();
     const out = try rule.evaluate(a, &bindings, &cancel);
     try std.testing.expect(out == .cancelled);
+}
+
+test "load errors carry native end offsets for metadata fields" {
+    const src =
+        \\zals.Rule{
+        \\  id: "test/end-pos",
+        \\  target: "task",
+        \\  severity: "warning",
+        \\  condition: true,
+        \\  message: "m",
+        \\  extra: 42
+        \\}
+    ;
+    var res = try load(std.testing.allocator, src, .{ .kind = .global_file, .file_path = "end.cel" });
+    switch (res) {
+        .ok => |*r| {
+            r.deinit();
+            return error.TestUnexpectedResult;
+        },
+        .err => |*e| {
+            defer e.deinit();
+            try std.testing.expectEqual(LoadErrorKind.unknown_field, e.info.kind);
+            try std.testing.expectEqual(@as(u32, 7), e.info.pos.line);
+            try std.testing.expectEqual(@as(u32, 3), e.info.pos.column);
+            try std.testing.expectEqual(@as(u32, 7), e.info.end_pos.line);
+            try std.testing.expectEqual(@as(u32, 8), e.info.end_pos.column);
+        },
+    }
 }
