@@ -1,0 +1,12 @@
+zals.Rule{
+  id: "only-builtins",
+  target: "task",
+  severity: "warning",
+  field: "action",
+  condition: !node.is_block &&
+    node.raw_action != "" &&
+    !(node.action_namespace in ["", "ansible.builtin", "ansible.legacy"]) &&
+    !("allow_list" in options && node.raw_action in options.allow_list) &&
+    !("allow_collections" in options && node.action_namespace in options.allow_collections),
+  message: "Use only builtin actions; '" + node.raw_action + "' is from a non-builtin collection."
+}

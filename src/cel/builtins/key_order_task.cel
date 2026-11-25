@@ -1,0 +1,11 @@
+zals.Rule{
+  id: "key-order[task]",
+  target: "task",
+  severity: "warning",
+  condition: size(node.keys) > 1 && (
+    ("name" in node.keys && node.keys[0] != "name") ||
+    ("always" in node.keys && node.keys[size(node.keys) - 1] != "always") ||
+    ("rescue" in node.keys && !("always" in node.keys) && node.keys[size(node.keys) - 1] != "rescue")
+  ),
+  message: "Ensure task keys follow canonical order ('name' first; 'block'/'rescue'/'always' last)."
+}

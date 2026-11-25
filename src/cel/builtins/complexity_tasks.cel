@@ -1,0 +1,7 @@
+zals.Rule{
+  id: "complexity[tasks]",
+  target: "play",
+  severity: "warning",
+  condition: node.task_count > ("max_tasks" in options ? options.max_tasks : 50),
+  message: "Play has " + string(node.task_count) + " tasks, exceeding the maximum allowed."
+}

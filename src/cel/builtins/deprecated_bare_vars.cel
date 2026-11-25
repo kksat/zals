@@ -1,0 +1,18 @@
+zals.Rule{
+  id: "deprecated-bare-vars",
+  target: "task",
+  severity: "warning",
+  condition: node.loop_key.startsWith("with_") &&
+    !(node.loop_key in [
+      "with_fileglob", "with_file", "with_first_found", "with_lines",
+      "with_pipe", "with_ini", "with_env", "with_sequence",
+      "with_random_choice", "with_inventory_hostnames"
+    ]) &&
+    node.loop != null &&
+    node.loop.kind == "string" &&
+    !node.loop.is_templated &&
+    node.loop.value != "" &&
+    !node.loop.value.contains("/") &&
+    !node.loop.value.contains("*"),
+  message: "Using bare variables in '" + node.loop_key + "' is deprecated; wrap variable names in '{{ ... }}'."
+}

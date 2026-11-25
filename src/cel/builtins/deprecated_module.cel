@@ -1,0 +1,25 @@
+zals.Rule{
+  id: "deprecated-module",
+  target: "task",
+  severity: "warning",
+  field: "action",
+  condition: !node.is_block && node.short_action in [
+    "accelerate", "aos_asn_pool", "aos_blueprint", "aos_blueprint_param",
+    "aos_blueprint_virtnet", "aos_device", "aos_external_router",
+    "aos_ip_pool", "aos_logical_device", "aos_logical_device_map",
+    "aos_login", "aos_rack_type", "aos_template", "azure", "cl_bond",
+    "cl_bridge", "cl_img_install", "cl_interface", "cl_interface_policy",
+    "cl_license", "cl_ports", "cs_nic", "docker", "docker_service",
+    "ec2", "ec2_ami_find", "ec2_ami_search", "ec2_asg_facts", "ec2_elb_facts",
+    "ec2_lc_facts", "ec2_remote_facts", "ec2_vpc_igw_facts",
+    "ec2_vpc_nat_gateway_facts", "ec2_vpc_net_facts",
+    "ec2_vpc_route_table_facts", "ec2_vpc_subnet_facts", "eos_template",
+    "gcdns_record", "gcdns_zone", "gce", "gce_eip", "gce_img",
+    "gce_instance_template", "gce_lb", "gce_mig", "gce_net", "gce_pd",
+    "gce_snapshot", "gce_tag", "include", "ios_template", "iosxr_template",
+    "junos_template", "nxos_template", "oc", "ops_template",
+    "panos_nat_policy", "panos_security_policy", "s3", "s3_bucket",
+    "vmware_guest_facts", "vsphere_guest", "vyos_template", "win_msi"
+  ],
+  message: "Deprecated module '" + node.raw_action + "'."
+}

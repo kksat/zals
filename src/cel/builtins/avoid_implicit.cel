@@ -1,0 +1,10 @@
+zals.Rule{
+  id: "avoid-implicit",
+  target: "task",
+  severity: "warning",
+  field: "content",
+  condition: node.short_action == "copy" &&
+    "content" in node.args &&
+    !(node.args.content.kind in ["string", "template", "null"]),
+  message: "Avoid implicit behaviors in copy content; pass a string value."
+}

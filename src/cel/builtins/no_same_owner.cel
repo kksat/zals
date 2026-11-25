@@ -1,0 +1,26 @@
+zals.Rule{
+  id: "no-same-owner",
+  target: "task",
+  severity: "warning",
+  field: "action",
+  condition: (
+      node.short_action in ["synchronize", "ansible.posix.synchronize"] &&
+      (!node.has_delegate_to || (node.delegate_to != null && node.delegate_to.kind == "string" && node.delegate_to.value == "localhost")) &&
+      !("owner" in node.args && node.args.owner.kind == "bool" && !node.args.owner.value) &&
+      !("group" in node.args && node.args.group.kind == "bool" && !node.args.group.value) &&
+      !("archive" in node.args && node.args.archive.kind == "bool" && !node.args.archive.value)
+    ) || (
+      node.short_action == "unarchive" &&
+      "src" in node.args &&
+      node.args.src.kind == "string" &&
+      (node.args.src.value.endsWith(".tar") ||
+       node.args.src.value.endsWith(".tar.gz") ||
+       node.args.src.value.endsWith(".tgz") ||
+       node.args.src.value.endsWith(".tar.bz2") ||
+       node.args.src.value.endsWith(".tar.xz")) &&
+      !("extra_opts" in node.args &&
+        node.args.extra_opts.kind == "list" &&
+        node.args.extra_opts.value.exists(o, type(o) == string && o.contains("--no-same-owner")))
+    ),
+  message: "Do not preserve the archive/source file owner when synchronizing or unarchiving."
+}

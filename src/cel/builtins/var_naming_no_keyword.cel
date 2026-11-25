@@ -1,0 +1,15 @@
+zals.Rule{
+  id: "var-naming[no-keyword]",
+  target: "var_def",
+  severity: "error",
+  condition: node.key_kind == "string" &&
+    !node.is_templated &&
+    node.name in [
+      "False", "None", "True", "and", "as", "assert", "async", "await",
+      "break", "class", "continue", "def", "del", "elif", "else", "except",
+      "finally", "for", "from", "global", "if", "import", "in", "is",
+      "lambda", "nonlocal", "not", "or", "pass", "raise", "return", "try",
+      "while", "with", "yield"
+    ],
+  message: "Variable name '" + node.name + "' cannot be a Python keyword."
+}

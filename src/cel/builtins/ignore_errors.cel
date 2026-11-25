@@ -1,0 +1,13 @@
+zals.Rule{
+  id: "ignore-errors",
+  target: "task",
+  severity: "warning",
+  field: "ignore_errors",
+  condition: node.has_ignore_errors &&
+    node.ignore_errors != null &&
+    node.ignore_errors.kind == "bool" &&
+    node.ignore_errors.value &&
+    !node.has_register &&
+    !node.when.exists(w, (w.kind == "string" || w.kind == "template") && w.value == "ansible_check_mode"),
+  message: "Use 'failed_when' and specify error conditions instead of using 'ignore_errors: true'."
+}

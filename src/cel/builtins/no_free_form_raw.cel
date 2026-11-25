@@ -1,0 +1,10 @@
+zals.Rule{
+  id: "no-free-form[raw]",
+  target: "task",
+  severity: "warning",
+  field: "action",
+  condition: node.short_action == "raw" &&
+    node.is_free_form &&
+    node.free_form_text.matches("(^|\\s)[A-Za-z_][A-Za-z0-9_]*="),
+  message: "Avoid passing key=value options in raw free-form syntax."
+}

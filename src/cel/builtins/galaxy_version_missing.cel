@@ -1,0 +1,11 @@
+zals.Rule{
+  id: "galaxy[version-missing]",
+  target: "galaxy_meta",
+  severity: "warning",
+  field: "version",
+  condition: !node.has_version ||
+    node.version == null ||
+    node.version.kind == "null" ||
+    (node.version.kind == "string" && node.version.value == ""),
+  message: "galaxy.yml should contain a 'version' key."
+}

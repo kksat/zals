@@ -1,0 +1,12 @@
+zals.Rule{
+  id: "run-once[task]",
+  target: "task",
+  severity: "warning",
+  field: "run_once",
+  condition: node.has_run_once &&
+    node.run_once != null &&
+    node.run_once.kind == "bool" &&
+    node.run_once.value &&
+    (node.play_strategy == "free" || document.kind == "tasks" || document.kind == "handlers"),
+  message: "Using 'run_once' with the 'free' strategy or outside a known linear play may behave unexpectedly."
+}

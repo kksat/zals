@@ -1,0 +1,9 @@
+zals.Rule{
+  id: "playbook-extension",
+  target: "document",
+  severity: "warning",
+  condition: document.kind == "playbook" &&
+    document.extension != ".yml" &&
+    document.extension != ".yaml",
+  message: "Playbooks should have the '.yml' or '.yaml' extension."
+}

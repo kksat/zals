@@ -1,0 +1,13 @@
+zals.Rule{
+  id: "key-order[play]",
+  target: "play",
+  severity: "warning",
+  condition: size(node.keys) > 1 && (
+    ("name" in node.keys && node.keys[0] != "name") ||
+    ("hosts" in node.keys &&
+      node.keys[0] != "hosts" &&
+      !(node.keys[0] == "name" && node.keys[1] == "hosts")) ||
+    ("handlers" in node.keys && node.keys[size(node.keys) - 1] != "handlers")
+  ),
+  message: "Ensure play keys follow canonical order ('name', 'hosts', ..., 'handlers')."
+}

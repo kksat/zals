@@ -1,0 +1,10 @@
+zals.Rule{
+  id: "no-handler",
+  target: "task",
+  severity: "warning",
+  field: "when",
+  condition: !node.in_handlers &&
+    node.when.exists(w, (w.kind == "string" || w.kind == "template") &&
+      (w.value.matches("\\.changed\\b") || w.value.matches("\\bis\\s+changed\\b"))),
+  message: "Tasks that run when changed should likely be handlers."
+}

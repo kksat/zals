@@ -1,0 +1,15 @@
+zals.Rule{
+  id: "no-free-form",
+  target: "task",
+  severity: "warning",
+  field: "action",
+  condition: !node.is_block &&
+    node.is_free_form &&
+    !(node.short_action in [
+      "command", "shell", "raw", "script", "meta",
+      "include_tasks", "import_tasks", "include_role", "import_role",
+      "include_vars", "import_playbook", "include",
+      "win_command", "win_shell", "win_raw", "win_script"
+    ]),
+  message: "Avoid using free-form syntax when calling '" + node.raw_action + "'."
+}

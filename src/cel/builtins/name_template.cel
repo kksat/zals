@@ -1,0 +1,11 @@
+zals.Rule{
+  id: "name[template]",
+  target: "task",
+  severity: "warning",
+  field: "name",
+  condition: node.has_name &&
+    node.name != null &&
+    node.name.is_templated &&
+    (node.name_text.matches("^\\s*\\{\\{") || node.name_text.matches("\\{\\{.*\\}\\}.+")),
+  message: "Jinja templates should only be at the end of a task 'name'."
+}

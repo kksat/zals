@@ -1,0 +1,11 @@
+zals.Rule{
+  id: "galaxy[no-repository]",
+  target: "galaxy_meta",
+  severity: "warning",
+  field: "repository",
+  condition: !node.has_repository ||
+    node.repository == null ||
+    node.repository.kind != "string" ||
+    node.repository.value == "",
+  message: "galaxy.yml should define a 'repository' URL."
+}

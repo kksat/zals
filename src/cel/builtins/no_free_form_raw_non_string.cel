@@ -1,0 +1,9 @@
+zals.Rule{
+  id: "no-free-form[raw-non-string]",
+  target: "task",
+  severity: "error",
+  field: "action",
+  condition: node.short_action == "raw" &&
+    !(node.module_val_kind in ["string", "template", "null"]),
+  message: "Pass a string value to 'raw' instead of a non-string argument."
+}

@@ -1,0 +1,16 @@
+zals.Rule{
+  id: "risky-shell-pipe",
+  target: "task",
+  severity: "warning",
+  field: "action",
+  condition: node.short_action == "shell" &&
+    node.command.has_pipe &&
+    !node.command.has_pipefail &&
+    !(node.has_ignore_errors && node.ignore_errors != null && node.ignore_errors.kind == "bool" && node.ignore_errors.value) &&
+    !("executable" in node.args && node.args.executable.kind == "string" &&
+      (node.args.executable.value.endsWith("csh") ||
+       node.args.executable.value.endsWith("fish") ||
+       node.args.executable.value.endsWith("pwsh") ||
+       node.args.executable.value.endsWith("powershell"))),
+  message: "Shells that use pipes should set the pipefail option."
+}

@@ -1,0 +1,12 @@
+zals.Rule{
+  id: "meta-incorrect",
+  target: "role_meta",
+  severity: "warning",
+  condition: node.has_galaxy_info && (
+    (node.author != null && node.author.kind == "string" && node.author.value in ["your name", ""]) ||
+    (node.description != null && node.description.kind == "string" && node.description.value in ["your role description", "your description", ""]) ||
+    (node.company != null && node.company.kind == "string" && node.company.value in ["your company (optional)", "your_company"]) ||
+    (node.license != null && node.license.kind == "string" && node.license.value in ["license (GPLv2, CC-BY, etc)", "license (GPL-2.0-or-later, MIT, etc)", ""])
+  ),
+  message: "Role meta/main.yml contains default placeholder metadata."
+}

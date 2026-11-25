@@ -1,0 +1,8 @@
+zals.Rule{
+  id: "fqcn[keyword]",
+  target: "play",
+  severity: "warning",
+  field: "import_playbook",
+  condition: node.is_import_playbook && node.import_playbook_key == "import_playbook",
+  message: "Use FQCN 'ansible.builtin.import_playbook' instead of 'import_playbook'."
+}

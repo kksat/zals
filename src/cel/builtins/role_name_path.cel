@@ -1,0 +1,7 @@
+zals.Rule{
+  id: "role-name[path]",
+  target: "role_ref",
+  severity: "warning",
+  condition: !node.is_templated && (node.name.contains("/") || node.name.contains("\\")),
+  message: "Avoid using paths when importing or including roles: '" + node.name + "'."
+}
