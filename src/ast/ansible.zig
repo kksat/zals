@@ -117,6 +117,14 @@ pub const Play = struct {
     collections: []const []const u8 = &.{},
     handler_names: []const []const u8 = &.{},
     var_names: []const []const u8 = &.{},
+    has_collections: bool = false,
+    collections_val_kind: []const u8 = "",
+    has_vars: bool = false,
+    vars_val_kind: []const u8 = "",
+    has_connection: bool = false,
+    connection: ?TypedValue = null,
+    has_debugger: bool = false,
+    debugger: ?TypedValue = null,
 
     pub fn toPlayContextCel(play_opt: ?*const Play, alloc: Allocator) !cel_env.Value {
         var b = cel_env.MapBuilder.init();
@@ -184,6 +192,14 @@ pub const Play = struct {
         try b.putInt(alloc, "task_count", @intCast(self.task_count));
         try b.putBool(alloc, "is_import_playbook", self.is_import_playbook);
         try b.putString(alloc, "import_playbook_key", self.import_playbook_key);
+        try b.putBool(alloc, "has_collections", self.has_collections);
+        try b.putString(alloc, "collections_val_kind", self.collections_val_kind);
+        try b.putBool(alloc, "has_vars", self.has_vars);
+        try b.putString(alloc, "vars_val_kind", self.vars_val_kind);
+        try b.putBool(alloc, "has_connection", self.has_connection);
+        try putOptTyped(&b, alloc, "connection", self.connection);
+        try b.putBool(alloc, "has_debugger", self.has_debugger);
+        try putOptTyped(&b, alloc, "debugger", self.debugger);
         return b.finish(alloc);
     }
 };
@@ -232,6 +248,10 @@ pub const Task = struct {
     has_poll: bool = false,
     poll_val: ?TypedValue = null,
     has_local_action: bool = false,
+    has_vars: bool = false,
+    vars_val_kind: []const u8 = "",
+    has_debugger: bool = false,
+    debugger: ?TypedValue = null,
     loop_key: []const u8 = "",
     loop_val: ?TypedValue = null,
     in_handlers: bool = false,
@@ -319,6 +339,10 @@ pub const Task = struct {
         try b.putBool(alloc, "has_poll", self.has_poll);
         try putOptTyped(&b, alloc, "poll", self.poll_val);
         try b.putBool(alloc, "has_local_action", self.has_local_action);
+        try b.putBool(alloc, "has_vars", self.has_vars);
+        try b.putString(alloc, "vars_val_kind", self.vars_val_kind);
+        try b.putBool(alloc, "has_debugger", self.has_debugger);
+        try putOptTyped(&b, alloc, "debugger", self.debugger);
         try b.putString(alloc, "loop_key", self.loop_key);
         try putOptTyped(&b, alloc, "loop", self.loop_val);
         try b.putBool(alloc, "in_handlers", self.in_handlers);
@@ -930,6 +954,9 @@ const AstBuilder = struct {
             } else if (std.mem.eql(u8, kname, "become_user")) {
                 play.has_become_user = true;
             } else if (std.mem.eql(u8, kname, "collections")) {
+                play.has_collections = true;
+                const cv_typed = try value_mod.fromYaml(self.alloc, pair.val);
+                play.collections_val_kind = cv_typed.kind.name();
                 if (pair.val) |cv| {
                     if (cv.kind == .seq) {
                         for (cv.items) |entry| {
@@ -941,6 +968,12 @@ const AstBuilder = struct {
                         }
                     }
                 }
+            } else if (std.mem.eql(u8, kname, "connection")) {
+                play.has_connection = true;
+                play.connection = try value_mod.fromYaml(self.alloc, pair.val);
+            } else if (std.mem.eql(u8, kname, "debugger")) {
+                play.has_debugger = true;
+                play.debugger = try value_mod.fromYaml(self.alloc, pair.val);
             } else if (std.mem.eql(u8, kname, "vars_prompt")) {
                 play.has_vars_prompt = true;
                 if (pair.val) |vp| {
@@ -958,6 +991,9 @@ const AstBuilder = struct {
                 play.has_run_once = true;
                 play.run_once = try value_mod.fromYaml(self.alloc, pair.val);
             } else if (std.mem.eql(u8, kname, "vars")) {
+                play.has_vars = true;
+                const vars_typed = try value_mod.fromYaml(self.alloc, pair.val);
+                play.vars_val_kind = vars_typed.kind.name();
                 if (pair.val) |v| {
                     if (v.kind == .map) {
                         for (v.items) |vp| {
@@ -1213,6 +1249,9 @@ const AstBuilder = struct {
                 task.poll_val = try value_mod.fromYaml(self.alloc, pair.val);
             } else if (std.mem.eql(u8, kname, "local_action")) {
                 task.has_local_action = true;
+            } else if (std.mem.eql(u8, kname, "debugger")) {
+                task.has_debugger = true;
+                task.debugger = try value_mod.fromYaml(self.alloc, pair.val);
             } else if (std.mem.eql(u8, kname, "loop") or std.mem.startsWith(u8, kname, "with_")) {
                 task.loop_key = kname;
                 task.loop_val = try value_mod.fromYaml(self.alloc, pair.val);
@@ -1222,6 +1261,9 @@ const AstBuilder = struct {
                 const tv = try value_mod.fromYaml(self.alloc, pair.val);
                 task.args_val_kind = tv.kind;
             } else if (std.mem.eql(u8, kname, "vars")) {
+                task.has_vars = true;
+                const vars_typed = try value_mod.fromYaml(self.alloc, pair.val);
+                task.vars_val_kind = vars_typed.kind.name();
                 if (pair.val) |v| {
                     if (v.kind == .map) try self.collectMapVarDefs(v, "task_vars", play_index, block_ctx);
                 }
@@ -2301,4 +2343,52 @@ test "unfinished quote triggers bounded recovery with parse issue" {
     defer doc.deinit();
     try std.testing.expect(doc.parse_issues.len >= 1);
     try std.testing.expectEqual(IssueKind.yaml_syntax, doc.parse_issues[0].kind);
+}
+
+test "plays and tasks lower vars, debugger, connection, and collections value kinds" {
+    const src =
+        \\- hosts: all
+        \\  collections: community.general
+        \\  connection: local
+        \\  debugger: always
+        \\  vars:
+        \\    - shared: 1
+        \\  tasks:
+        \\    - name: obsolete static include
+        \\      ansible.builtin.include_tasks: more.yml
+        \\      static: true
+        \\      debugger: true
+        \\      vars:
+        \\        - local: 2
+        \\
+    ;
+    var doc = try build(std.testing.allocator, "/ws/site.yml", "site.yml", src);
+    defer doc.deinit();
+
+    try std.testing.expectEqual(@as(usize, 1), doc.plays.len);
+    const play = doc.plays[0];
+    try std.testing.expect(play.has_collections);
+    try std.testing.expectEqualStrings("string", play.collections_val_kind);
+    try std.testing.expect(play.has_vars);
+    try std.testing.expectEqualStrings("list", play.vars_val_kind);
+    try std.testing.expect(play.has_connection);
+    try std.testing.expectEqualStrings("local", play.connection.?.str_v);
+    try std.testing.expect(play.has_debugger);
+    try std.testing.expectEqualStrings("always", play.debugger.?.str_v);
+
+    try std.testing.expectEqual(@as(usize, 1), doc.tasks.len);
+    const task = doc.tasks[0];
+    try std.testing.expect(std.mem.eql(u8, task.raw_action, "ansible.builtin.include_tasks"));
+    try std.testing.expect(hasKey(task.keys, "static"));
+    try std.testing.expect(task.has_debugger);
+    try std.testing.expect(task.debugger.?.kind == .bool_val);
+    try std.testing.expect(task.has_vars);
+    try std.testing.expectEqualStrings("list", task.vars_val_kind);
+}
+
+fn hasKey(keys: []const []const u8, want: []const u8) bool {
+    for (keys) |k| {
+        if (std.mem.eql(u8, k, want)) return true;
+    }
+    return false;
 }
