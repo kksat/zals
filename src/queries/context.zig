@@ -33,6 +33,8 @@ const variables = @import("../variables/root.zig");
 const roles = @import("../roles/root.zig");
 const paths = @import("../paths.zig");
 const project_config = @import("../services/project_config.zig");
+const navigation_cache = @import("cache.zig");
+pub const Cache = navigation_cache.Cache;
 const AnsibleConfig = @import("../services/ansible_config.zig").AnsibleConfig;
 const DocsLibrary = @import("../services/docs.zig").DocsLibrary;
 const ContextLibraries = @import("../services/docs_service.zig").ContextLibraries;
@@ -67,6 +69,7 @@ pub const Session = struct {
     docs: Docs,
     /// The client's position encoding.
     encoding: document_mod.PositionEncoding = .utf16,
+    cache: ?*Cache = null,
 };
 
 /// Which files a search runs over (ADR-0032).
@@ -97,6 +100,7 @@ pub const FileSet = struct {
     /// depend on the referencing file.
     reach: ?view.Reachability = null,
     collections: ?[]const WorkspaceCollection = null,
+    store: Allocator,
 
     pub fn isLoaded(self: *const FileSet, path: []const u8) bool {
         return self.loaded.contains(path);
@@ -148,6 +152,7 @@ pub const Context = struct {
     /// navigation request goes through here, so path-form rules (for
     /// example symlinked roots) apply in one place.
     pub fn pathOf(self: *const Context, uri: []const u8) ![]const u8 {
+        if (self.session.cache) |cache| return cache.pathOf(uri);
         const path = try paths.uriToPath(self.allocator, uri);
         defer self.allocator.free(path);
         return workspace_session.resolvedPath(self.allocator, path);
@@ -198,107 +203,144 @@ pub const Context = struct {
             .file => |path| try std.fmt.allocPrint(a, "f:{s}", .{path}),
         };
         if (self.sets.get(key)) |found| return found;
+        if (self.session.cache) |cache| {
+            if (try cache.lookupSet(key)) |found| {
+                try self.sets.put(key, found);
+                return found;
+            }
+            if (self.cacheableScope(scope)) {
+                try cache.beginSetBuild();
+                errdefer cache.dropSetBuild();
+                const sa = cache.setAllocator();
+                const found = try sa.create(FileSet);
+                found.* = try self.buildSet(sa, scope);
+                try cache.storeSet(key, found);
+                try self.sets.put(key, found);
+                return found;
+            }
+        }
         const found = try a.create(FileSet);
-        found.* = switch (scope) {
-            .workspace => |root| try self.workspaceSet(root),
-            .role => |dir| try self.roleSet(dir),
-            .file => |path| try self.fileSet(path),
-        };
+        found.* = try self.buildSet(a, scope);
         try self.sets.put(key, found);
         return found;
     }
 
+    fn buildSet(self: *Context, sa: Allocator, scope: Scope) !FileSet {
+        return switch (scope) {
+            .workspace => |root| try self.workspaceSet(sa, root),
+            .role => |dir| try self.roleSet(sa, dir),
+            .file => |path| try self.fileSet(sa, path),
+        };
+    }
+
+    fn cacheableScope(self: *Context, scope: Scope) bool {
+        return switch (scope) {
+            .workspace, .file => true,
+            .role => |dir| blk: {
+                const probe = std.fs.path.join(self.allocator, &.{ dir, "tasks", "main.yml" }) catch break :blk false;
+                defer self.allocator.free(probe);
+                break :blk self.workspaceRoot(probe) != null;
+            },
+        };
+    }
+
     /// Every file of the Workspace, with every load target promoted.
-    fn workspaceSet(self: *Context, root: []const u8) !FileSet {
-        const a = self.allocator;
-        const all = try self.overlay(root, null);
-        var loaded = std.StringHashMap(void).init(a);
+    fn workspaceSet(self: *Context, sa: Allocator, root: []const u8) !FileSet {
+        const all = try self.overlay(sa, root, null);
+        var loaded = std.StringHashMap(void).init(sa);
         for (all) |f| {
             for (f.facts.var_loads) |load| try loaded.put(load.path, {});
         }
         for (all) |*f| {
-            if (loaded.contains(f.path)) f.facts = try f.facts.loaded(a);
+            if (loaded.contains(f.path)) f.facts = try f.facts.loaded(sa);
         }
-        return .{ .scope = .{ .workspace = root }, .root = root, .files = all, .loaded = loaded };
+        const owned = try sa.dupe(u8, root);
+        return .{ .scope = .{ .workspace = owned }, .root = owned, .files = all, .loaded = loaded, .store = sa };
     }
 
     /// A Role's conventional sources: the Workspace's, when it has indexed or
     /// opened any, else those on disk.
-    fn roleSet(self: *Context, dir: []const u8) !FileSet {
-        const a = self.allocator;
-        const root = self.workspaceRoot(try std.fs.path.join(a, &.{ dir, "tasks", "main.yml" }));
-        var base = std.array_list.Managed(File).init(a);
-        if (root) |r| for (try self.overlay(r, dir)) |f| {
+    fn roleSet(self: *Context, sa: Allocator, dir: []const u8) !FileSet {
+        const root = self.workspaceRoot(try std.fs.path.join(self.allocator, &.{ dir, "tasks", "main.yml" }));
+        var base = std.array_list.Managed(File).init(sa);
+        if (root) |r| for (try self.overlay(sa, r, dir)) |f| {
             if (view.isCalleeSource(f.path, dir)) try base.append(f);
         };
         if (base.items.len == 0) {
-            for (try variables.scope.enumerateFiles(a, self.source(), dir)) |path| {
-                if (try self.extracted(root, path, try paths.pathToUri(a, path))) |f| try base.append(f);
+            for (try variables.scope.enumerateFiles(sa, self.source(), dir)) |path| {
+                if (try self.extracted(sa, root, path, try paths.pathToUri(sa, path))) |f| try base.append(f);
             }
             std.mem.sort(File, base.items, {}, lessPath);
         }
-        return self.withLoads(.{ .role = dir }, root, &base);
+        const owned = try sa.dupe(u8, dir);
+        return self.withLoads(sa, .{ .role = owned }, root, &base);
     }
 
     /// One file, its open document winning.
-    fn fileSet(self: *Context, path: []const u8) !FileSet {
-        const a = self.allocator;
+    fn fileSet(self: *Context, sa: Allocator, path: []const u8) !FileSet {
         const root = self.workspaceRoot(path);
-        var base = std.array_list.Managed(File).init(a);
-        if (try self.extracted(root, path, try paths.pathToUri(a, path))) |f| try base.append(f);
-        return self.withLoads(.{ .file = path }, root, &base);
+        var base = std.array_list.Managed(File).init(sa);
+        if (try self.extracted(sa, root, path, try paths.pathToUri(sa, path))) |f| try base.append(f);
+        const owned = try sa.dupe(u8, path);
+        return self.withLoads(sa, .{ .file = owned }, root, &base);
     }
 
     /// Add one level of the base files' vars-load targets. Provenance is
     /// frozen first: a target's own loads never extend the set.
-    fn withLoads(self: *Context, scope: Scope, root: ?[]const u8, list: *std.array_list.Managed(File)) !FileSet {
-        const a = self.allocator;
-        var reach_paths = std.array_list.Managed([]const u8).init(a);
-        var loads = std.array_list.Managed(variables.scope.VarFileLoad).init(a);
+    fn withLoads(self: *Context, sa: Allocator, scope: Scope, root: ?[]const u8, list: *std.array_list.Managed(File)) !FileSet {
+        var reach_paths = std.array_list.Managed([]const u8).init(sa);
+        var loads = std.array_list.Managed(variables.scope.VarFileLoad).init(sa);
         for (list.items) |f| try appendUnique(&reach_paths, f.path);
         for (list.items) |f| for (f.facts.var_loads) |load| {
             try loads.append(load);
             try appendUnique(&reach_paths, load.path);
         };
-        var loaded = std.StringHashMap(void).init(a);
+        var loaded = std.StringHashMap(void).init(sa);
         for (loads.items) |load| {
             if (loaded.contains(load.path)) continue;
             try loaded.put(load.path, {});
-            try self.addLoadTarget(root, list, load.path);
+            try self.addLoadTarget(sa, root, list, load.path);
         }
         return .{
             .scope = scope,
-            .root = root,
+            .root = if (root) |r| try sa.dupe(u8, r) else null,
             .files = try list.toOwnedSlice(),
             .loaded = loaded,
             .reach = .{ .paths = try reach_paths.toOwnedSlice(), .loads = try loads.toOwnedSlice() },
+            .store = sa,
         };
     }
 
     /// A load target joins with its load-only bindings (ADR-0045): from the
     /// set, else its open document or indexed entry in the Workspace, else
     /// its text. Explicit loads are Ansible data whatever their extension.
-    fn addLoadTarget(self: *Context, root: ?[]const u8, list: *std.array_list.Managed(File), path: []const u8) !void {
-        const a = self.allocator;
+    fn addLoadTarget(self: *Context, sa: Allocator, root: ?[]const u8, list: *std.array_list.Managed(File), path: []const u8) !void {
         var existing: ?*File = null;
         for (list.items) |*f| if (std.mem.eql(u8, f.path, path)) {
             existing = f;
         };
         if (discover.isAnsibleFile(std.fs.path.basename(path))) {
             if (existing) |f| {
-                f.facts = try f.facts.loaded(a);
+                f.facts = try f.facts.loaded(sa);
                 return;
             }
-            if (root) |r| if (try self.workspaceFile(r, path)) |found| {
+            if (root) |r| if (try self.workspaceFile(sa, r, path)) |found| {
                 var file = found;
-                file.facts = try file.facts.loaded(a);
+                file.facts = try file.facts.loaded(sa);
                 try list.append(file);
                 return;
             };
         }
-        const uri = try paths.pathToUri(a, path);
+        const uri = try paths.pathToUri(sa, path);
+        if (self.document(uri) != null) {
+            if (self.session.cache) |cache| {
+                const dependency = try cache.dependencyFacts(self, root, path, uri);
+                if (existing) |f| f.facts = dependency else try list.append(.{ .path = path, .uri = uri, .facts = dependency });
+                return;
+            }
+        }
         const body = (try self.text(uri)) orelse return;
-        const dependency = try facts_mod.extractDependencyIn(a, root, path, body);
+        const dependency = try facts_mod.extractDependencyIn(sa, root, path, body);
         // Normal non-Ansible source-candidate facts are deliberately empty.
         // Only an explicit load authorizes their hydration.
         if (existing) |f| f.facts = dependency else try list.append(.{ .path = path, .uri = uri, .facts = dependency });
@@ -306,27 +348,26 @@ pub const Context = struct {
 
     /// One Workspace file: its open document, else its indexed entry, else
     /// null when neither belongs to `root`.
-    fn workspaceFile(self: *Context, root: []const u8, path: []const u8) !?File {
-        if ((try self.openIn(root)).get(path)) |doc| return try self.openFile(root, path, doc);
+    fn workspaceFile(self: *Context, sa: Allocator, root: []const u8, path: []const u8) !?File {
+        if ((try self.openIn(root)).get(path)) |doc| return try self.openFile(sa, root, path, doc);
         const entry = self.index().get(path) orelse return null;
         if (!std.mem.eql(u8, entry.root, root)) return null;
-        return .{ .path = entry.path, .uri = try paths.pathToUri(self.allocator, entry.path), .facts = entry.facts };
+        return .{ .path = entry.path, .uri = try paths.pathToUri(sa, entry.path), .facts = entry.facts };
     }
 
     /// Indexed entries in path order, each replaced by its open document;
     /// then open documents the index does not know yet.
-    fn overlay(self: *Context, root: []const u8, within: ?[]const u8) ![]File {
-        const a = self.allocator;
+    fn overlay(self: *Context, sa: Allocator, root: []const u8, within: ?[]const u8) ![]File {
         const open = try self.openIn(root);
-        const entries = if (within) |dir| try self.index().entriesWithin(a, root, dir) else try self.index().entriesOf(a, root);
-        var out = std.array_list.Managed(File).init(a);
-        var replaced = std.StringHashMap(void).init(a);
+        const entries = if (within) |dir| try self.index().entriesWithin(sa, root, dir) else try self.index().entriesOf(sa, root);
+        var out = std.array_list.Managed(File).init(sa);
+        var replaced = std.StringHashMap(void).init(sa);
         for (entries) |entry| {
             if (open.get(entry.path)) |doc| {
-                try out.append(try self.openFile(root, entry.path, doc));
+                try out.append(try self.openFile(sa, root, entry.path, doc));
                 try replaced.put(entry.path, {});
             } else {
-                try out.append(.{ .path = entry.path, .uri = try paths.pathToUri(a, entry.path), .facts = entry.facts });
+                try out.append(.{ .path = entry.path, .uri = try paths.pathToUri(sa, entry.path), .facts = entry.facts });
             }
         }
         var rest = open.iterator();
@@ -334,7 +375,7 @@ pub const Context = struct {
             const path = item.key_ptr.*;
             if (replaced.contains(path)) continue;
             if (within) |dir| if (!isBelow(path, dir)) continue;
-            try out.append(try self.openFile(root, path, item.value_ptr.*));
+            try out.append(try self.openFile(sa, root, path, item.value_ptr.*));
         }
         return out.toOwnedSlice();
     }
@@ -357,18 +398,25 @@ pub const Context = struct {
     }
 
     /// An open document's facts, extracted once per request.
-    fn openFile(self: *Context, root: []const u8, path: []const u8, doc: *Document) !File {
-        return (try self.extracted(root, path, doc.uri)) orelse unreachable;
+    fn openFile(self: *Context, sa: Allocator, root: []const u8, path: []const u8, doc: *Document) !File {
+        return (try self.extracted(sa, root, path, doc.uri)) orelse unreachable;
     }
 
     /// The facts of the file at `path` under `root`, from `text(uri)` and
     /// extracted at most once per request. Null when the file has no text.
-    fn extracted(self: *Context, root: ?[]const u8, path: []const u8, uri: []const u8) !?File {
+    fn extracted(self: *Context, sa: Allocator, root: ?[]const u8, path: []const u8, uri: []const u8) !?File {
         if (self.facts_memo.get(path)) |cached| {
             if (sameRoot(cached.root, root)) return .{ .path = path, .uri = uri, .facts = cached.facts };
         }
+        if (self.session.cache) |cache| {
+            if (self.document(uri) != null) {
+                const facts = try cache.overlayFacts(self, root, path, uri);
+                try self.facts_memo.put(path, .{ .root = root, .facts = facts });
+                return .{ .path = path, .uri = uri, .facts = facts };
+            }
+        }
         const body = (try self.text(uri)) orelse return null;
-        const found = try facts_mod.extractIn(self.allocator, root, path, body);
+        const found = try facts_mod.extractIn(sa, root, path, body);
         try self.facts_memo.put(path, .{ .root = root, .facts = found });
         return .{ .path = path, .uri = uri, .facts = found };
     }
@@ -379,8 +427,9 @@ pub const Context = struct {
         const doc = self.document(uri) orelse return null;
         const path = try self.pathOf(uri);
         const root = self.workspaceRoot(path);
+        if (self.session.cache) |cache| return try cache.documentFacts(self, root, path, uri);
         if (discover.isAnsibleFile(std.fs.path.basename(path))) {
-            return ((try self.extracted(root, path, uri)) orelse return null).facts;
+            return ((try self.extracted(self.allocator, root, path, uri)) orelse return null).facts;
         }
         return try facts_mod.extractDocumentIn(self.allocator, root, path, doc.bytes());
     }
@@ -415,7 +464,7 @@ pub const Context = struct {
         if (ws.collections) |colls| return colls;
         const ws_root = ws.root orelse return &.{};
         if (ws.scope != .workspace) return &.{};
-        const a = self.allocator;
+        const a = ws.store;
         var out = std.array_list.Managed(WorkspaceCollection).init(a);
         for (ws.files) |f| {
             const base = std.fs.path.basename(f.path);
@@ -459,6 +508,7 @@ pub const Context = struct {
 
     /// Role search paths for the file at `path`, memoised per directory.
     fn rolesPaths(self: *Context, path: []const u8) ![]const []const u8 {
+        if (self.session.cache) |cache| return (try cache.dirPaths(self, path)).roles;
         const dir = std.fs.path.dirname(path) orelse path;
         if (self.roles_paths.get(dir)) |found| return found;
         const found = try project_config.rolesPaths(self.allocator, self.projectContext(path), path);
@@ -468,6 +518,7 @@ pub const Context = struct {
 
     /// Collections paths for the file at `path`, memoised per directory.
     pub fn collectionsPaths(self: *Context, path: []const u8) ![]const []const u8 {
+        if (self.session.cache) |cache| return (try cache.dirPaths(self, path)).collections;
         const dir = std.fs.path.dirname(path) orelse path;
         if (self.collections_paths.get(dir)) |found| return found;
         const found = try project_config.collectionsPaths(self.allocator, self.projectContext(path), path);
@@ -475,7 +526,7 @@ pub const Context = struct {
         return found;
     }
 
-    fn projectContext(self: *Context, path: []const u8) project_config.Context {
+    pub fn projectContext(self: *Context, path: []const u8) project_config.Context {
         const root = self.workspaceRoot(path);
         return .{
             .workspace_root = root,
@@ -501,7 +552,9 @@ pub const Context = struct {
     pub fn text(self: *Context, uri: []const u8) !?[]const u8 {
         if (self.document(uri)) |doc| return doc.bytes();
         if (self.texts.get(uri)) |cached| return cached;
-        const body = paths.readFile(self.allocator, try self.pathOf(uri), max_read_bytes);
+        const path = try self.pathOf(uri);
+        if (self.session.cache) |cache| cache.recordProbe(path);
+        const body = paths.readFile(self.allocator, path, max_read_bytes);
         try self.texts.put(uri, body);
         return body;
     }
