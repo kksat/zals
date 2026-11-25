@@ -1,0 +1,13 @@
+zals.Rule{
+  id: "include-inline-params",
+  target: "task",
+  severity: "error",
+  field: "action",
+  condition: !node.is_block &&
+    node.short_action in ["include_tasks", "import_tasks"] &&
+    node.action_namespace in ["", "ansible.builtin", "ansible.legacy"] &&
+    node.is_free_form &&
+    size(node.args) > 0,
+  message: "Inlined parameters for '" + node.raw_action +
+    "' are not supported; pass 'file:' and 'vars:' as a mapping instead."
+}

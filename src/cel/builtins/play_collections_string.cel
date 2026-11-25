@@ -1,0 +1,8 @@
+zals.Rule{
+  id: "play-collections[string]",
+  target: "play",
+  severity: "warning",
+  field: "collections",
+  condition: node.has_collections && node.collections_val_kind == "string",
+  message: "Play 'collections' is given as a string; use a list of strings."
+}

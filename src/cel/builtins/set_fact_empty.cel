@@ -1,0 +1,12 @@
+zals.Rule{
+  id: "set-fact-empty",
+  target: "task",
+  severity: "error",
+  field: "action",
+  condition: !node.is_block &&
+    node.short_action == "set_fact" &&
+    node.action_namespace in ["", "ansible.builtin", "ansible.legacy"] &&
+    node.module_val_kind in ["null", "map", "string", "template"] &&
+    size(node.args) == 0,
+  message: "'ansible.builtin.set_fact' expects at least one key:value pair."
+}

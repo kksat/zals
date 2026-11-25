@@ -1,0 +1,8 @@
+zals.Rule{
+  id: "action-value-type",
+  target: "task",
+  severity: "error",
+  field: "action",
+  condition: !node.is_block && node.module_val_kind in ["int", "float", "bool", "list"],
+  message: "Expected a mapping or string of module arguments, but got '" + node.module_val_kind + "'."
+}

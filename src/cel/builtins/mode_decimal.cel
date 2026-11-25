@@ -1,0 +1,13 @@
+zals.Rule{
+  id: "mode[decimal]",
+  target: "task",
+  severity: "hint",
+  field: "mode",
+  condition: "mode" in node.args &&
+    node.args.mode.kind == "int" &&
+    node.args.mode.raw.matches("^[0-7]+$") &&
+    !node.args.mode.raw.startsWith("0"),
+  message: "Mode '" + node.args.mode.raw + "' in module '" + node.raw_action +
+    "' is in decimal instead of octal format; use '0" + node.args.mode.raw +
+    "' if an octal definition was intended."
+}

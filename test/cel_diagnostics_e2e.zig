@@ -586,3 +586,319 @@ test "stdio cross-file role context checks directory-style defaults, live siblin
     });
     _ = try client.pumpUntil(spec_uri, hasSpecCrossFileFindings);
 }
+
+fn hasTaskRuleFindings(diags: Value) bool {
+    return hasCode(diags, "action-keyword") and
+        hasCode(diags, "action-missing-module") and
+        hasCode(diags, "action-value-type") and
+        hasCode(diags, "task-keyword-in-args") and
+        hasCode(diags, "static-obsolete") and
+        hasCode(diags, "with-items") and
+        hasCode(diags, "debugger[task]") and
+        hasCode(diags, "include-inline-params") and
+        hasCode(diags, "meta-module-params") and
+        hasCode(diags, "set-fact-empty") and
+        hasCode(diags, "inline-shell-params") and
+        hasCode(diags, "debug-module") and
+        hasCode(diags, "debug-var-type");
+}
+
+fn hasModeAndValueRuleFindings(diags: Value) bool {
+    return hasCode(diags, "mode[format]") and
+        hasCode(diags, "mode[variables]") and
+        hasCode(diags, "mode[decimal]") and
+        hasCode(diags, "jinja-leading-space") and
+        hasCode(diags, "jinja-spacing") and
+        hasCode(diags, "vars-list-deprecated") and
+        hasCode(diags, "vars-syntax") and
+        hasCode(diags, "hardcoded-secret[task]");
+}
+
+fn hasPlayRuleFindings(diags: Value) bool {
+    return hasCode(diags, "dash-in-hostname") and
+        hasCode(diags, "debugger[play]") and
+        hasCode(diags, "play-collections[string]") and
+        hasCode(diags, "play-collections[invalid]") and
+        hasCode(diags, "mixed-roles-tasks") and
+        hasCode(diags, "vars-list-deprecated");
+}
+
+fn hasVarFileRuleFindings(diags: Value) bool {
+    return hasCode(diags, "hardcoded-secret[variable]") and
+        hasCode(diags, "jinja-leading-space") and
+        hasCode(diags, "jinja-spacing");
+}
+
+fn hasHostsMissing(diags: Value) bool {
+    return hasCode(diags, "hosts-missing");
+}
+
+const new_rule_codes = [_][]const u8{
+    "action-keyword",
+    "action-missing-module",
+    "action-value-type",
+    "task-keyword-in-args",
+    "static-obsolete",
+    "with-items",
+    "debugger[task]",
+    "debugger[play]",
+    "debug-module",
+    "debug-var-type",
+    "set-fact-empty",
+    "meta-module-params",
+    "include-inline-params",
+    "vars-syntax",
+    "vars-list-deprecated",
+    "hosts-missing",
+    "dash-in-hostname",
+    "play-collections[string]",
+    "play-collections[invalid]",
+    "mixed-roles-tasks",
+    "hardcoded-secret[task]",
+    "hardcoded-secret[variable]",
+    "jinja-leading-space",
+    "jinja-spacing",
+    "mode[format]",
+    "mode[variables]",
+    "mode[decimal]",
+    "inline-shell-params",
+};
+
+fn hasNoNewRuleFindings(diags: Value) bool {
+    for (new_rule_codes) |code| {
+        if (hasCode(diags, code)) return false;
+    }
+    return diags == .array;
+}
+
+fn messageOf(diags: Value, expected_code: []const u8) ?[]const u8 {
+    if (diags != .array) return null;
+    for (diags.array.items) |item| {
+        const code = field(item, "code") orelse continue;
+        if (code == .string and std.mem.eql(u8, code.string, expected_code)) {
+            const msg = field(item, "message") orelse continue;
+            if (msg == .string) return msg.string;
+        }
+    }
+    return null;
+}
+
+test "stdio builtin rule batch reports task, play, variable, and mode findings with clean-file silence" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.makePath("ws/.git");
+    try tmp.dir.makePath("ws/vars");
+    try tmp.dir.makePath("bin");
+
+    const ws_root = try tmp.dir.realpathAlloc(a, "ws");
+    const bin_dir = try tmp.dir.realpathAlloc(a, "bin");
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "ws/tasks.yml",
+        .data =
+        \\- name: task structure findings
+        \\  hosts: all
+        \\  tasks:
+        \\    - name: inline action keyword
+        \\      action: ansible.builtin.ping
+        \\    - name: local action without module
+        \\      local_action:
+        \\        src: a
+        \\    - name: numeric module args
+        \\      ansible.builtin.package: 22
+        \\    - name: indented task keyword
+        \\      ansible.builtin.pip:
+        \\        name: curl
+        \\        check_mode: true
+        \\    - name: obsolete static keyword
+        \\      ansible.builtin.include_tasks: f.yml
+        \\      static: false
+        \\    - name: legacy loop
+        \\      ansible.builtin.debug:
+        \\        msg: one
+        \\      with_items: [1, 2]
+        \\    - name: task debugger
+        \\      debugger: on_failed
+        \\      ansible.builtin.ping:
+        \\    - name: include with inline params
+        \\      ansible.builtin.include_tasks: f.yml a=b
+        \\    - name: wrong meta argument
+        \\      ansible.builtin.meta: bad_action
+        \\    - name: empty set_fact
+        \\      ansible.builtin.set_fact:
+        \\    - name: shell with inline options
+        \\      ansible.builtin.shell: echo hi executable=/bin/bash
+        \\      changed_when: false
+        \\    - name: debug var list
+        \\      ansible.builtin.debug:
+        \\        var: [bad, good]
+        \\
+        ,
+    });
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "ws/modes.yml",
+        .data =
+        \\- name: mode and value findings
+        \\  hosts: all
+        \\  tasks:
+        \\    - name: short mode
+        \\      ansible.builtin.file:
+        \\        path: /tmp/a
+        \\        mode: "44"
+        \\    - name: long mode
+        \\      ansible.builtin.file:
+        \\        path: /tmp/b
+        \\        mode: "064444"
+        \\    - name: unknown mode format
+        \\      ansible.builtin.file:
+        \\        path: /tmp/c
+        \\        mode: "u+rw g-wx o-rwx"
+        \\    - name: invalid octal mode
+        \\      ansible.builtin.file:
+        \\        path: /tmp/d
+        \\        mode: 07777
+        \\    - name: decimal mode
+        \\      ansible.builtin.file:
+        \\        path: /tmp/e
+        \\        mode: 511
+        \\    - name: templated mode
+        \\      ansible.builtin.file:
+        \\        path: /tmp/f
+        \\        mode: "{{ file_mode }}"
+        \\    - name: tight jinja
+        \\      ansible.builtin.debug:
+        \\        msg: "{{x}}"
+        \\    - name: leading jinja space
+        \\      ansible.builtin.file:
+        \\        path: " {{ p }}"
+        \\        mode: "0644"
+        \\    - name: task vars as list
+        \\      ansible.builtin.ping:
+        \\      vars:
+        \\        - a: 1
+        \\    - name: scalar task vars
+        \\      ansible.builtin.ping:
+        \\      vars: not-a-mapping
+        \\    - name: hardcoded password
+        \\      ansible.builtin.uri:
+        \\        url: https://example.com
+        \\        password: hunter2
+        \\
+        ,
+    });
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "ws/plays.yml",
+        .data =
+        \\- name: play findings
+        \\  hosts: host-with-dash
+        \\  debugger: on_failed
+        \\  collections: ns.collection
+        \\  vars:
+        \\    - a: 1
+        \\  roles:
+        \\    - web
+        \\  tasks:
+        \\    - name: t
+        \\      ansible.builtin.ping:
+        \\- name: invalid collections type
+        \\  hosts: all
+        \\  collections:
+        \\    ns.other: 1.0.0
+        \\  tasks: []
+        \\
+        ,
+    });
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "ws/vars/main.yml",
+        .data =
+        \\service_password: hunter2
+        \\api_token: abc123
+        \\ok_value: fine
+        \\leading_space: " {{ x }}"
+        \\tight_spacing: "{{y}}"
+        \\
+        ,
+    });
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "ws/nohosts.yml",
+        .data =
+        \\- name: play without hosts
+        \\  tasks:
+        \\    - name: t
+        \\      ansible.builtin.ping:
+        \\
+        ,
+    });
+
+    try tmp.dir.writeFile(.{
+        .sub_path = "ws/good.yml",
+        .data =
+        \\- name: clean play
+        \\  hosts: all
+        \\  collections:
+        \\    - ns.collection
+        \\  vars:
+        \\    service_password: "{{ vault_pw }}"
+        \\  tasks:
+        \\    - name: ping
+        \\      ansible.builtin.ping:
+        \\    - name: templated config
+        \\      ansible.builtin.template:
+        \\        src: app.conf.j2
+        \\        dest: /etc/app.conf
+        \\        mode: "0644"
+        \\    - name: set fact
+        \\      ansible.builtin.set_fact:
+        \\        my_fact: my_value
+        \\    - name: file mode
+        \\      ansible.builtin.file:
+        \\        path: /tmp/a
+        \\        mode: "0644"
+        \\
+        ,
+    });
+
+    const root_uri = try std.fmt.allocPrint(a, "file://{s}", .{ws_root});
+    const binary = try std.fs.cwd().realpathAlloc(a, "zig-out/bin/zals");
+    var client = try DiagClient.start(a, binary, bin_dir, ws_root);
+    defer client.deinit();
+
+    _ = try client.request("initialize", .{
+        .processId = @as(?i64, null),
+        .rootUri = root_uri,
+        .capabilities = .{},
+    });
+    try client.notify("initialized", .{});
+
+    const tasks_uri = try std.fmt.allocPrint(a, "file://{s}/tasks.yml", .{ws_root});
+    const modes_uri = try std.fmt.allocPrint(a, "file://{s}/modes.yml", .{ws_root});
+    const plays_uri = try std.fmt.allocPrint(a, "file://{s}/plays.yml", .{ws_root});
+    const vars_uri = try std.fmt.allocPrint(a, "file://{s}/vars/main.yml", .{ws_root});
+    const nohosts_uri = try std.fmt.allocPrint(a, "file://{s}/nohosts.yml", .{ws_root});
+    const good_uri = try std.fmt.allocPrint(a, "file://{s}/good.yml", .{ws_root});
+
+    const tasks_diags = try client.pumpUntil(tasks_uri, hasTaskRuleFindings);
+    try std.testing.expect(hasCode(tasks_diags, "action-keyword"));
+    try std.testing.expect(hasCode(tasks_diags, "task-keyword-in-args"));
+
+    const modes_diags = try client.pumpUntil(modes_uri, hasModeAndValueRuleFindings);
+    const short_mode_msg = messageOf(modes_diags, "mode[format]");
+    try std.testing.expect(short_mode_msg != null);
+    try std.testing.expect(std.mem.indexOf(u8, short_mode_msg.?, "too short") != null);
+    const decimal_mode_msg = messageOf(modes_diags, "mode[decimal]");
+    try std.testing.expect(decimal_mode_msg != null);
+    try std.testing.expect(std.mem.indexOf(u8, decimal_mode_msg.?, "0511") != null);
+
+    _ = try client.pumpUntil(plays_uri, hasPlayRuleFindings);
+    _ = try client.pumpUntil(vars_uri, hasVarFileRuleFindings);
+    _ = try client.pumpUntil(nohosts_uri, hasHostsMissing);
+    _ = try client.pumpUntil(good_uri, hasNoNewRuleFindings);
+}

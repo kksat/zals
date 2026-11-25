@@ -1,0 +1,15 @@
+zals.Rule{
+  id: "jinja-spacing",
+  target: ["task", "var_def"],
+  severity: "hint",
+  condition: has(node.string_leaves)
+    ? node.string_leaves.exists(l,
+        l.value.matches("\\{\\{[^ \\t\\-\\n#{}'\"`%]") ||
+        l.value.matches("[^ \\t\\-\\n}'\"`#]\\}\\}"))
+    : (node.value != null &&
+       node.value.kind in ["string", "template"] &&
+       !(node.site in ["task_vars", "set_fact"]) &&
+       (node.value.value.matches("\\{\\{[^ \\t\\-\\n#{}'\"`%]") ||
+        node.value.value.matches("[^ \\t\\-\\n}'\"`#]\\}\\}"))),
+  message: "Insert a space after '{{' and before '}}' to ensure proper Jinja syntax."
+}

@@ -1,0 +1,8 @@
+zals.Rule{
+  id: "mode[variables]",
+  target: "task",
+  severity: "hint",
+  field: "mode",
+  condition: "mode" in node.args && node.args.mode.is_templated,
+  message: "Mode in module '" + node.raw_action + "' contains variables, which is not considered good practice."
+}

@@ -1,0 +1,7 @@
+zals.Rule{
+  id: "with-items",
+  target: "task",
+  severity: "warning",
+  condition: node.loop_key == "with_items",
+  message: "Use of 'with_items' is discouraged. Consider using 'loop' instead."
+}

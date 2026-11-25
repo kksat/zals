@@ -1,0 +1,11 @@
+zals.Rule{
+  id: "action-missing-module",
+  target: "task",
+  severity: "error",
+  field: "action",
+  condition: !node.is_block &&
+    node.invocation_form in ["action", "local_action"] &&
+    node.module_val_kind in ["map", "null"] &&
+    node.raw_action == "",
+  message: "Module name is not specified for '" + node.invocation_form + "'."
+}

@@ -63,8 +63,8 @@ fn containsCode(codes: []const []const u8, expected: []const u8) bool {
     return false;
 }
 
-test "all 77 builtin rules load without errors and have unique ids" {
-    try std.testing.expectEqual(@as(usize, 77), builtins.all.len);
+test "all 105 builtin rules load without errors and have unique ids" {
+    try std.testing.expectEqual(@as(usize, 105), builtins.all.len);
     var rs = try registry.buildRuleSet(std.testing.allocator, 1, .{ .include_builtins = true });
     defer rs.deinit();
     try std.testing.expectEqual(@as(usize, 0), rs.errors.len);
@@ -564,6 +564,147 @@ test "rule conformance matrix positive and negative fixtures for every approved 
             .path = "/ws/vars/main.yml",
             .bad = "import: bad\n",
             .good = "import_name: ok\n",
+        },
+        .{
+            .rule_id = "action-keyword",
+            .bad = "- name: p\n  hosts: all\n  tasks:\n    - name: a\n      action: ansible.builtin.ping\n",
+            .good = "- name: p\n  hosts: all\n  tasks:\n    - name: a\n      ansible.builtin.ping:\n",
+        },
+        .{
+            .rule_id = "action-missing-module",
+            .bad = "- name: p\n  hosts: all\n  tasks:\n    - name: a\n      local_action:\n        src: a\n",
+            .good = "- name: p\n  hosts: all\n  tasks:\n    - name: a\n      local_action:\n        module: ansible.builtin.copy\n        src: a\n",
+        },
+        .{
+            .rule_id = "action-value-type",
+            .bad = "- name: p\n  hosts: all\n  tasks:\n    - name: t\n      ansible.builtin.package: 22\n",
+            .good = "- name: p\n  hosts: all\n  tasks:\n    - name: t\n      ansible.builtin.package:\n        name: curl\n        state: present\n",
+        },
+        .{
+            .rule_id = "task-keyword-in-args",
+            .bad = "- name: p\n  hosts: all\n  tasks:\n    - name: t\n      ansible.builtin.pip:\n        name: curl\n        check_mode: true\n",
+            .good = "- name: p\n  hosts: all\n  tasks:\n    - name: t\n      ansible.builtin.pip:\n        name: curl\n      check_mode: true\n",
+        },
+        .{
+            .rule_id = "static-obsolete",
+            .bad = "- name: p\n  hosts: all\n  tasks:\n    - name: t\n      ansible.builtin.include_tasks: f.yml\n      static: false\n",
+            .good = "- name: p\n  hosts: all\n  tasks:\n    - name: t\n      ansible.builtin.include_tasks: f.yml\n",
+        },
+        .{
+            .rule_id = "with-items",
+            .bad = "- name: p\n  hosts: all\n  tasks:\n    - name: t\n      ansible.builtin.debug:\n        msg: hi\n      with_items: [1, 2]\n",
+            .good = "- name: p\n  hosts: all\n  tasks:\n    - name: t\n      ansible.builtin.debug:\n        msg: hi\n      loop: [1, 2]\n",
+        },
+        .{
+            .rule_id = "debugger[task]",
+            .bad = "- name: p\n  hosts: all\n  tasks:\n    - name: t\n      debugger: on_failed\n      ansible.builtin.ping:\n",
+            .good = "- name: p\n  hosts: all\n  tasks:\n    - name: t\n      debugger: never\n      ansible.builtin.ping:\n",
+        },
+        .{
+            .rule_id = "debugger[play]",
+            .bad = "- name: p\n  hosts: all\n  debugger: on_failed\n  tasks:\n    - name: t\n      ansible.builtin.ping:\n",
+            .good = "- name: p\n  hosts: all\n  debugger: never\n  tasks:\n    - name: t\n      ansible.builtin.ping:\n",
+        },
+        .{
+            .rule_id = "debug-module",
+            .bad = "- name: p\n  hosts: all\n  tasks:\n    - name: t\n      ansible.builtin.debug:\n        msg: hi\n",
+            .good = "- name: p\n  hosts: all\n  tasks:\n    - name: t\n      ansible.builtin.ping:\n",
+        },
+        .{
+            .rule_id = "debug-var-type",
+            .bad = "- name: p\n  hosts: all\n  tasks:\n    - name: t\n      ansible.builtin.debug:\n        var:\n          - bad\n          - good\n",
+            .good = "- name: p\n  hosts: all\n  tasks:\n    - name: t\n      ansible.builtin.debug:\n        var: test_list\n",
+        },
+        .{
+            .rule_id = "set-fact-empty",
+            .bad = "- name: p\n  hosts: all\n  tasks:\n    - name: t\n      ansible.builtin.set_fact:\n",
+            .good = "- name: p\n  hosts: all\n  tasks:\n    - name: t\n      ansible.builtin.set_fact:\n        my_fact: my_value\n",
+        },
+        .{
+            .rule_id = "meta-module-params",
+            .bad = "- name: p\n  hosts: all\n  tasks:\n    - name: t\n      ansible.builtin.meta: bad_action\n",
+            .good = "- name: p\n  hosts: all\n  tasks:\n    - name: t\n      ansible.builtin.meta: flush_handlers\n",
+        },
+        .{
+            .rule_id = "include-inline-params",
+            .bad = "- name: p\n  hosts: all\n  tasks:\n    - name: t\n      ansible.builtin.include_tasks: f.yml a=b\n",
+            .good = "- name: p\n  hosts: all\n  tasks:\n    - name: t\n      ansible.builtin.include_tasks:\n        file: f.yml\n",
+        },
+        .{
+            .rule_id = "vars-syntax",
+            .bad = "- name: p\n  hosts: all\n  tasks:\n    - name: t\n      ansible.builtin.add_host:\n        name: \"{{ item }}\"\n      vars:\n        flash_hosts = [\"test_01\", \"test_02\"]\n      loop: \"{{ flash_hosts }}\"\n",
+            .good = "- name: p\n  hosts: all\n  tasks:\n    - name: t\n      ansible.builtin.add_host:\n        name: \"{{ item }}\"\n      vars:\n        flash_hosts:\n          - test_01\n          - test_02\n      loop: \"{{ flash_hosts }}\"\n",
+        },
+        .{
+            .rule_id = "vars-list-deprecated",
+            .bad = "- name: p\n  hosts: all\n  tasks:\n    - name: t\n      ansible.builtin.ping:\n      vars:\n        - dir_loc: /etc/motd\n",
+            .good = "- name: p\n  hosts: all\n  tasks:\n    - name: t\n      ansible.builtin.ping:\n      vars:\n        dir_loc: /etc/motd\n",
+        },
+        .{
+            .rule_id = "hosts-missing",
+            .bad = "- name: p\n  tasks:\n    - name: t\n      ansible.builtin.ping:\n",
+            .good = "- name: p\n  hosts: all\n  tasks:\n    - name: t\n      ansible.builtin.ping:\n",
+        },
+        .{
+            .rule_id = "dash-in-hostname",
+            .bad = "- name: p\n  hosts: host-with-dash\n  tasks: []\n",
+            .good = "- name: p\n  hosts: hostwithoutdash\n  tasks: []\n",
+        },
+        .{
+            .rule_id = "play-collections[string]",
+            .bad = "- name: p\n  hosts: all\n  collections: ns.collection\n  tasks: []\n",
+            .good = "- name: p\n  hosts: all\n  collections:\n    - ns.collection\n  tasks: []\n",
+        },
+        .{
+            .rule_id = "play-collections[invalid]",
+            .bad = "- name: p\n  hosts: all\n  collections:\n    ns.collection: 2.1.7\n  tasks: []\n",
+            .good = "- name: p\n  hosts: all\n  collections:\n    - ns.collection\n  tasks: []\n",
+        },
+        .{
+            .rule_id = "mixed-roles-tasks",
+            .bad = "- name: p\n  hosts: all\n  roles:\n    - web\n  tasks:\n    - name: t\n      ansible.builtin.ping:\n",
+            .good = "- name: p\n  hosts: all\n  tasks:\n    - name: t\n      ansible.builtin.ping:\n",
+        },
+        .{
+            .rule_id = "hardcoded-secret[task]",
+            .bad = "- name: p\n  hosts: all\n  tasks:\n    - name: t\n      ansible.builtin.uri:\n        url: https://x\n        password: hardcoded\n",
+            .good = "- name: p\n  hosts: all\n  tasks:\n    - name: t\n      ansible.builtin.uri:\n        url: https://x\n        password: \"{{ vault_pw }}\"\n",
+        },
+        .{
+            .rule_id = "hardcoded-secret[variable]",
+            .path = "/ws/vars/main.yml",
+            .bad = "service_now_password: hardcoded\n",
+            .good = "service_now_password: \"{{ var_defined_in_vault_file }}\"\n",
+        },
+        .{
+            .rule_id = "jinja-leading-space",
+            .bad = "- name: p\n  hosts: all\n  tasks:\n    - name: t\n      ansible.builtin.file:\n        path: \" {{ path }}\"\n        mode: '0644'\n",
+            .good = "- name: p\n  hosts: all\n  tasks:\n    - name: t\n      ansible.builtin.file:\n        path: \"{{ path }}\"\n        mode: '0644'\n",
+        },
+        .{
+            .rule_id = "jinja-spacing",
+            .bad = "- name: p\n  hosts: all\n  tasks:\n    - name: t\n      ansible.builtin.debug:\n        msg: \"{{x}}\"\n",
+            .good = "- name: p\n  hosts: all\n  tasks:\n    - name: t\n      ansible.builtin.debug:\n        msg: \"{{ x }}\"\n",
+        },
+        .{
+            .rule_id = "mode[format]",
+            .bad = "- name: p\n  hosts: all\n  tasks:\n    - name: t\n      ansible.builtin.file:\n        path: /etc/file.txt\n        mode: \"44\"\n",
+            .good = "- name: p\n  hosts: all\n  tasks:\n    - name: t\n      ansible.builtin.file:\n        path: /etc/file.txt\n        mode: \"0644\"\n",
+        },
+        .{
+            .rule_id = "mode[variables]",
+            .bad = "- name: p\n  hosts: all\n  tasks:\n    - name: t\n      ansible.builtin.file:\n        path: /etc/file.txt\n        mode: \"{{ mode }}\"\n",
+            .good = "- name: p\n  hosts: all\n  tasks:\n    - name: t\n      ansible.builtin.file:\n        path: /etc/file.txt\n        mode: \"0644\"\n",
+        },
+        .{
+            .rule_id = "mode[decimal]",
+            .bad = "- name: p\n  hosts: all\n  tasks:\n    - name: t\n      ansible.builtin.file:\n        path: /etc/file.txt\n        mode: 511\n",
+            .good = "- name: p\n  hosts: all\n  tasks:\n    - name: t\n      ansible.builtin.file:\n        path: /etc/file.txt\n        mode: 0777\n",
+        },
+        .{
+            .rule_id = "inline-shell-params",
+            .bad = "- name: p\n  hosts: all\n  tasks:\n    - name: t\n      ansible.builtin.shell: echo hi executable=/bin/bash\n      changed_when: false\n",
+            .good = "- name: p\n  hosts: all\n  tasks:\n    - name: t\n      ansible.builtin.shell:\n        cmd: echo hi\n        executable: /bin/bash\n      changed_when: false\n",
         },
     };
 
