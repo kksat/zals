@@ -44,8 +44,9 @@ The following decisions are requirements, not alternatives still awaiting
 selection:
 
 - **Engine:** evaluate rules with [zig-cel](https://github.com/kksat/zig-cel)
-  (pinned commit `895a750`), consumed as a vendored source dependency until it
-  publishes a package manifest. Do not require a separate runtime service.
+  (pinned commit `445a967`), consumed as a pinned `url`+`hash` Zig package
+  dependency through `build.zig.zon` and its registered `cel` module. Do not
+  require a separate runtime service.
 - **Catalog:** implement the support entries in the pinned ansible-lint 26.11.0
   matrix. Omit whole deferred/excluded subrules rather than approximate easy
   cases under the same compatibility claim.

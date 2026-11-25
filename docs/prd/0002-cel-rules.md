@@ -20,8 +20,8 @@ install or run a separate CEL service, Python interpreter, or Ansible process
 to evaluate a rule.
 
 The engine baseline is zig-cel at commit
-[`895a750`](https://github.com/kksat/zig-cel/commit/895a750) ("VM fast paths,
-anchored-regex entry, small-map scan, benchmarks vs cel-go"). Pin an exact
+[`445a967`](https://github.com/kksat/zig-cel/commit/445a967) ("host function
+registration (cel-go FunctionBinding equivalent)"). Pin an exact
 commit. The library builds and passes its unit tests and its vendored cel-spec
 simple conformance suite on the repository's pinned Zig 0.15.1 toolchain, with
 no C++/protobuf/Bazel dependency closure. Upstream results are not evidence
@@ -238,14 +238,13 @@ reappear after reload, disablement, deletion, or permission revocation.
 
 ## Native integration and distribution
 
-Consume zig-cel as a pinned source dependency of the Zig server:
+Consume zig-cel as a pinned Zig package dependency of the server:
 
-- Until zig-cel publishes a `build.zig.zon`, vendor its `src/`, `LICENSE`, and
-  `README.md` at the pinned commit under `vendor/zig-cel/` (the same policy as
-  the vendored C parsers) and create the `cel` module from
-  `vendor/zig-cel/src/cel.zig`. Record the upstream commit, and switch to a
-  `url`+`hash` package dependency once the library can be fetched.
-- Do not modify the vendored engine logic locally; request changes upstream.
+- Declare `zig_cel` in `build.zig.zon` using a pinned archive `url` and content
+  `hash` for commit `445a967`, and consume its registered `cel` module via
+  `b.dependency("zig_cel", ...).module("cel")`. Do not vendor `zig-cel` under
+  `vendor/`.
+- Do not maintain local patches to the engine; request changes upstream.
   The library is maintained by the Zals owner, so engine improvements belong in
   the upstream repository.
 - One `Program` must not run concurrently: compile per worker (compilation is
