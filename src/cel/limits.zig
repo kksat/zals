@@ -1,0 +1,10 @@
+pub const max_rule_source_bytes: usize = 64 * 1024;
+pub const max_rule_id_bytes: usize = 128;
+pub const max_ast_nodes: usize = 2048;
+pub const max_ast_depth: usize = 64;
+pub const max_comprehension_depth: usize = 4;
+pub const max_regex_pattern_bytes: usize = 512;
+pub const max_diagnostics_per_document: usize = 512;
+pub const max_diagnostics_per_rule_per_document: usize = 128;
+pub const max_message_bytes: usize = 2048;
+pub const max_list_items_per_field: usize = 4096;
