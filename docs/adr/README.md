@@ -53,6 +53,7 @@ Each ADR captures one decision, its context, and its consequences. Statuses are
 | [0047](0047-personal-owner-release-approval.md) | Personal-owner release-note approval | Accepted |
 | [0048](0048-no-inline-code-comments.md) | No inline code comments | Accepted |
 | [0049](0049-vendored-parser-optimized-in-every-build-mode.md) | Optimize the vendored parser in every build mode | Accepted |
+| [0050](0050-cel-rule-engine.md) | Native CEL rule engine via zig-cel package dependency | Accepted |
 
 ## Template
 
