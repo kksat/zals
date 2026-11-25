@@ -36,7 +36,7 @@ test("manifest contributes only language client and no commands", () => {
   assert.equal(pkg.contributes?.commands, undefined);
 });
 
-test("manifest contributes exactly the 9 approved settings", () => {
+test("manifest contributes exactly the 16 approved settings", () => {
   const properties = pkg.contributes?.configuration?.properties;
   assert.ok(properties, "configuration.properties should exist");
 
@@ -46,11 +46,18 @@ test("manifest contributes exactly the 9 approved settings", () => {
     "ansible.ansible.useFullyQualifiedCollectionNames",
     "ansible.completion.provideModuleOptionAliases",
     "ansible.completion.provideRedirectModules",
+    "ansible.validation.cel.allowWorkspaceRules",
+    "ansible.validation.cel.disabledRules",
+    "ansible.validation.cel.enabled",
+    "ansible.validation.cel.globalRuleFiles",
+    "ansible.validation.cel.rules",
+    "ansible.validation.cel.workspaceRuleFiles",
     "ansible.validation.enabled",
     "ansible.validation.lint.arguments",
     "ansible.validation.lint.autoFixOnSave",
     "ansible.validation.lint.enabled",
     "ansible.validation.lint.path",
+    "ansible.validation.schema.enabled",
   ].sort();
 
   assert.deepEqual(keys, expectedKeys);
