@@ -385,19 +385,95 @@ fn expectSameNode(a: *const Node, b: *const Node) !void {
     for (a.items, b.items) |x, y| try expectSameNode(x, y);
 }
 
+fn expectSameNodeWithRanges(a: *const Node, b: *const Node) !void {
+    try expectSameNode(a, b);
+    try std.testing.expectEqual(a.start, b.start);
+    try std.testing.expectEqual(a.end, b.end);
+    if (a.key) |k| try expectSameNodeWithRanges(k, b.key.?);
+    if (a.val) |v| try expectSameNodeWithRanges(v, b.val.?);
+    for (a.items, b.items) |x, y| try expectSameNodeWithRanges(x, y);
+}
+
 test "tree-sitter and subset backends agree on block YAML" {
     const corpus = [_][]const u8{
         "- hosts: all\n  tasks:\n    - name: ping\n      ansible.builtin.ping:\n",
         "key: value\nlist:\n  - a\n  - b\nnested:\n  x: 1\n  y: 2\n",
         "a: 'single'\nb: \"double\"\nc: 42\nd: true\n",
         "- name: multi\n  vars:\n    msg: |\n      line one\n      line two\n",
+        "---\n- hosts: all\n...\n---\nkey: 1\n",
+        "- name: quoted jinja\n  ansible.builtin.debug:\n    msg: \"{{ a.b | default('x') }}\"\n",
+        "# leading comment\n- name: c # trailing\n  when: a and not b\n",
+        "\"quoted key\": v\n'sq': w\n",
+        "key: # comment\n",
     };
     for (corpus) |src| {
         var ts = try parse(std.testing.allocator, src);
         defer ts.deinit();
-        var sub = try @import("parser.zig").parse(std.testing.allocator, src);
+        var sub = try @import("parser.zig").parseChecked(std.testing.allocator, src);
         defer sub.deinit();
         try std.testing.expectEqual(ts.roots.len, sub.roots.len);
-        for (ts.roots, sub.roots) |x, y| try expectSameNode(x, y);
+        for (ts.roots, sub.roots) |x, y| try expectSameNodeWithRanges(x, y);
+    }
+}
+
+test "the audit defers constructs the subset parser does not model" {
+    const corpus = [_][]const u8{
+        "- |\n  block\n",
+        "when: {{ x }}\n",
+        "vars: {port: 80}\n",
+        "when: [a, b]\n",
+        "x: &anchor\n  y: 1\n",
+        "a: *b\n",
+        "key: \"esc\\nap\"\n",
+        "key: v\n  cont\n",
+        "%YAML 1.1\n---\nx: 1\n",
+        "- - a\n",
+        "--- inline\n",
+        "msg: 'it''s'\n",
+        "msg: |2\n    indented\n",
+        "? complex\n: value\n",
+    };
+    for (corpus) |src| {
+        const result = @import("parser.zig").parseChecked(std.testing.allocator, src);
+        try std.testing.expectError(error.UnsupportedYaml, result);
+    }
+}
+
+test "audit-passing documents parse identically on every checked-in fixture" {
+    const a = std.testing.allocator;
+    var checked: usize = 0;
+    var deferred_to_tree_sitter: usize = 0;
+    try diffWalk(a, "test/fixtures", &checked, &deferred_to_tree_sitter);
+    try std.testing.expect(checked > 20);
+    try std.testing.expect(checked + deferred_to_tree_sitter > 40);
+}
+
+fn diffWalk(a: std.mem.Allocator, dir_path: []const u8, checked: *usize, deferred: *usize) !void {
+    var dir = std.fs.cwd().openDir(dir_path, .{ .iterate = true }) catch return;
+    defer dir.close();
+    var walker = try dir.walk(a);
+    defer walker.deinit();
+    while (try walker.next()) |entry| {
+        if (entry.kind != .file) continue;
+        if (!std.mem.endsWith(u8, entry.path, ".yml") and
+            !std.mem.endsWith(u8, entry.path, ".yaml") and
+            !std.mem.endsWith(u8, entry.path, ".j2")) continue;
+        const text = try entry.dir.readFileAlloc(a, entry.basename, 1 << 20);
+        defer a.free(text);
+
+        var sub = @import("parser.zig").parseChecked(a, text) catch |err| switch (err) {
+            error.UnsupportedYaml => {
+                deferred.* += 1;
+                continue;
+            },
+            else => continue,
+        };
+        defer sub.deinit();
+        var ts = try parse(a, text);
+        defer ts.deinit();
+        try std.testing.expectEqual(ts.roots.len, sub.roots.len);
+        try std.testing.expectEqualSlices(usize, ts.document_starts, sub.document_starts);
+        for (ts.roots, sub.roots) |x, y| try expectSameNodeWithRanges(x, y);
+        checked.* += 1;
     }
 }
