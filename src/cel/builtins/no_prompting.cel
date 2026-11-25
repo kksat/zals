@@ -1,0 +1,9 @@
+zals.Rule{
+  id: "no-prompting",
+  target: ["play", "task"],
+  severity: "warning",
+  condition: has(node.has_vars_prompt)
+    ? node.has_vars_prompt
+    : (node.short_action == "pause" && !("seconds" in node.args) && !("minutes" in node.args)),
+  message: "Disallow interactive prompting in plays ('vars_prompt') or 'pause' tasks without timeout."
+}

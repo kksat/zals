@@ -1,0 +1,8 @@
+zals.Rule{
+  id: "schema[moves]",
+  target: "task",
+  severity: "warning",
+  condition: node.keys.exists(k, k in ["always_run", "sudo", "sudo_user", "su", "su_user"]) ||
+    (node.short_action in ["command", "shell"] && "warn" in node.args),
+  message: "Task uses a deprecated or moved keyword/option."
+}

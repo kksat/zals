@@ -1,0 +1,18 @@
+zals.Rule{
+  id: "package-latest",
+  target: "task",
+  severity: "warning",
+  field: "state",
+  condition: node.short_action in [
+      "apk", "apt", "dnf", "dnf5", "gem", "homebrew", "homebrew_cask",
+      "openbsd_pkg", "package", "pacman", "pip", "pkg5", "pkgin", "pkgng",
+      "pkgutil", "portage", "rpm_ostree_pkg", "slackpkg", "swdepot",
+      "urpmi", "win_chocolatey", "xbps", "yarn", "yum", "zypper"
+    ] &&
+    "state" in node.args &&
+    node.args.state.kind == "string" &&
+    node.args.state.value == "latest" &&
+    !("update_only" in node.args && node.args.update_only.kind == "bool" && node.args.update_only.value) &&
+    !("version" in node.args),
+  message: "Package installs should not use 'state: latest'."
+}

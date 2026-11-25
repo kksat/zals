@@ -900,7 +900,7 @@ const AstBuilder = struct {
                     action_count += 1;
                     action_pair = pair;
                     invocation_form = .local_action_keyword;
-                } else if (!yaml_keywords.isTaskKeyword(kname)) {
+                } else if (!yaml_keywords.isTaskKeyword(kname) and !isLegacyTaskKeyword(kname)) {
                     action_count += 1;
                     action_pair = pair;
                     invocation_form = .module_key;
@@ -1523,6 +1523,14 @@ fn collectStringLeaves(
         },
         else => {},
     }
+}
+
+fn isLegacyTaskKeyword(k: []const u8) bool {
+    return std.mem.eql(u8, k, "always_run") or
+        std.mem.eql(u8, k, "sudo") or
+        std.mem.eql(u8, k, "sudo_user") or
+        std.mem.eql(u8, k, "su") or
+        std.mem.eql(u8, k, "su_user");
 }
 
 fn isAscii(s: []const u8) bool {

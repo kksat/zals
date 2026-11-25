@@ -1,0 +1,11 @@
+zals.Rule{
+  id: "latest[git]",
+  target: "task",
+  severity: "warning",
+  field: "version",
+  condition: node.short_action == "git" &&
+    (!("version" in node.args) ||
+     node.args.version.kind == "null" ||
+     (node.args.version.kind == "string" && node.args.version.value in ["", "HEAD", "master", "main", "latest"])),
+  message: "Git checkouts must contain an explicit version."
+}

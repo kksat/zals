@@ -1,0 +1,12 @@
+zals.Rule{
+  id: "galaxy-version-incorrect",
+  target: "galaxy_meta",
+  severity: "warning",
+  field: "version",
+  condition: node.has_version &&
+    node.version != null &&
+    node.version.kind == "string" &&
+    node.version.value != "" &&
+    node.version.value.matches("^0+(\\.|$)"),
+  message: "Collection version in galaxy.yml should be >= 1.0.0."
+}

@@ -1,0 +1,16 @@
+zals.Rule{
+  id: "galaxy[no-license]",
+  target: "galaxy_meta",
+  severity: "warning",
+  field: "license",
+  condition: (!node.has_license ||
+      node.license == null ||
+      node.license.kind == "null" ||
+      (node.license.kind == "string" && node.license.value == "") ||
+      (node.license.kind == "list" && size(node.license.value) == 0)) &&
+    (!node.has_license_file ||
+      node.license_file == null ||
+      node.license_file.kind != "string" ||
+      node.license_file.value == ""),
+  message: "galaxy.yml must specify either 'license' or 'license_file'."
+}

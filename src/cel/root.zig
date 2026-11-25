@@ -31,4 +31,5 @@ test {
     _ = @import("rule.zig");
     _ = @import("registry.zig");
     _ = @import("evaluator.zig");
+    _ = @import("conformance_test.zig");
 }

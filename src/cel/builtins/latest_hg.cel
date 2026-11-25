@@ -1,0 +1,11 @@
+zals.Rule{
+  id: "latest[hg]",
+  target: "task",
+  severity: "warning",
+  field: "revision",
+  condition: node.short_action in ["hg", "community.general.hg"] &&
+    (!("revision" in node.args) ||
+     node.args.revision.kind == "null" ||
+     (node.args.revision.kind == "string" && node.args.revision.value in ["", "default", "tip", "latest"])),
+  message: "Mercurial checkouts must contain an explicit revision."
+}

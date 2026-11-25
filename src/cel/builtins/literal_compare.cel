@@ -1,0 +1,11 @@
+zals.Rule{
+  id: "literal-compare",
+  target: "task",
+  severity: "warning",
+  field: "when",
+  condition: node.when.exists(w, (w.kind == "string" || w.kind == "template") && w.value.matches("(==|!=)\\s*([Tt]rue|[Ff]alse)\\b")) ||
+    node.changed_when.exists(w, (w.kind == "string" || w.kind == "template") && w.value.matches("(==|!=)\\s*([Tt]rue|[Ff]alse)\\b")) ||
+    node.failed_when.exists(w, (w.kind == "string" || w.kind == "template") && w.value.matches("(==|!=)\\s*([Tt]rue|[Ff]alse)\\b")) ||
+    node.until.exists(w, (w.kind == "string" || w.kind == "template") && w.value.matches("(==|!=)\\s*([Tt]rue|[Ff]alse)\\b")),
+  message: "Do not compare to literal True/False; use the boolean expression directly."
+}

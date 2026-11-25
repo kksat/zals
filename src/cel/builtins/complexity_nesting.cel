@@ -1,0 +1,7 @@
+zals.Rule{
+  id: "complexity[nesting]",
+  target: "task",
+  severity: "warning",
+  condition: node.nesting_depth > ("max_nesting" in options ? options.max_nesting : 2),
+  message: "Block nesting depth (" + string(node.nesting_depth) + ") exceeds the maximum allowed."
+}

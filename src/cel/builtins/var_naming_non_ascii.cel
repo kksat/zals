@@ -1,0 +1,9 @@
+zals.Rule{
+  id: "var-naming[non-ascii]",
+  target: "var_def",
+  severity: "error",
+  condition: node.key_kind in ["string", "template"] &&
+    !node.is_templated &&
+    !node.is_ascii,
+  message: "Variable name '" + node.name + "' must contain only ASCII characters."
+}

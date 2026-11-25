@@ -1,0 +1,15 @@
+zals.Rule{
+  id: "meta-no-tags",
+  target: "role_meta",
+  severity: "warning",
+  field: "galaxy_tags",
+  condition: node.has_galaxy_info && (
+    node.has_categories ||
+    !node.has_galaxy_tags ||
+    node.galaxy_tags == null ||
+    node.galaxy_tags.kind != "list" ||
+    size(node.galaxy_tags.value) == 0 ||
+    node.galaxy_tags.value.exists(t, type(t) != string || !t.matches("^[a-z0-9]+$"))
+  ),
+  message: "Role meta/main.yml must specify valid lowercase alphanumeric 'galaxy_tags' and avoid deprecated 'categories'."
+}

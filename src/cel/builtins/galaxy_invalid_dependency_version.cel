@@ -1,0 +1,10 @@
+zals.Rule{
+  id: "galaxy[invalid-dependency-version]",
+  target: "galaxy_meta",
+  severity: "warning",
+  field: "dependencies",
+  condition: node.dependencies.exists(d,
+    d.version.kind != "string" || d.version.value.matches("^\\s*$")
+  ),
+  message: "galaxy.yml contains a dependency with an empty or non-string version."
+}

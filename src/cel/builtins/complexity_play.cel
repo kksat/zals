@@ -1,0 +1,8 @@
+zals.Rule{
+  id: "complexity[play]",
+  target: "document",
+  severity: "warning",
+  condition: document.kind == "playbook" &&
+    document.play_count > ("max_plays" in options ? options.max_plays : 5),
+  message: "Playbook has " + string(document.play_count) + " plays, exceeding the maximum allowed."
+}

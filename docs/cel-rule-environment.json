@@ -1,0 +1,245 @@
+{
+  "$schema": "https://zals.dev/schemas/cel-rule-environment/v1",
+  "schema_version": 1,
+  "engine": {
+    "name": "zig-cel",
+    "commit": "445a967",
+    "profile": "standard-cel-no-proto",
+    "macros": ["has", "all", "exists", "exists_one", "filter", "map"],
+    "functions": [
+      "size",
+      "contains",
+      "startsWith",
+      "endsWith",
+      "matches",
+      "int",
+      "uint",
+      "double",
+      "string",
+      "bool",
+      "bytes",
+      "type",
+      "dyn",
+      "duration",
+      "timestamp"
+    ],
+    "limits": {
+      "max_rule_source_bytes": 65536,
+      "max_ast_nodes": 2048,
+      "max_ast_depth": 64,
+      "max_comprehension_depth": 4,
+      "max_regex_pattern_bytes": 512,
+      "max_diagnostics_per_document": 512,
+      "max_diagnostics_per_rule_per_document": 128,
+      "max_message_bytes": 2048
+    }
+  },
+  "declaration": {
+    "type": "zals.Rule",
+    "fields": {
+      "id": { "type": "string", "literal": true, "required": true },
+      "target": { "type": "string | list<string>", "literal": true, "required": true },
+      "severity": { "type": "enum(error,warning,info,hint)", "literal": true, "required": true },
+      "field": { "type": "string", "literal": true, "required": false },
+      "schema_version": { "type": "int", "literal": true, "required": false, "default": 1 },
+      "condition": { "type": "expr<bool>", "required": true },
+      "message": { "type": "expr<string>", "required": true }
+    }
+  },
+  "bindings": {
+    "location": {
+      "type": "map",
+      "fields": {
+        "path": "string",
+        "line": "int",
+        "column": "int"
+      }
+    },
+    "document": {
+      "type": "map",
+      "fields": {
+        "path": "string",
+        "filename": "string",
+        "extension": "string",
+        "kind": "string",
+        "play_count": "int",
+        "task_count": "int",
+        "parse_issue_count": "int"
+      }
+    },
+    "context": { "type": "map" },
+    "metadata": {
+      "type": "map",
+      "fields": {
+        "available": "bool",
+        "status": "enum(ready,pending,unavailable,partial,stale)",
+        "environment_id": "string",
+        "reason": "string",
+        "modules": "map<string, map>"
+      }
+    },
+    "options": { "type": "map<string, dyn>" }
+  },
+  "typed_value_shape": {
+    "kind": "enum(null,bool,int,float,string,template,list,map)",
+    "is_templated": "bool",
+    "is_quoted": "bool",
+    "raw": "string",
+    "value": "dyn"
+  },
+  "targets": {
+    "document": {
+      "fields": ["root"],
+      "node_fields": {
+        "path": "string",
+        "filename": "string",
+        "extension": "string",
+        "kind": "string",
+        "play_count": "int",
+        "task_count": "int",
+        "parse_issue_count": "int"
+      }
+    },
+    "play": {
+      "fields": ["self", "name", "hosts", "become", "become_user", "strategy", "run_once", "vars_prompt", "collections", "tasks", "pre_tasks", "post_tasks", "handlers", "roles", "import_playbook"],
+      "node_fields": {
+        "index": "int",
+        "keys": "list<string>",
+        "has_name": "bool",
+        "name": "TypedValue | null",
+        "name_text": "string",
+        "hosts": "TypedValue | null",
+        "strategy": "TypedValue | null",
+        "strategy_text": "string",
+        "has_become": "bool",
+        "has_become_user": "bool",
+        "has_vars_prompt": "bool",
+        "has_run_once": "bool",
+        "run_once": "TypedValue | null",
+        "task_count": "int",
+        "is_import_playbook": "bool",
+        "import_playbook_key": "string"
+      }
+    },
+    "task": {
+      "fields": ["self", "name", "action", "local_action", "args", "when", "changed_when", "failed_when", "until", "ignore_errors", "no_log", "become", "become_user", "delegate_to", "run_once", "loop", "with_items", "register", "mode", "state", "version", "revision", "src", "dest", "content", "cmd", "executable", "block", "rescue", "always"],
+      "node_fields": {
+        "keys": "list<string>",
+        "invocation_form": "enum(module_key,action,local_action,block)",
+        "is_block": "bool",
+        "raw_action": "string",
+        "raw_action_key": "string",
+        "action": "string",
+        "short_action": "string",
+        "action_namespace": "string",
+        "is_free_form": "bool",
+        "free_form_text": "string",
+        "module_val_kind": "string",
+        "has_args_key": "bool",
+        "args_val_kind": "string",
+        "args": "map<string, TypedValue>",
+        "arg_keys": "list<string>",
+        "command": "map",
+        "has_name": "bool",
+        "name": "TypedValue | null",
+        "name_text": "string",
+        "is_duplicate_name": "bool",
+        "when": "list<TypedValue>",
+        "changed_when": "list<TypedValue>",
+        "failed_when": "list<TypedValue>",
+        "until": "list<TypedValue>",
+        "has_changed_when": "bool",
+        "has_failed_when": "bool",
+        "has_ignore_errors": "bool",
+        "ignore_errors": "TypedValue | null",
+        "has_register": "bool",
+        "register": "TypedValue | null",
+        "has_no_log": "bool",
+        "no_log": "TypedValue | null",
+        "has_become": "bool",
+        "has_become_user": "bool",
+        "has_delegate_to": "bool",
+        "delegate_to": "TypedValue | null",
+        "has_run_once": "bool",
+        "run_once": "TypedValue | null",
+        "has_async": "bool",
+        "async": "TypedValue | null",
+        "has_poll": "bool",
+        "poll": "TypedValue | null",
+        "has_local_action": "bool",
+        "loop_key": "string",
+        "loop": "TypedValue | null",
+        "in_handlers": "bool",
+        "in_block": "bool",
+        "nesting_depth": "int",
+        "section": "string",
+        "play_strategy": "string",
+        "play_name": "string",
+        "string_leaves": "list<map>"
+      }
+    },
+    "role_ref": {
+      "fields": ["self", "name", "role", "when"],
+      "node_fields": {
+        "name": "string",
+        "is_templated": "bool",
+        "when": "list<TypedValue>",
+        "site": "string"
+      }
+    },
+    "var_def": {
+      "fields": ["self", "name", "value"],
+      "node_fields": {
+        "name": "string",
+        "key_kind": "string",
+        "is_quoted": "bool",
+        "is_templated": "bool",
+        "is_ascii": "bool",
+        "site": "string"
+      }
+    },
+    "role_meta": {
+      "fields": ["self", "author", "description", "company", "license", "min_ansible_version", "galaxy_tags", "categories", "platforms", "video_links"],
+      "node_fields": {
+        "has_galaxy_info": "bool",
+        "author": "TypedValue | null",
+        "description": "TypedValue | null",
+        "company": "TypedValue | null",
+        "license": "TypedValue | null",
+        "min_ansible_version": "TypedValue | null",
+        "has_galaxy_tags": "bool",
+        "galaxy_tags": "TypedValue | null",
+        "has_categories": "bool",
+        "categories": "TypedValue | null",
+        "has_platforms": "bool",
+        "platforms": "TypedValue | null",
+        "video_links": "list<map>"
+      }
+    },
+    "galaxy_meta": {
+      "fields": ["self", "namespace", "name", "version", "tags", "dependencies", "repository", "license", "license_file"],
+      "node_fields": {
+        "namespace": "TypedValue | null",
+        "name": "TypedValue | null",
+        "has_version": "bool",
+        "version": "TypedValue | null",
+        "has_tags": "bool",
+        "tags": "TypedValue | null",
+        "dependencies": "list<map>",
+        "has_repository": "bool",
+        "repository": "TypedValue | null",
+        "has_license": "bool",
+        "license": "TypedValue | null",
+        "has_license_file": "bool",
+        "license_file": "TypedValue | null"
+      }
+    },
+    "parse_issue": {
+      "fields": ["self"],
+      "node_fields": {
+        "kind": "enum(yaml_syntax,ansible_structure)",
+        "message": "string"
+      }
+    }
+  }
+}

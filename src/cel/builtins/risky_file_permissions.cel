@@ -1,0 +1,23 @@
+zals.Rule{
+  id: "risky-file-permissions",
+  target: "task",
+  severity: "warning",
+  field: "action",
+  condition: !("mode" in node.args) &&
+    (
+      node.short_action in [
+        "copy", "template", "get_url", "assemble", "archive", "unarchive",
+        "htpasswd", "openssl_privatekey", "openssl_csr", "openssl_certificate",
+        "replace"
+      ] ||
+      (node.short_action == "file" &&
+        "state" in node.args &&
+        node.args.state.kind == "string" &&
+        node.args.state.value in ["touch", "directory"]) ||
+      (node.short_action in ["lineinfile", "blockinfile", "ini_file"] &&
+        "create" in node.args &&
+        node.args.create.kind == "bool" &&
+        node.args.create.value)
+    ),
+  message: "File permissions unset or incorrect; specify an explicit 'mode'."
+}

@@ -1,0 +1,13 @@
+zals.Rule{
+  id: "command-instead-of-shell",
+  target: "task",
+  severity: "warning",
+  field: "action",
+  condition: node.short_action == "shell" &&
+    !("executable" in node.args) &&
+    node.command.text != "" &&
+    !node.command.has_shell_metachar &&
+    !node.command.has_multiline &&
+    !node.command.text.contains("{{"),
+  message: "Use command instead of shell when shell functionality is not required."
+}

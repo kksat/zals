@@ -51,3 +51,7 @@ pinned Zig 0.15.1 toolchain ([ADR-0019](0019-toolchain-build-and-platforms.md)).
   map/list values rather than via custom side-effectful host functions.
 - Updating `zig-cel` requires only updating the pinned archive `url` and
   content `hash` in `build.zig.zon`.
+- Upstream `zig-cel` at commit `445a967` has a regex codegen defect in `regex.zig`
+  where alternations with three or more top-level branches skip branch 2+;
+  built-in `.cel` rules express regex alternations using 2-way groups or
+  separate `matches()` calls rather than maintaining local engine patches.

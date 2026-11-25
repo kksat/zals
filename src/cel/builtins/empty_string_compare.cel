@@ -1,0 +1,11 @@
+zals.Rule{
+  id: "empty-string-compare",
+  target: "task",
+  severity: "warning",
+  field: "when",
+  condition: node.when.exists(w, (w.kind == "string" || w.kind == "template") && w.value.matches("(==|!=)\\s*(\"\"|'')")) ||
+    node.changed_when.exists(w, (w.kind == "string" || w.kind == "template") && w.value.matches("(==|!=)\\s*(\"\"|'')")) ||
+    node.failed_when.exists(w, (w.kind == "string" || w.kind == "template") && w.value.matches("(==|!=)\\s*(\"\"|'')")) ||
+    node.until.exists(w, (w.kind == "string" || w.kind == "template") && w.value.matches("(==|!=)\\s*(\"\"|'')")),
+  message: "Do not compare to an empty string; test string truthiness or 'length == 0'."
+}

@@ -1,0 +1,13 @@
+zals.Rule{
+  id: "jinja-template-extension",
+  target: "task",
+  severity: "warning",
+  field: "src",
+  condition: node.short_action in ["template", "win_template"] &&
+    "src" in node.args &&
+    node.args.src.kind == "string" &&
+    !node.args.src.is_templated &&
+    node.args.src.value != "" &&
+    !node.args.src.value.endsWith(".j2"),
+  message: "Template files should use the '.j2' extension."
+}

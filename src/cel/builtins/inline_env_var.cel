@@ -1,0 +1,8 @@
+zals.Rule{
+  id: "inline-env-var",
+  target: "task",
+  severity: "warning",
+  field: "action",
+  condition: node.short_action == "command" && node.command.has_inline_env_var,
+  message: "Command module does not accept setting environment variables inline; use the 'environment' keyword."
+}

@@ -1,0 +1,7 @@
+zals.Rule{
+  id: "var-naming[non-string]",
+  target: "var_def",
+  severity: "error",
+  condition: !(node.key_kind in ["string", "template"]),
+  message: "Variable names must be strings, got " + node.key_kind + "."
+}

@@ -1,0 +1,11 @@
+zals.Rule{
+  id: "no-tabs",
+  target: "task",
+  severity: "warning",
+  condition: node.string_leaves.exists(s,
+    s.value.contains("\t") &&
+    !s.is_templated &&
+    !(node.short_action == "lineinfile" && s.key == "line")
+  ),
+  message: "Most files should not contain tabs."
+}

@@ -1,0 +1,21 @@
+zals.Rule{
+  id: "command-instead-of-module",
+  target: "task",
+  severity: "warning",
+  field: "action",
+  condition: node.short_action in ["command", "shell"] &&
+    node.command.basename in [
+      "git", "hg", "curl", "wget", "svn", "service", "mount", "rpm", "yum",
+      "apt-get", "apt", "dnf", "tar", "unzip", "sed", "rsync", "systemctl",
+      "chkconfig", "chmod", "chown", "mkdir", "rm", "rmdir", "ln", "touch",
+      "pip", "pip3", "supervisorctl", "useradd", "usermod", "userdel",
+      "groupadd", "groupmod", "groupdel", "umount", "crontab"
+    ] &&
+    !(node.command.basename == "git" && node.command.second_word in ["branch", "log", "status", "rev-parse", "describe", "diff", "show", "ls-remote"]) &&
+    !(node.command.basename == "systemctl" && node.command.second_word in ["status", "show", "is-active", "is-enabled", "list-units", "list-unit-files"]) &&
+    !(node.command.basename == "rpm" && node.command.second_word in ["-q", "--query", "-V", "--verify", "-qa"]) &&
+    !(node.command.basename in ["yum", "dnf"] && node.command.second_word in ["list", "info", "check-update", "repolist"]) &&
+    !(node.command.basename in ["apt", "apt-get"] && node.command.second_word in ["list", "search", "show"]) &&
+    !(node.command.basename == "tar" && node.command.second_word in ["-t", "--list", "-tf", "-tzf"]),
+  message: node.command.basename + " used in place of an Ansible module."
+}

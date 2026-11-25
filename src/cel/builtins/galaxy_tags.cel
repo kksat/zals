@@ -1,0 +1,11 @@
+zals.Rule{
+  id: "galaxy[tags]",
+  target: "galaxy_meta",
+  severity: "warning",
+  field: "tags",
+  condition: !node.has_tags ||
+    node.tags == null ||
+    node.tags.kind != "list" ||
+    size(node.tags.value) == 0,
+  message: "galaxy.yml must define a non-empty 'tags' list."
+}

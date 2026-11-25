@@ -1,0 +1,8 @@
+zals.Rule{
+  id: "no-jinja-when",
+  target: ["task", "role_ref"],
+  severity: "warning",
+  field: "when",
+  condition: node.when.exists(w, w.is_templated),
+  message: "No Jinja2 delimiters in 'when' conditionals."
+}

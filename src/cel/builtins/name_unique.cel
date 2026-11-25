@@ -1,0 +1,8 @@
+zals.Rule{
+  id: "name[unique]",
+  target: "task",
+  severity: "warning",
+  field: "name",
+  condition: node.is_duplicate_name,
+  message: "All tasks within a play must have unique names; duplicate name '" + node.name_text + "'."
+}

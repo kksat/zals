@@ -1,0 +1,20 @@
+zals.Rule{
+  id: "meta-video-links",
+  target: "role_meta",
+  severity: "warning",
+  field: "video_links",
+  condition: node.has_galaxy_info &&
+    node.video_links.exists(v,
+      !v.is_map ||
+      v.url == null ||
+      v.url.kind != "string" ||
+      v.title == null ||
+      v.title.kind != "string" ||
+      v.keys.exists(k, !(k in ["url", "title"])) ||
+      !(v.url.value.matches("^https://(www\\.)?youtube\\.com/watch\\?v=[A-Za-z0-9_-]+$") ||
+        v.url.value.matches("^https://youtu\\.be/[A-Za-z0-9_-]+$") ||
+        v.url.value.matches("^https://vimeo\\.com/[0-9]+$") ||
+        v.url.value.matches("^https://drive\\.google\\.com/file/d/[A-Za-z0-9_-]+"))
+    ),
+  message: "Role meta/main.yml contains an invalid 'video_links' entry."
+}

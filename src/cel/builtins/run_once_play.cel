@@ -1,0 +1,12 @@
+zals.Rule{
+  id: "run-once[play]",
+  target: "play",
+  severity: "warning",
+  field: "run_once",
+  condition: node.has_run_once &&
+    node.run_once != null &&
+    node.run_once.kind == "bool" &&
+    node.run_once.value &&
+    node.strategy_text == "free",
+  message: "Using 'run_once' with the 'free' strategy may behave unexpectedly."
+}

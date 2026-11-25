@@ -52,6 +52,7 @@ pub const TargetKind = enum(u8) {
                 "post_tasks",
                 "handlers",
                 "roles",
+                "import_playbook",
             },
             .task => &.{
                 "self",
@@ -62,6 +63,7 @@ pub const TargetKind = enum(u8) {
                 "when",
                 "changed_when",
                 "failed_when",
+                "until",
                 "ignore_errors",
                 "no_log",
                 "become",
@@ -74,6 +76,7 @@ pub const TargetKind = enum(u8) {
                 "mode",
                 "state",
                 "version",
+                "revision",
                 "src",
                 "dest",
                 "content",
