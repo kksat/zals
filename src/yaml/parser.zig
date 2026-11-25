@@ -11,6 +11,8 @@ const Node = dom.Node;
 
 pub const Forest = dom.Forest;
 
+pub const UnsupportedYaml = error.UnsupportedYaml;
+
 const Line = struct {
     /// Indent of the first non-space character (the `-` if this is a seq item).
     indent: usize,
@@ -19,6 +21,7 @@ const Line = struct {
     start: usize,
     /// Byte offset past the last non-newline character.
     end: usize,
+    trivia_end: usize,
     /// Text after indent and optional `- `.
     body: []const u8,
     /// Byte offset of `body`.
@@ -31,6 +34,8 @@ const Parser = struct {
     text: []const u8,
     lines: []const Line,
     i: usize,
+    audit: bool = false,
+    unsupported: bool = false,
 
     fn peek(self: *Parser) ?Line {
         if (self.i >= self.lines.len or self.lines[self.i].marker != .none) return null;
@@ -49,6 +54,15 @@ const Parser = struct {
 };
 
 pub fn parse(allocator: Allocator, text: []const u8) !Forest {
+    return parseImpl(allocator, text, false);
+}
+
+/// Parse, rejecting constructs tree-sitter lowers differently.
+pub fn parseChecked(allocator: Allocator, text: []const u8) !Forest {
+    return parseImpl(allocator, text, true);
+}
+
+fn parseImpl(allocator: Allocator, text: []const u8, audit: bool) !Forest {
     var forest = Forest{
         .arena = std.heap.ArenaAllocator.init(allocator),
         .text = text,
@@ -59,7 +73,7 @@ pub fn parse(allocator: Allocator, text: []const u8) !Forest {
     const arena = forest.arena.allocator();
 
     const lines = try collectLines(arena, text);
-    var p = Parser{ .arena = arena, .text = text, .lines = lines, .i = 0 };
+    var p = Parser{ .arena = arena, .text = text, .lines = lines, .i = 0, .audit = audit };
 
     var roots = std.array_list.Managed(*Node).init(arena);
     var document_starts = std.array_list.Managed(usize).init(arena);
@@ -70,6 +84,11 @@ pub fn parse(allocator: Allocator, text: []const u8) !Forest {
             continue;
         }
         if (line.marker == .start) p.bump();
+        if (p.audit and line.marker == .none and roots.items.len > 0) p.unsupported = true;
+        if (p.audit and line.marker == .none and !line.has_dash and line.indent == 0 and
+            line.body.len > 0 and (line.body[0] == '%' or
+            std.mem.startsWith(u8, line.body, "---") or
+            std.mem.startsWith(u8, line.body, "..."))) p.unsupported = true;
         // Markers stop recursive parsing, so maps and sequences cannot consume
         // another document. Retain an empty root for an explicit empty document.
         const root = try parseNode(&p, 0) orelse blk: {
@@ -80,6 +99,7 @@ pub fn parse(allocator: Allocator, text: []const u8) !Forest {
         try roots.append(root);
         try document_starts.append(if (line.marker == .start) line.start else root.start);
     }
+    if (p.unsupported) return error.UnsupportedYaml;
     forest.roots = try roots.toOwnedSlice();
     forest.document_starts = try document_starts.toOwnedSlice();
     return forest;
@@ -101,7 +121,13 @@ fn collectLines(arena: Allocator, text: []const u8) ![]Line {
         const rest = raw[indent..];
         const trimmed = std.mem.trimRight(u8, rest, " \t");
         if (trimmed.len == 0) continue;
-        if (trimmed[0] == '#') continue;
+        if (trimmed[0] == '#') {
+            if (lines.items.len > 0) {
+                const last = &lines.items[lines.items.len - 1];
+                last.trivia_end = line_start + indent + trimmed.len;
+            }
+            continue;
+        }
         // Only column-zero, standalone markers (optionally commented) delimit
         // documents. Indented marker-looking text can be scalar content.
         if (indent == 0 and trimmed.len >= 3) {
@@ -115,6 +141,7 @@ fn collectLines(arena: Allocator, text: []const u8) ![]Line {
                         .has_dash = false,
                         .start = line_start,
                         .end = line_start + 3,
+                        .trivia_end = line_start + 3,
                         .body = trimmed[0..3],
                         .body_start = line_start,
                         .marker = if (opening) .start else .end,
@@ -144,6 +171,7 @@ fn collectLines(arena: Allocator, text: []const u8) ![]Line {
             .has_dash = has_dash,
             .start = line_start + indent,
             .end = line_start + indent + trimmed.len,
+            .trivia_end = line_start + indent + trimmed.len,
             .body = body,
             .body_start = line_start + body_off,
         });
@@ -157,7 +185,15 @@ fn parseNode(p: *Parser, min_indent: usize) anyerror!?*Node {
     if (line.has_dash) return try parseSeq(p, line.indent);
     if (keyColonPos(line.body) != null) return try parseMap(p, line.indent);
     p.bump();
-    return try parseScalarFrom(p, line.body, line.body_start, line.end);
+    return try parseScalarItem(p, line);
+}
+
+/// Node end matching tree-sitter's range rule.
+fn contentEnd(p: *Parser) usize {
+    if (p.i == 0) return 0;
+    const last_index = p.i - 1;
+    if (last_index == p.lines.len - 1) return p.text.len;
+    return p.lines[last_index].trivia_end;
 }
 
 fn parseSeq(p: *Parser, indent: usize) anyerror!*Node {
@@ -169,9 +205,9 @@ fn parseSeq(p: *Parser, indent: usize) anyerror!*Node {
         const item = try parseSeqItem(p);
         item.parent = seq;
         try items.append(item);
-        seq.end = item.end;
     }
     seq.items = try items.toOwnedSlice();
+    seq.end = contentEnd(p);
     return seq;
 }
 
@@ -186,7 +222,14 @@ fn parseSeqItem(p: *Parser) anyerror!*Node {
     if (keyColonPos(line.body) != null) {
         return parseMapStartingAt(p, line, contentIndent(line));
     }
-    return try parseScalarFrom(p, line.body, line.body_start, line.end);
+    return try parseScalarItem(p, line);
+}
+
+fn parseScalarItem(p: *Parser, line: Line) anyerror!*Node {
+    const body = line.body;
+    const comment = unquotedHash(body);
+    const scalar_text = if (comment) |c| std.mem.trimRight(u8, body[0..c], " \t") else body;
+    return try parseScalarFrom(p, scalar_text, line.body_start, line.body_start + scalar_text.len);
 }
 
 fn contentIndent(line: Line) usize {
@@ -199,7 +242,7 @@ fn parseMap(p: *Parser, indent: usize) anyerror!*Node {
 }
 
 fn parseMapStartingAt(p: *Parser, first: Line, indent: usize) anyerror!*Node {
-    const map = try p.allocNode(.map, first.start, first.end);
+    const map = try p.allocNode(.map, first.body_start, first.end);
     var pairs = std.array_list.Managed(*Node).init(p.arena);
 
     if (p.peek()) |cur| {
@@ -211,7 +254,6 @@ fn parseMapStartingAt(p: *Parser, first: Line, indent: usize) anyerror!*Node {
         const pair = try parsePair(p, line, indent) orelse break;
         pair.parent = map;
         try pairs.append(pair);
-        map.end = pair.end;
 
         const next = p.peek() orelse break;
         if (next.indent != indent or next.has_dash) break;
@@ -219,14 +261,14 @@ fn parseMapStartingAt(p: *Parser, first: Line, indent: usize) anyerror!*Node {
         p.bump();
     }
     map.items = try pairs.toOwnedSlice();
+    map.end = contentEnd(p);
     return map;
 }
 
 fn parsePair(p: *Parser, line: Line, indent: usize) anyerror!?*Node {
     const colon = keyColonPos(line.body) orelse {
-        // A colon-less line at map indent is an incomplete key with no value
-        // (e.g. `ansible.builtin.` while typing). Upstream's YAML parser keeps
-        // it as a pair with a null value.
+        // A colon-less line at map indent joins the previous value in tree-sitter.
+        if (p.audit) p.unsupported = true;
         if (line.body.len == 0 or line.body[0] == '#') return null;
         const key_node = try parseScalarFrom(p, line.body, line.body_start, line.end);
         const pair = try p.allocNode(.pair, key_node.start, key_node.end);
@@ -239,8 +281,9 @@ fn parsePair(p: *Parser, line: Line, indent: usize) anyerror!?*Node {
     };
     const key_raw = std.mem.trimRight(u8, line.body[0..colon], " \t");
     const key_node = try parseScalarFrom(p, key_raw, line.body_start, line.body_start + key_raw.len);
+    const colon_end = line.body_start + colon + 1;
 
-    const pair = try p.allocNode(.pair, key_node.start, key_node.end);
+    const pair = try p.allocNode(.pair, key_node.start, colon_end);
     pair.key = key_node;
     key_node.parent = pair;
 
@@ -252,14 +295,15 @@ fn parsePair(p: *Parser, line: Line, indent: usize) anyerror!?*Node {
         if (p.peek()) |next| {
             if (next.indent > indent) {
                 value = try parseNode(p, next.indent) orelse
-                    try emptyScalar(p, line.end);
+                    try emptyScalar(p, colon_end);
             } else {
-                value = try emptyScalar(p, line.end);
+                value = try emptyScalar(p, colon_end);
             }
         } else {
-            value = try emptyScalar(p, line.end);
+            value = try emptyScalar(p, colon_end);
         }
     } else if (after[0] == '|' or after[0] == '>') {
+        if (p.audit) auditBlockScalarHeader(after, p);
         value = try parseBlockScalar(p, after_off, after, indent);
     } else {
         const comment = unquotedHash(after);
@@ -283,26 +327,52 @@ fn parseBlockScalar(p: *Parser, start: usize, header: []const u8, parent_indent:
     const strip = std.mem.indexOfScalar(u8, header, '-') != null;
     const keep = std.mem.indexOfScalar(u8, header, '+') != null;
     var buf = std.array_list.Managed(u8).init(p.arena);
-    var end = start;
     while (p.peek()) |line| {
         if (line.indent <= parent_indent) break;
         if (buf.items.len > 0) try buf.append(if (folded) ' ' else '\n');
         try buf.appendSlice(p.text[line.start..line.end]);
-        end = line.end;
         p.bump();
     }
     // Clip chomping keeps a single trailing newline; `-` strips it, `+` keeps all.
     if (!strip) try buf.append('\n');
     if (keep) try buf.append('\n');
-    const n = try p.allocNode(.scalar, start, end);
+    const n = try p.allocNode(.scalar, start, contentEnd(p));
     n.value = try buf.toOwnedSlice();
     return n;
 }
 
 fn parseScalarFrom(p: *Parser, raw: []const u8, start: usize, end: usize) !*Node {
+    if (p.audit) auditScalar(raw, p);
     const n = try p.allocNode(.scalar, start, end);
     n.value = unquote(raw);
     return n;
+}
+
+fn auditScalar(raw: []const u8, p: *Parser) void {
+    if (raw.len == 0) return;
+    switch (raw[0]) {
+        '-' => {
+            if (raw.len == 1 or raw[1] == ' ' or raw[1] == '\t') p.unsupported = true;
+        },
+        '{', '[', '&', '*', '!' => p.unsupported = true,
+        '"', '\'' => {
+            if (raw.len < 2 or raw[raw.len - 1] != raw[0]) {
+                p.unsupported = true;
+            } else if (raw[0] == '"') {
+                if (std.mem.indexOfScalar(u8, raw, '\\') != null) p.unsupported = true;
+            } else if (std.mem.indexOf(u8, raw[1 .. raw.len - 1], "''") != null) {
+                p.unsupported = true;
+            }
+        },
+        else => {},
+    }
+}
+
+fn auditBlockScalarHeader(header: []const u8, p: *Parser) void {
+    for (header[1..]) |c| {
+        if (c == ' ' or c == '\t' or c == '#') break;
+        if (c != '-' and c != '+') p.unsupported = true;
+    }
 }
 
 fn unquote(s: []const u8) []const u8 {
@@ -436,4 +506,23 @@ test "block scalars end at dedented sequence items" {
     try std.testing.expectEqualStrings("text\n", dom.findPair(first, "msg").?.val.?.value.?);
     const second = dom.findPair(root.items[1], "vars").?.val.?;
     try std.testing.expectEqualStrings("more\n", dom.findPair(second, "msg").?.val.?.value.?);
+}
+
+test "parseChecked accepts block YAML and rejects unmodeled constructs" {
+    const plain =
+        \\- hosts: all
+        \\  tasks:
+        \\    - name: ping
+        \\      ansible.builtin.ping:
+        \\
+    ;
+    var ok = try parseChecked(std.testing.allocator, plain);
+    defer ok.deinit();
+    try std.testing.expectEqual(@as(usize, 1), ok.roots.len);
+
+    const flow =
+        \\vars: {port: 80}
+        \\
+    ;
+    try std.testing.expectError(error.UnsupportedYaml, parseChecked(std.testing.allocator, flow));
 }

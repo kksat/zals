@@ -25,12 +25,15 @@ pub const Backend = enum { subset, tree_sitter };
 /// fallback parser.
 pub var backend: Backend = .tree_sitter;
 
-/// Parse `text` with the active backend. If the tree-sitter backend fails for
-/// any reason, fall back to the subset parser so callers always get a forest.
+/// Parse `text` with the active backend: the audited subset parser first when
+/// tree-sitter is active, deferring to tree-sitter beyond the subset model.
 pub fn parse(allocator: std.mem.Allocator, text: []const u8) !Forest {
     return switch (backend) {
         .subset => parser.parse(allocator, text),
-        .tree_sitter => treesitter.parse(allocator, text) catch parser.parse(allocator, text),
+        .tree_sitter => parseFast: {
+            if (parser.parseChecked(allocator, text)) |forest| break :parseFast forest else |_| {}
+            break :parseFast treesitter.parse(allocator, text) catch parser.parse(allocator, text);
+        },
     };
 }
 pub const AncestryBuilder = ancestry.AncestryBuilder;

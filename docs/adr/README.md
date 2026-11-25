@@ -55,6 +55,7 @@ Each ADR captures one decision, its context, and its consequences. Statuses are
 | [0049](0049-vendored-parser-optimized-in-every-build-mode.md) | Optimize the vendored parser in every build mode | Accepted |
 | [0050](0050-cel-rule-engine.md) | Native CEL rule engine via zig-cel package dependency | Accepted |
 | [0051](0051-cross-request-navigation-cache.md) | Cross-request navigation cache | Accepted |
+| [0052](0052-audited-subset-fast-path.md) | Audited subset fast path for YAML parsing | Accepted |
 
 ## Template
 
