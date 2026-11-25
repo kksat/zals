@@ -10,6 +10,7 @@ const DocumentStore = @import("../workspace/store.zig").DocumentStore;
 const DocsLibrary = @import("../services/docs.zig").DocsLibrary;
 const paths = @import("../paths.zig");
 const context_mod = @import("context.zig");
+const Cache = @import("cache.zig").Cache;
 
 pub const Fixture = struct {
     tmp: std.testing.TmpDir,
@@ -92,6 +93,30 @@ pub const Fixture = struct {
             .docs = .{ .ptr = self, .forPathsFn = noDocs },
             .encoding = .utf16,
         });
+    }
+
+    pub fn scan(self: *Fixture) !void {
+        if (self.workspace) try self.index.scanNow(self.root, ".git");
+    }
+
+    pub fn contextWithCache(self: *Fixture, cache: *Cache) !context_mod.Context {
+        std.debug.assert(self.lease == null);
+        const a = self.allocator();
+        self.lease = self.index.acquireQuery(false);
+        cache.beginRequest(self.index.entriesGeneration(), self.documents.generationOf(), 0);
+        const roots: []const []const u8 = if (self.workspace) try a.dupe([]const u8, &.{self.root}) else &.{};
+        return context_mod.Context.init(a, &self.lease.?, .{
+            .documents = &self.documents,
+            .workspaces = .{ .roots = roots, .marker = ".git", .venv = "" },
+            .docs = .{ .ptr = self, .forPathsFn = noDocs },
+            .encoding = .utf16,
+            .cache = cache,
+        });
+    }
+
+    pub fn release(self: *Fixture) void {
+        self.lease.?.release();
+        self.lease = null;
     }
 
     /// Byte offset of the first `needle` in `text`, plus `skip`.

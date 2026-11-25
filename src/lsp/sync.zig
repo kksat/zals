@@ -42,6 +42,7 @@ pub fn didClose(self: *Server, a: Allocator, params: Value) !void {
     const uri = json_util.string(td, "uri") orelse return;
     self.documents.close(uri);
     providers.validation.onClose(self, a, uri) catch {};
+    self.query_cache.forgetDocument(uri);
 }
 
 pub fn didSave(self: *Server, a: Allocator, params: Value) !void {

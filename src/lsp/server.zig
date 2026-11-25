@@ -22,6 +22,7 @@ const docs_service = @import("../services/docs_service.zig");
 const DocsService = docs_service.DocsService;
 const Writer = @import("writer.zig").Writer;
 const navigation_context = @import("../queries/context.zig");
+const navigation_cache = @import("../queries/cache.zig");
 const validation_provider = @import("../providers/validation.zig");
 
 pub const Server = struct {
@@ -48,6 +49,7 @@ pub const Server = struct {
     session: workspace_session.Session,
     /// Workspace index (ADR-0031).
     index: *WorkspaceIndex,
+    query_cache: *navigation_cache.Cache,
     /// The client supports dynamic registration of watched files.
     can_watch_files: bool = false,
     /// Watched-file events keep the index current; otherwise it re-stats.
@@ -64,6 +66,8 @@ pub const Server = struct {
         errdefer writer.deinit();
         const index = try WorkspaceIndex.create(allocator);
         errdefer index.destroy();
+        const query_cache = try navigation_cache.Cache.create(allocator);
+        errdefer query_cache.destroy();
 
         return Server{
             .allocator = allocator,
@@ -81,6 +85,7 @@ pub const Server = struct {
             .contextual_docs = docs_service.ContextLibraries.init(allocator, runner),
             .session = try workspace_session.Session.init(allocator, venv_override),
             .index = index,
+            .query_cache = query_cache,
         };
     }
 
@@ -94,6 +99,7 @@ pub const Server = struct {
         self.pool.deinit();
         self.validation.deinit();
         self.index.destroy();
+        self.query_cache.destroy();
         self.documents.deinit();
         self.settings.deinit();
         self.contextual_docs.deinit();
@@ -224,12 +230,15 @@ pub const Server = struct {
     /// The paths are already absolute (relative entries keep their server-cwd
     /// meaning), and `ansible-doc` runs in the server's working directory.
     pub fn navigationContext(self: *Server, a: Allocator, lease: *const WorkspaceIndex.QueryLease) !navigation_context.Context {
+        if (!self.watching_files) self.index.refreshUnderLease();
+        self.query_cache.beginRequest(self.index.entriesGeneration(), self.documents.generationOf(), self.session.generationOf());
         return navigation_context.Context.init(a, lease, .{
             .documents = &self.documents,
             .workspaces = self.session.snapshot(),
             .ansible_config = &self.ansible_config,
             .docs = navigation_context.Docs.contextual(&self.contextual_docs),
             .encoding = self.encoding,
+            .cache = self.query_cache,
         });
     }
 };

@@ -54,6 +54,7 @@ Each ADR captures one decision, its context, and its consequences. Statuses are
 | [0048](0048-no-inline-code-comments.md) | No inline code comments | Accepted |
 | [0049](0049-vendored-parser-optimized-in-every-build-mode.md) | Optimize the vendored parser in every build mode | Accepted |
 | [0050](0050-cel-rule-engine.md) | Native CEL rule engine via zig-cel package dependency | Accepted |
+| [0051](0051-cross-request-navigation-cache.md) | Cross-request navigation cache | Accepted |
 
 ## Template
 
