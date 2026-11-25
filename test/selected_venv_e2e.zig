@@ -4,6 +4,7 @@ const std = @import("std");
 const lsp = @import("e2e/client.zig");
 const anchor = @import("e2e/anchor.zig");
 const model = @import("e2e/model.zig");
+const ansible_doc = @import("e2e/ansible_doc.zig");
 const Value = std.json.Value;
 
 const Session = struct {
@@ -126,6 +127,7 @@ test "direct ansible_collections environment path resolves the dependency with v
 }
 
 test "relative direct collection paths retain server cwd meaning for navigation and modules" {
+    try ansible_doc.requireUsable();
     var session = try Session.start("", .{ .collections_path = "test/fixtures/selected-venv/.venv/ansible_collections", .use_fixture_config = false });
     defer session.deinit();
     const collection = model.cursor("configs/direct/site.yml", "    - <fixture.root>\n");
@@ -138,6 +140,7 @@ test "relative direct collection paths retain server cwd meaning for navigation 
 }
 
 test "nearest config can name ansible_collections directly with venv disabled" {
+    try ansible_doc.requireUsable();
     var session = try Session.start("", .{ .collections_path = "", .use_fixture_config = false });
     defer session.deinit();
     const collection = model.cursor("configs/direct/site.yml", "    - <fixture.root>\n");
@@ -150,6 +153,7 @@ test "nearest config can name ansible_collections directly with venv disabled" {
 }
 
 test "direct collection aliases preserve path order and do not duplicate module completions" {
+    try ansible_doc.requireUsable();
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
@@ -221,6 +225,7 @@ test "selected venv root collection definition and hover" {
 }
 
 test "selected venv root module definition and hover use the file's collections paths" {
+    try ansible_doc.requireUsable();
     var session = try Session.start(".venv", .{});
     defer session.deinit();
     const from = model.cursor("site.yml", "      fixture.root.<probe>:");
@@ -242,6 +247,7 @@ test "module completion discovers modules on the effective selected venv paths" 
 }
 
 test "completion resolve retains the originating file's selected venv paths" {
+    try ansible_doc.requireUsable();
     var session = try Session.start(".venv", .{});
     defer session.deinit();
     const result = try session.at("textDocument/completion", model.cursor("completion.yml", "      <module_choice>:"));
@@ -258,6 +264,7 @@ test "completion resolve retains the originating file's selected venv paths" {
 }
 
 test "selected venv module options receive schema-aware semantic tokens" {
+    try ansible_doc.requireUsable();
     var session = try Session.start(".venv", .{});
     defer session.deinit();
     const option = model.cursor("site.yml", "        <message>: root");
@@ -281,6 +288,7 @@ test "selected venv module options receive schema-aware semantic tokens" {
 }
 
 test "relative environment collections paths keep server cwd meaning in doc subprocesses" {
+    try ansible_doc.requireUsable();
     var session = try Session.start("", .{ .collections_path = "test/fixtures/selected-venv/.venv", .use_fixture_config = false });
     defer session.deinit();
     const from = model.cursor("configs/b/site.yml", "    - fixture.root.<probe>:");
@@ -289,6 +297,7 @@ test "relative environment collections paths keep server cwd meaning in doc subp
 }
 
 test "module docs stay isolated across Workspaces and changes of selected environment" {
+    try ansible_doc.requireUsable();
     var session = try Session.start(".venv", .{});
     defer session.deinit();
     const parent = model.cursor("site.yml", "      fixture.root.<probe>:");
@@ -320,6 +329,7 @@ test "module docs stay isolated across Workspaces and changes of selected enviro
 }
 
 test "module docs use nearest per-file ansible.cfg without cross-file cache contamination" {
+    try ansible_doc.requireUsable();
     var session = try Session.start("", .{ .collections_path = "", .use_fixture_config = false });
     defer session.deinit();
     const configured = model.cursor("site.yml", "      fixture.root.<probe>:");

@@ -7,6 +7,7 @@ const std = @import("std");
 const lsp = @import("e2e/client.zig");
 const anchor = @import("e2e/anchor.zig");
 const model = @import("e2e/model.zig");
+const ansible_doc = @import("e2e/ansible_doc.zig");
 const Value = std.json.Value;
 
 /// `ansible.builtin.copy`'s short description, stable across ansible-core
@@ -31,18 +32,8 @@ const playbook =
     \\
 ;
 
-fn requireAnsibleDoc(a: std.mem.Allocator) !void {
-    const result = std.process.Child.run(.{
-        .allocator = a,
-        .argv = &.{ "ansible-doc", "--version" },
-        .max_output_bytes = 1 << 20,
-    }) catch return error.SkipZigTest;
-    defer a.free(result.stdout);
-    defer a.free(result.stderr);
-    switch (result.term) {
-        .Exited => |code| if (code != 0) return error.SkipZigTest,
-        else => return error.SkipZigTest,
-    }
+fn requireAnsibleDoc() !void {
+    try ansible_doc.requireUsable();
 }
 
 const Session = struct {
@@ -131,7 +122,7 @@ test "real ansible-doc serves builtin module documentation and completion" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    try requireAnsibleDoc(a);
+    try requireAnsibleDoc();
 
     var workspace = try makeWorkspace();
     defer workspace.cleanup();
@@ -202,7 +193,7 @@ test "docs bootstrap persists real documentation and a warm restart serves it" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    try requireAnsibleDoc(a);
+    try requireAnsibleDoc();
 
     var workspace = try makeWorkspace();
     defer workspace.cleanup();
