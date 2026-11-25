@@ -72,6 +72,11 @@ pub const Session = struct {
     warn_missing: bool = true,
     warned: bool = false,
     ready: bool = false,
+    generation: u64 = 0,
+
+    pub fn generationOf(self: *const Session) u64 {
+        return self.generation;
+    }
 
     /// The CLI selection is copied, including an empty (disabled) override.
     pub fn init(gpa: Allocator, venv_override: ?[]const u8) !Session {
@@ -158,11 +163,23 @@ pub const Session = struct {
                 next.warned = true;
             }
         }
+        const changed = sessionChanged(self, &next);
         self.deinit();
+        if (changed) next.generation = self.generation + 1;
         self.* = next;
         return effects;
     }
 };
+
+fn sessionChanged(before: *const Session, after: *const Session) bool {
+    if (!std.mem.eql(u8, before.marker, after.marker)) return true;
+    if (!std.mem.eql(u8, before.venv, after.venv)) return true;
+    if ((before.venv_override == null) != (after.venv_override == null)) return true;
+    if (before.venv_override) |venv| if (!std.mem.eql(u8, venv, after.venv_override.?)) return true;
+    if (before.roots.len != after.roots.len) return true;
+    for (before.roots, after.roots) |x, y| if (!std.mem.eql(u8, x, y)) return true;
+    return false;
+}
 
 fn appendUnique(list: *std.array_list.Managed([]const u8), item: []const u8) !void {
     for (list.items) |existing| if (std.mem.eql(u8, existing, item)) return;
