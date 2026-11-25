@@ -1,0 +1,8 @@
+zals.Rule{
+  id: "vars-list-deprecated",
+  target: ["task", "play"],
+  severity: "warning",
+  field: "vars",
+  condition: node.has_vars && node.vars_val_kind == "list",
+  message: "Specifying a list of dictionaries for 'vars' is deprecated since Ansible 2.15 and will be removed; use a single mapping."
+}

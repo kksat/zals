@@ -1,0 +1,10 @@
+zals.Rule{
+  id: "debug-module",
+  target: "task",
+  severity: "hint",
+  field: "action",
+  condition: !node.is_block &&
+    node.short_action == "debug" &&
+    node.action_namespace in ["", "ansible.builtin", "ansible.legacy"],
+  message: "Use of module 'debug' is discouraged in production."
+}

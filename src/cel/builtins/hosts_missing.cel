@@ -1,0 +1,7 @@
+zals.Rule{
+  id: "hosts-missing",
+  target: "play",
+  severity: "error",
+  condition: !node.is_import_playbook && !("hosts" in node.keys),
+  message: "The 'hosts' keyword is required for a play."
+}

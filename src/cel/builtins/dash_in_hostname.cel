@@ -1,0 +1,11 @@
+zals.Rule{
+  id: "dash-in-hostname",
+  target: "play",
+  severity: "error",
+  field: "hosts",
+  condition: node.hosts != null &&
+    node.hosts.kind == "string" &&
+    !node.hosts.is_templated &&
+    node.hosts.value.contains("-"),
+  message: "Dashes should be avoided in hostnames; used in hostname '" + node.hosts.value + "'."
+}

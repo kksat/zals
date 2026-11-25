@@ -1,0 +1,9 @@
+zals.Rule{
+  id: "vars-syntax",
+  target: ["task", "play"],
+  severity: "error",
+  field: "vars",
+  condition: node.has_vars &&
+    node.vars_val_kind in ["string", "template", "int", "float", "bool"],
+  message: "Wrong syntax for 'vars'; variables should be specified as a mapping of names to values."
+}

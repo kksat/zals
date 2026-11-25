@@ -1,0 +1,13 @@
+zals.Rule{
+  id: "debugger[play]",
+  target: "play",
+  severity: "error",
+  field: "debugger",
+  condition: node.has_debugger && node.debugger != null &&
+    ((node.debugger.kind == "bool" && node.debugger.value) ||
+     (node.debugger.kind == "string" &&
+      node.debugger.value in ["always", "on_failed", "on_unreachable", "on_skipped", "verbose"])),
+  message: "This play may pause execution because of 'debugger: " +
+    (node.debugger != null && node.debugger.kind == "string" ? node.debugger.value : "true") +
+    "'. Disable the debugger for running in production."
+}

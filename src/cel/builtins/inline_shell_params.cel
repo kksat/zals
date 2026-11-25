@@ -1,0 +1,12 @@
+zals.Rule{
+  id: "inline-shell-params",
+  target: "task",
+  severity: "hint",
+  field: "action",
+  condition: !node.is_block &&
+    node.short_action in ["command", "shell", "win_command", "win_shell"] &&
+    node.action_namespace in ["", "ansible.builtin", "ansible.legacy"] &&
+    node.is_free_form &&
+    node.free_form_text.matches("(^|\\s)(executable|stdin|chdir|creates|removes|cmd|argv)="),
+  message: "Inline parameters in a shell-like module may be mistaken for command arguments; use the mapping form to avoid ambiguity."
+}

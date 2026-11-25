@@ -1,0 +1,23 @@
+zals.Rule{
+  id: "task-keyword-in-args",
+  target: "task",
+  severity: "error",
+  condition: !node.is_block &&
+    !node.is_free_form &&
+    node.arg_keys.exists(k,
+      k in ["when", "register", "until", "retries", "delay", "changed_when",
+            "failed_when", "ignore_errors", "delegate_to", "run_once",
+            "check_mode", "any_errors_fatal", "become", "become_user",
+            "become_method", "become_flags", "notify", "listen", "loop",
+            "module_defaults", "throttle"] ||
+      k.matches("^with_")),
+  message: "Task keyword '" +
+    node.arg_keys.filter(k,
+      k in ["when", "register", "until", "retries", "delay", "changed_when",
+            "failed_when", "ignore_errors", "delegate_to", "run_once",
+            "check_mode", "any_errors_fatal", "become", "become_user",
+            "become_method", "become_flags", "notify", "listen", "loop",
+            "module_defaults", "throttle"] ||
+      k.matches("^with_"))[0] +
+    "' is not a module parameter; it looks like a task keyword with incorrect indentation."
+}

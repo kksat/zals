@@ -1,0 +1,7 @@
+zals.Rule{
+  id: "mixed-roles-tasks",
+  target: "play",
+  severity: "hint",
+  condition: "tasks" in node.keys && "roles" in node.keys,
+  message: "Use either the 'tasks' or the 'roles' section in a play, not both; the order of execution between roles and tasks is not obvious."
+}

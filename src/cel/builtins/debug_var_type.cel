@@ -1,0 +1,13 @@
+zals.Rule{
+  id: "debug-var-type",
+  target: "task",
+  severity: "warning",
+  field: "action",
+  condition: !node.is_block &&
+    node.short_action == "debug" &&
+    node.action_namespace in ["", "ansible.builtin", "ansible.legacy"] &&
+    "var" in node.args &&
+    !(node.args.var.kind in ["string", "template", "null"]),
+  message: "The 'var' parameter of the debug module accepts a single variable name (string); got '" +
+    node.args.var.kind + "'."
+}

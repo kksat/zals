@@ -1,0 +1,12 @@
+zals.Rule{
+  id: "jinja-leading-space",
+  target: ["task", "var_def"],
+  severity: "hint",
+  condition: has(node.string_leaves)
+    ? node.string_leaves.exists(l, l.value.startsWith(" {{"))
+    : (node.value != null &&
+       node.value.kind in ["string", "template"] &&
+       !(node.site in ["task_vars", "set_fact"]) &&
+       node.value.value.startsWith(" {{")),
+  message: "Leading space in template string expression; possibly a typo."
+}

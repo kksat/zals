@@ -1,0 +1,13 @@
+zals.Rule{
+  id: "meta-module-params",
+  target: "task",
+  severity: "error",
+  field: "action",
+  condition: !node.is_block &&
+    node.short_action == "meta" &&
+    node.action_namespace in ["", "ansible.builtin", "ansible.legacy"] &&
+    (node.module_val_kind == "map" ||
+     (node.module_val_kind in ["string", "template"] &&
+      !(node.free_form_text in ["flush_handlers", "noop"]))),
+  message: "Incorrect parameters for the 'ansible.builtin.meta' module; only 'flush_handlers' and 'noop' are supported."
+}

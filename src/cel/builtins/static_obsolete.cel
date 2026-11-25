@@ -1,0 +1,7 @@
+zals.Rule{
+  id: "static-obsolete",
+  target: "task",
+  severity: "error",
+  condition: "static" in node.keys,
+  message: "The task keyword 'static' is obsolete; remove it."
+}

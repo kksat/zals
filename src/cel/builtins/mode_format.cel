@@ -1,0 +1,22 @@
+zals.Rule{
+  id: "mode[format]",
+  target: "task",
+  severity: "error",
+  field: "mode",
+  condition: "mode" in node.args &&
+    (node.args.mode.kind == "string"
+      ? (node.args.mode.value != "preserve" &&
+         !node.args.mode.value.matches("^[ugoa]*[+-=][rwxXstugo]*(,[ugoa]*[+-=][rwxXstugo]*)*$") &&
+         !node.args.mode.value.matches("^[0-7]{3,4}$"))
+      : (node.args.mode.kind == "int" &&
+         !node.args.mode.raw.matches("^(0o)?[0-7]{1,4}$"))),
+  message: "Mode '" + (node.args.mode.kind == "string" ? node.args.mode.value : node.args.mode.raw) +
+    "' in module '" + node.raw_action + "' " +
+    (node.args.mode.kind == "int"
+      ? "is invalid."
+      : (node.args.mode.value.matches("^[0-9]+$")
+          ? (size(node.args.mode.value) < 3
+              ? "is too short."
+              : (size(node.args.mode.value) > 4 ? "is too long." : "is invalid."))
+          : "is in an unknown format."))
+}

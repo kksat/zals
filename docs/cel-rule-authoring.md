@@ -80,6 +80,15 @@ zals.Rule{
   - Docsmith's Markdown checks (README `MAIN`/`TOC`/`TOC-FULL` markers,
     anchorless ToC headings, and comment-flattening notices) stay out of scope
     for YAML CEL diagnostics.
+- Beyond the ansible-lint port set, the built-in catalog also carries
+  structural and value-hygiene rules: task invocation forms
+  (`action`/`local_action` misuse), task keywords nested inside module
+  arguments (indentation errors), obsolete or discouraged keywords (`static`,
+  `with_items`), enabled debuggers, `ansible.builtin.meta` and `set_fact`
+  argument shapes, inline parameters on include/import tasks and shell-like
+  free-form text, play structure (`hosts`, `collections` kinds, `roles` mixed
+  with `tasks`), `vars` value kinds, Jinja delimiter formatting, file `mode`
+  formats, and hardcoded secret-looking values.
 
 ## Configuration and migration notes
 

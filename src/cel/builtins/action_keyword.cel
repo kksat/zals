@@ -1,0 +1,8 @@
+zals.Rule{
+  id: "action-keyword",
+  target: "task",
+  severity: "warning",
+  field: "action",
+  condition: !node.is_block && node.invocation_form == "action",
+  message: "Use the common task structure with a module key instead of the 'action' keyword."
+}

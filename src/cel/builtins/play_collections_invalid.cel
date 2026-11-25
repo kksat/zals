@@ -1,0 +1,9 @@
+zals.Rule{
+  id: "play-collections[invalid]",
+  target: "play",
+  severity: "error",
+  field: "collections",
+  condition: node.has_collections &&
+    !(node.collections_val_kind in ["list", "string"]),
+  message: "Play 'collections' has type '" + node.collections_val_kind + "'; must be a list of strings."
+}
