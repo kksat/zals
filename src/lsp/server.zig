@@ -122,7 +122,7 @@ pub const Server = struct {
             // results and publish readiness even if the client sends nothing.
             // Once ready, return to a blocking read (no idle polling).
             if (self.index.isScanning() or self.docs_service.hasPendingBootstrap() or self.validation.hasPending()) {
-                if (!try self.transport.waitForInput(25)) continue;
+                if (!try self.transport.waitForInput(5)) continue;
             }
             const body = (try self.transport.readMessage(self.allocator)) orelse break;
             defer self.allocator.free(body);
