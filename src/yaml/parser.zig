@@ -285,7 +285,7 @@ fn parseBlockScalar(p: *Parser, start: usize, header: []const u8, parent_indent:
     var buf = std.array_list.Managed(u8).init(p.arena);
     var end = start;
     while (p.peek()) |line| {
-        if (line.indent <= parent_indent and !line.has_dash) break;
+        if (line.indent <= parent_indent) break;
         if (buf.items.len > 0) try buf.append(if (folded) ' ' else '\n');
         try buf.appendSlice(p.text[line.start..line.end]);
         end = line.end;
@@ -413,4 +413,27 @@ test "URL scalars are not mapping keys" {
     try std.testing.expect(root.items[0].isScalar());
     try std.testing.expectEqualStrings("http://example.com", root.items[0].stringValue().?);
     try std.testing.expect(root.items[1].isMap());
+}
+
+test "block scalars end at dedented sequence items" {
+    const src =
+        \\- name: first
+        \\  vars:
+        \\    msg: |
+        \\      text
+        \\- name: second
+        \\  vars:
+        \\    msg: |
+        \\      more
+        \\
+    ;
+    var forest = try parse(std.testing.allocator, src);
+    defer forest.deinit();
+    const root = forest.roots[0];
+    try std.testing.expect(root.isSeq());
+    try std.testing.expectEqual(@as(usize, 2), root.items.len);
+    const first = dom.findPair(root.items[0], "vars").?.val.?;
+    try std.testing.expectEqualStrings("text\n", dom.findPair(first, "msg").?.val.?.value.?);
+    const second = dom.findPair(root.items[1], "vars").?.val.?;
+    try std.testing.expectEqualStrings("more\n", dom.findPair(second, "msg").?.val.?.value.?);
 }
