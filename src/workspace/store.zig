@@ -10,6 +10,11 @@ pub const DocumentStore = struct {
     allocator: Allocator,
     docs: std.StringHashMap(*Document),
     encoding: PositionEncoding,
+    generation: u64 = 0,
+
+    pub fn generationOf(self: *const DocumentStore) u64 {
+        return self.generation;
+    }
 
     pub fn init(allocator: Allocator, encoding: PositionEncoding) DocumentStore {
         return .{
@@ -48,6 +53,7 @@ pub const DocumentStore = struct {
         doc.* = try Document.init(self.allocator, uri, language_id, version, text, self.encoding);
         errdefer doc.deinit();
         try self.docs.put(doc.uri, doc);
+        self.generation += 1;
         return doc;
     }
 
@@ -55,6 +61,7 @@ pub const DocumentStore = struct {
         if (self.docs.fetchRemove(uri)) |kv| {
             kv.value.deinit();
             self.allocator.destroy(kv.value);
+            self.generation += 1;
         }
     }
 
@@ -67,6 +74,7 @@ pub const DocumentStore = struct {
         const doc = self.docs.get(uri) orelse return error.DocumentNotOpen;
         for (changes) |change| try doc.applyChange(change);
         doc.version = version;
+        self.generation += 1;
     }
 
     pub fn count(self: *const DocumentStore) usize {

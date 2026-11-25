@@ -88,6 +88,7 @@ pub const WorkspaceIndex = struct {
     /// Current scan generation per root; stale scan output is dropped.
     generations: std.StringHashMap(u64),
     next_generation: u64 = 1,
+    entries_generation: u64 = 0,
     active_scans: usize = 0,
     /// A request's refresh policy, or null outside a request. Preparation is
     /// lazy so discovery-only requests do not re-stat the whole Workspace.
@@ -197,6 +198,7 @@ pub const WorkspaceIndex = struct {
     }
 
     fn dropRoot(self: *WorkspaceIndex, root: []const u8) void {
+        self.entries_generation += 1;
         var doomed = std.array_list.Managed([]const u8).init(self.gpa);
         defer doomed.deinit();
         var it = self.entries.iterator();
@@ -292,6 +294,14 @@ pub const WorkspaceIndex = struct {
         return e;
     }
 
+    pub fn entriesGeneration(self: *const WorkspaceIndex) u64 {
+        return self.entries_generation;
+    }
+
+    pub fn refreshUnderLease(self: *WorkspaceIndex) void {
+        self.prepareEntries();
+    }
+
     pub fn isScanning(self: *const WorkspaceIndex) bool {
         return self.active_scans > 0;
     }
@@ -312,7 +322,10 @@ pub const WorkspaceIndex = struct {
 
     pub fn remove(self: *WorkspaceIndex, path: []const u8) void {
         std.debug.assert(!self.query_entries_borrowed);
-        if (self.entries.fetchRemove(path)) |kv| kv.value.destroy(self.gpa);
+        if (self.entries.fetchRemove(path)) |kv| {
+            kv.value.destroy(self.gpa);
+            self.entries_generation += 1;
+        }
     }
 
     /// Re-stat every entry and re-parse those whose mtime changed; drop the
@@ -389,7 +402,11 @@ pub const WorkspaceIndex = struct {
     fn putEntry(self: *WorkspaceIndex, e: *Entry) void {
         std.debug.assert(!self.query_entries_borrowed);
         if (self.entries.fetchRemove(e.path)) |kv| kv.value.destroy(self.gpa);
-        self.entries.put(e.path, e) catch e.destroy(self.gpa);
+        self.entries.put(e.path, e) catch {
+            e.destroy(self.gpa);
+            return;
+        };
+        self.entries_generation += 1;
     }
 
     fn push(self: *WorkspaceIndex, p: Pending) void {
