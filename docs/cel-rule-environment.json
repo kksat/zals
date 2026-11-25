@@ -165,7 +165,7 @@
       }
     },
     "play": {
-      "fields": ["self", "name", "hosts", "become", "become_user", "strategy", "run_once", "vars_prompt", "collections", "tasks", "pre_tasks", "post_tasks", "handlers", "roles", "import_playbook"],
+      "fields": ["self", "name", "hosts", "become", "become_user", "connection", "debugger", "strategy", "run_once", "vars", "vars_prompt", "collections", "tasks", "pre_tasks", "post_tasks", "handlers", "roles", "import_playbook"],
       "node_fields": {
         "index": "int",
         "keys": "list<string>",
@@ -182,11 +182,19 @@
         "run_once": "TypedValue | null",
         "task_count": "int",
         "is_import_playbook": "bool",
-        "import_playbook_key": "string"
+        "import_playbook_key": "string",
+        "has_collections": "bool",
+        "collections_val_kind": "string",
+        "has_vars": "bool",
+        "vars_val_kind": "string",
+        "has_connection": "bool",
+        "connection": "TypedValue | null",
+        "has_debugger": "bool",
+        "debugger": "TypedValue | null"
       }
     },
     "task": {
-      "fields": ["self", "name", "action", "local_action", "args", "when", "changed_when", "failed_when", "until", "ignore_errors", "no_log", "become", "become_user", "delegate_to", "run_once", "loop", "with_items", "register", "mode", "state", "version", "revision", "src", "dest", "content", "cmd", "executable", "block", "rescue", "always"],
+      "fields": ["self", "name", "action", "local_action", "args", "when", "changed_when", "failed_when", "until", "ignore_errors", "no_log", "become", "become_user", "delegate_to", "debugger", "run_once", "vars", "loop", "with_items", "register", "mode", "state", "version", "revision", "src", "dest", "content", "cmd", "executable", "block", "rescue", "always"],
       "node_fields": {
         "keys": "list<string>",
         "invocation_form": "enum(module_key,action,local_action,block)",
@@ -239,7 +247,11 @@
         "section": "string",
         "play_strategy": "string",
         "play_name": "string",
-        "string_leaves": "list<map>"
+        "string_leaves": "list<map>",
+        "has_vars": "bool",
+        "vars_val_kind": "string",
+        "has_debugger": "bool",
+        "debugger": "TypedValue | null"
       }
     },
     "role_ref": {

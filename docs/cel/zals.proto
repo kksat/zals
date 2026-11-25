@@ -445,6 +445,14 @@ message Play {
   int64 task_count = 14;
   bool is_import_playbook = 15;
   string import_playbook_key = 16;
+  bool has_collections = 17;
+  string collections_val_kind = 18;
+  bool has_vars = 19;
+  string vars_val_kind = 20;
+  bool has_connection = 21;
+  TypedValue connection = 22;
+  bool has_debugger = 23;
+  TypedValue debugger = 24;
 }
 
 // Task/Block/Handler AST target (target: "task").
@@ -501,6 +509,10 @@ message Task {
   string play_strategy = 50;
   string play_name = 51;
   repeated StringLeaf string_leaves = 52;
+  bool has_vars = 53;
+  string vars_val_kind = 54;
+  bool has_debugger = 55;
+  TypedValue debugger = 56;
 }
 
 // Role invocation/reference AST target (target: "role_ref").

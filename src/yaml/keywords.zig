@@ -28,9 +28,9 @@ pub const task_keywords = [_][]const u8{
     "ignore_errors", "ignore_unreachable", "local_action", "loop",
     "loop_control",  "module_defaults",    "name",         "no_log",
     "notify",        "poll",               "port",         "register",
-    "remote_user",   "retries",            "run_once",     "tags",
-    "throttle",      "timeout",            "until",        "vars",
-    "when",          "listen",
+    "remote_user",   "retries",            "run_once",     "static",
+    "tags",          "throttle",           "timeout",      "until",
+    "vars",          "when",               "listen",
 };
 
 pub const block_keywords = [_][]const u8{
