@@ -40,11 +40,13 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("vendor/schemas/embed.zig"),
         .target = target,
     });
+    const cel = b.dependency("zig_cel", .{ .target = target }).module("cel");
     const mod = b.addModule("zals", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .imports = &.{
             .{ .name = "schemas", .module = schemas },
+            .{ .name = "cel", .module = cel },
         },
     });
     mod.addIncludePath(b.path("vendor/tree-sitter/include"));
