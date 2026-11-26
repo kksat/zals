@@ -20,21 +20,23 @@ time. Target platforms are Linux and macOS first, Windows later.
 - Target **Linux and macOS first**; Windows later.
 - Produce **static binaries where feasible**.
 
-### macOS 26 + Xcode 26.5 SDK workaround
+### macOS 26 + Xcode 26.5 SDK workaround (removed)
 
-Zig 0.15.1's bundled lld did not match a plain `arm64-macos` request against the
-SDK's `libSystem.B.tbd`, which lists `arm64e-macos` but not `arm64-macos`. The
-link fails with undefined libc symbols (`_abort`, `_getenv`, ...). Setting
-`DEVELOPER_DIR=/nonexistent` makes Zig skip SDK discovery and use its bundled
-libc stubs, which link correctly. The `Makefile` sets this automatically on
-Darwin. This is safe for a pure-Zig project with vendored C sources.
+Zig 0.15.1's bundled lld did not match a plain `arm64-macos` request against
+the SDK's `libSystem.B.tbd`, which lists `arm64e-macos` but not `arm64-macos`.
+The link fails with undefined libc symbols (`_abort`, `_getenv`, ...). Until
+the 0.17.1 upgrade the `Makefile` set `DEVELOPER_DIR=/nonexistent` on Darwin so
+Zig skipped SDK discovery and linked against its bundled libc stubs. Zig
+0.17.1 links against the real SDK (`aarch64-macos.13.0`, verified on macOS 26
+with Xcode 26.5: plain build, `make check`, `make e2e`, `make smoke`), so the
+workaround was removed.
 
 ## Consequences
 
 - Builds are reproducible across machines with the same Zig version.
-- The macOS workaround is a local build-environment concern, not a code change;
-  retained through the 0.17.1 upgrade until the lld matching is confirmed fixed
-  on macOS 26.
+- The macOS `DEVELOPER_DIR` workaround was removed with the 0.17.1 upgrade
+  after the SDK link path was verified on hardware; revive it from this ADR if
+  a future Zig regresses the lld `arm64e-macos` TBD matching.
 - Vendoring C means the build needs a C toolchain, which `zig cc` provides.
 - Windows support will require revisiting process spawning, path handling, and
   the self-pipe wakeup.
