@@ -155,13 +155,13 @@ pub const Server = struct {
         if (self.index.takeReadyEvent()) {
             var ready = json_util.obj(a);
             try ready.put("filesCount", json_util.num(@as(i64, @intCast(self.index.count()))));
-            try self.notify(a, "ansible/workspaceIndexReady", .{ .object = ready });
+            try self.notify(a, "ansible/workspaceIndexReady", .{ .object = ready.map });
             validation_provider.onWorkspaceIndexReady(self, a) catch {};
         }
         if (self.docs_service.takeReadyEvent()) {
             var ready = json_util.obj(a);
             try ready.put("modulesCount", json_util.num(self.docs.catalogCount()));
-            try self.notify(a, "ansible/docsLibraryReady", .{ .object = ready });
+            try self.notify(a, "ansible/docsLibraryReady", .{ .object = ready.map });
         }
         try validation_provider.drain(self, a);
     }
@@ -198,19 +198,19 @@ pub const Server = struct {
         for ([_][]const u8{ "**/*.{yml,yaml,j2}", "**/plugins/**/*.{py,ps1}", "**/ansible.cfg", "**/galaxy.{yml,yaml}", "**/*.cel" }) |glob| {
             var w = json_util.obj(a);
             try w.put("globPattern", json_util.str(glob));
-            try watchers.append(.{ .object = w });
+            try watchers.append(.{ .object = w.map });
         }
         var opts = json_util.obj(a);
         try opts.put("watchers", .{ .array = watchers });
         var reg = json_util.obj(a);
         try reg.put("id", json_util.str("zals-watched-files"));
         try reg.put("method", json_util.str("workspace/didChangeWatchedFiles"));
-        try reg.put("registerOptions", .{ .object = opts });
+        try reg.put("registerOptions", .{ .object = opts.map });
         var regs = std.json.Array.init(a);
-        try regs.append(.{ .object = reg });
+        try regs.append(.{ .object = reg.map });
         var params = json_util.obj(a);
         try params.put("registrations", .{ .array = regs });
-        try out.sendRequest(self.writer, a, "zals-register-watchers", "client/registerCapability", .{ .object = params });
+        try out.sendRequest(self.writer, a, "zals-register-watchers", "client/registerCapability", .{ .object = params.map });
         self.watching_files = true;
     }
 

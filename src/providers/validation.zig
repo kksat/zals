@@ -1,4 +1,5 @@
 const std = @import("std");
+const fsio = @import("../fsio.zig");
 const Allocator = std.mem.Allocator;
 const Value = std.json.Value;
 const json_util = @import("../lsp/json_util.zig");
@@ -97,7 +98,7 @@ fn cloneDiagSlice(gpa: Allocator, src: []const types.Diagnostic) ![]types.Diagno
 
 pub const Queue = struct {
     gpa: Allocator,
-    mutex: std.Thread.Mutex = .{},
+    mutex: @import("../sync.zig").Mutex = .{},
     latest_seq: std.StringHashMapUnmanaged(u64) = .empty,
     next_seq: u64 = 1,
     pending: std.ArrayListUnmanaged(*Job) = .empty,
@@ -105,7 +106,7 @@ pub const Queue = struct {
     worker_running: bool = false,
     worker_task: concurrency.Task = undefined,
 
-    native_mutex: std.Thread.Mutex = .{},
+    native_mutex: @import("../sync.zig").Mutex = .{},
     latest_native_seq: std.StringHashMapUnmanaged(u64) = .empty,
     next_native_seq: u64 = 1,
     native_pending: std.ArrayListUnmanaged(*NativeJob) = .empty,
@@ -1110,24 +1111,24 @@ fn send(self: *Server, a: Allocator, uri: []const u8, diags: []const types.Diagn
         var range = json_util.obj(a);
         try putPos(&range, a, "start", d.range.start);
         try putPos(&range, a, "end", d.range.end);
-        try obj.put("range", .{ .object = range });
-        if (d.severity) |s| try obj.put("severity", json_util.num(@intFromEnum(s)));
+        try obj.put("range", .{ .object = range.map });
+        if (d.severity) |s| try obj.put("severity", json_util.num(@backingInt(s)));
         try obj.put("message", json_util.str(d.message));
         if (d.source) |src| try obj.put("source", json_util.str(src));
         if (d.code) |c| try obj.put("code", json_util.str(c));
-        try arr.append(.{ .object = obj });
+        try arr.append(.{ .object = obj.map });
     }
     var params = json_util.obj(a);
     try params.put("uri", json_util.str(uri));
     try params.put("diagnostics", .{ .array = arr });
-    try self.notify(a, "textDocument/publishDiagnostics", .{ .object = params });
+    try self.notify(a, "textDocument/publishDiagnostics", .{ .object = params.map });
 }
 
-fn putPos(obj: *std.json.ObjectMap, a: Allocator, key: []const u8, pos: types.Position) !void {
+fn putPos(obj: *json_util.Obj, a: Allocator, key: []const u8, pos: types.Position) !void {
     var p = json_util.obj(a);
     try p.put("line", json_util.num(pos.line));
     try p.put("character", json_util.num(pos.character));
-    try obj.put(key, .{ .object = p });
+    try obj.put(key, .{ .object = p.map });
 }
 
 test "validation runs on the worker pool without blocking the main thread" {
@@ -1135,10 +1136,10 @@ test "validation runs on the worker pool without blocking the main thread" {
     const Transport = @import("../lsp/transport.zig").Transport;
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    const output = try tmp.dir.createFile("messages", .{ .read = true });
-    defer output.close();
+    const output = try tmp.dir.createFile(std.testing.io, "messages", .{ .read = true });
+    defer output.close(fsio.get());
 
-    var server = try Server.init(testing.allocator, Transport.init(output, output), null);
+    var server = try Server.init(testing.allocator, Transport.init(std.testing.io, output, output), null);
     defer server.deinit();
     server.settings.lint_enabled = false;
 
@@ -1150,7 +1151,7 @@ test "validation runs on the worker pool without blocking the main thread" {
 
     var deadline: usize = 0;
     while (server.validation.hasPending() and deadline < 500) : (deadline += 1) {
-        std.Thread.sleep(2 * std.time.ns_per_ms);
+        @import("../sync.zig").sleep(2 * std.time.ns_per_ms);
         try drain(&server, arena.allocator());
     }
     try testing.expect(!server.validation.hasPending());

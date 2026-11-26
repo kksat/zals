@@ -518,11 +518,11 @@ fn checkGroup(origins: []const m.Anchor, reads: []const m.ExpectedLocation, with
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const fixture = try std.fs.cwd().realpathAlloc(a, "test/fixtures/field-expressions-workspace");
-    const binary = try std.fs.cwd().realpathAlloc(a, "zig-out/bin/zals");
+    const fixture = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "test/fixtures/field-expressions-workspace", a);
+    const binary = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "zig-out/bin/zals", a);
     var temp_home = std.testing.tmpDir(.{});
     defer temp_home.cleanup();
-    const home = try temp_home.dir.realpathAlloc(a, ".");
+    const home = try temp_home.dir.realPathFileAlloc(std.testing.io, ".", a);
     var client = try initializedClient(a, binary, fixture, home);
     defer client.deinit();
 
@@ -602,11 +602,11 @@ fn checkNavigation(origins: []const m.Anchor, targets: []const m.ExpectedLocatio
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const fixture = try std.fs.cwd().realpathAlloc(a, "test/fixtures/field-expressions-workspace");
-    const binary = try std.fs.cwd().realpathAlloc(a, "zig-out/bin/zals");
+    const fixture = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "test/fixtures/field-expressions-workspace", a);
+    const binary = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "zig-out/bin/zals", a);
     var temp_home = std.testing.tmpDir(.{});
     defer temp_home.cleanup();
-    const home = try temp_home.dir.realpathAlloc(a, ".");
+    const home = try temp_home.dir.realPathFileAlloc(std.testing.io, ".", a);
     var client = try initializedClient(a, binary, fixture, home);
     defer client.deinit();
     const resolver: anchor.Resolver = .{ .allocator = a, .fixture = fixture, .deps = fixture };

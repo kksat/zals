@@ -17,6 +17,7 @@
 //! request allocator (ADR-0013); nothing it returns may outlive the request.
 
 const std = @import("std");
+const fsio = @import("../fsio.zig");
 const Allocator = std.mem.Allocator;
 const types = @import("../lsp/types.zig");
 const document_mod = @import("../workspace/document.zig");
@@ -586,10 +587,10 @@ pub const Context = struct {
 
     fn sourceListDir(_: *anyopaque, a: Allocator, path: []const u8) anyerror![]const variables.DirEntry {
         var out = std.array_list.Managed(variables.DirEntry).init(a);
-        var dir = std.fs.cwd().openDir(path, .{ .iterate = true }) catch return out.toOwnedSlice();
-        defer dir.close();
+        var dir = fsio.openDir(path, .{ .iterate = true }) catch return out.toOwnedSlice();
+        defer dir.close(fsio.get());
         var it = dir.iterate();
-        while (it.next() catch null) |entry| {
+        while (it.next(fsio.get()) catch null) |entry| {
             try out.append(.{ .name = try a.dupe(u8, entry.name), .is_dir = entry.kind == .directory });
         }
         return out.toOwnedSlice();
@@ -669,14 +670,14 @@ const testing = std.testing;
 test "symlinked opened folders overlay unsaved documents with resolved paths" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.makePath("workspace/.git");
-    try tmp.dir.writeFile(.{ .sub_path = "workspace/site.yml", .data = "- hosts: all\n  vars: {disk_only: true}\n" });
-    try tmp.dir.symLink("workspace", "linked", .{ .is_directory = true });
+    try tmp.dir.createDirPath(std.testing.io, "workspace/.git");
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "workspace/site.yml", .data = "- hosts: all\n  vars: {disk_only: true}\n" });
+    try tmp.dir.symLink(std.testing.io, "workspace", "linked", .{ .is_directory = true });
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const base = try tmp.dir.realpathAlloc(a, ".");
-    const root = try tmp.dir.realpathAlloc(a, "workspace");
+    const base = try tmp.dir.realPathFileAlloc(std.testing.io, ".", a);
+    const root = try tmp.dir.realPathFileAlloc(std.testing.io, "workspace", a);
     const linked = try std.fs.path.join(a, &.{ base, "linked/site.yml" });
     const uri = try paths.pathToUri(a, linked);
     var session = try workspace_session.Session.init(testing.allocator, null);
@@ -722,12 +723,12 @@ test "galaxy name" {
 test "variable reachability joins short and FQCN role aliases, not colliding basenames" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.makePath("ansible_collections/ns/first/roles/notify/tasks");
-    try tmp.dir.makePath("ansible_collections/ns/second/roles/notify/tasks");
+    try tmp.dir.createDirPath(std.testing.io, "ansible_collections/ns/first/roles/notify/tasks");
+    try tmp.dir.createDirPath(std.testing.io, "ansible_collections/ns/second/roles/notify/tasks");
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const root = try tmp.dir.realpathAlloc(a, ".");
+    const root = try tmp.dir.realPathFileAlloc(std.testing.io, ".", a);
     const first = try std.fs.path.join(a, &.{ root, "ansible_collections/ns/first/roles/notify" });
     const second = try std.fs.path.join(a, &.{ root, "ansible_collections/ns/second/roles/notify" });
     const play_first = try std.fs.path.join(a, &.{ root, "first.yml" });

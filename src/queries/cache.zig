@@ -1,4 +1,5 @@
 const std = @import("std");
+const fsio = @import("../fsio.zig");
 const Allocator = std.mem.Allocator;
 const discover = @import("../workspace/discover.zig");
 const facts_mod = @import("../workspace/facts.zig");
@@ -11,7 +12,7 @@ const FileSet = context_mod.FileSet;
 
 pub const Probe = struct {
     path: []const u8,
-    mtime: i128,
+    mtime: std.Io.Timestamp,
 };
 
 const SetEntry = struct {
@@ -108,11 +109,11 @@ pub const Cache = struct {
     pub fn lookupSet(self: *Cache, key: []const u8) !?*FileSet {
         const entry = self.sets.get(key) orelse return null;
         for (entry.probes) |probe| {
-            const st = std.fs.cwd().statFile(probe.path) catch {
+            const st = fsio.statFile(probe.path) catch {
                 self.resetSets();
                 return null;
             };
-            if (st.mtime != probe.mtime) {
+            if (st.mtime.nanoseconds != probe.mtime.nanoseconds) {
                 self.resetSets();
                 return null;
             }
@@ -141,7 +142,7 @@ pub const Cache = struct {
     pub fn recordProbe(self: *Cache, path: []const u8) void {
         if (self.probe_sink == null) return;
         const sink = &self.probe_sink.?;
-        const st = std.fs.cwd().statFile(path) catch return;
+        const st = fsio.statFile(path) catch return;
         const a = self.sets_arena.allocator();
         const owned = a.dupe(u8, path) catch return;
         sink.append(.{ .path = owned, .mtime = st.mtime }) catch {};

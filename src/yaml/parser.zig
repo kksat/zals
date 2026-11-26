@@ -119,7 +119,7 @@ fn collectLines(arena: Allocator, text: []const u8) ![]Line {
         var indent: usize = 0;
         while (indent < raw.len and (raw[indent] == ' ' or raw[indent] == '\t')) : (indent += 1) {}
         const rest = raw[indent..];
-        const trimmed = std.mem.trimRight(u8, rest, " \t");
+        const trimmed = std.mem.trimEnd(u8, rest, " \t");
         if (trimmed.len == 0) continue;
         if (trimmed[0] == '#') {
             if (lines.items.len > 0) {
@@ -131,7 +131,7 @@ fn collectLines(arena: Allocator, text: []const u8) ![]Line {
         // Only column-zero, standalone markers (optionally commented) delimit
         // documents. Indented marker-looking text can be scalar content.
         if (indent == 0 and trimmed.len >= 3) {
-            const tail = std.mem.trimLeft(u8, trimmed[3..], " \t");
+            const tail = std.mem.trimStart(u8, trimmed[3..], " \t");
             if (tail.len == 0 or (trimmed.len > 3 and (trimmed[3] == ' ' or trimmed[3] == '\t') and tail[0] == '#')) {
                 const opening = std.mem.eql(u8, trimmed[0..3], "---");
                 const closing = std.mem.eql(u8, trimmed[0..3], "...");
@@ -161,7 +161,7 @@ fn collectLines(arena: Allocator, text: []const u8) ![]Line {
                 body_off = indent + 1;
             } else {
                 const after = trimmed[2..];
-                const stripped = std.mem.trimLeft(u8, after, " \t");
+                const stripped = std.mem.trimStart(u8, after, " \t");
                 body = stripped;
                 body_off = indent + 2 + (after.len - stripped.len);
             }
@@ -228,7 +228,7 @@ fn parseSeqItem(p: *Parser) anyerror!*Node {
 fn parseScalarItem(p: *Parser, line: Line) anyerror!*Node {
     const body = line.body;
     const comment = unquotedHash(body);
-    const scalar_text = if (comment) |c| std.mem.trimRight(u8, body[0..c], " \t") else body;
+    const scalar_text = if (comment) |c| std.mem.trimEnd(u8, body[0..c], " \t") else body;
     return try parseScalarFrom(p, scalar_text, line.body_start, line.body_start + scalar_text.len);
 }
 
@@ -279,7 +279,7 @@ fn parsePair(p: *Parser, line: Line, indent: usize) anyerror!?*Node {
         pair.val = empty;
         return pair;
     };
-    const key_raw = std.mem.trimRight(u8, line.body[0..colon], " \t");
+    const key_raw = std.mem.trimEnd(u8, line.body[0..colon], " \t");
     const key_node = try parseScalarFrom(p, key_raw, line.body_start, line.body_start + key_raw.len);
     const colon_end = line.body_start + colon + 1;
 
@@ -287,7 +287,7 @@ fn parsePair(p: *Parser, line: Line, indent: usize) anyerror!?*Node {
     pair.key = key_node;
     key_node.parent = pair;
 
-    const after = std.mem.trimLeft(u8, line.body[colon + 1 ..], " \t");
+    const after = std.mem.trimStart(u8, line.body[colon + 1 ..], " \t");
     const after_off = line.body_start + colon + 1 + (line.body[colon + 1 ..].len - after.len);
 
     var value: *Node = undefined;
@@ -307,7 +307,7 @@ fn parsePair(p: *Parser, line: Line, indent: usize) anyerror!?*Node {
         value = try parseBlockScalar(p, after_off, after, indent);
     } else {
         const comment = unquotedHash(after);
-        const scalar_text = if (comment) |c| std.mem.trimRight(u8, after[0..c], " \t") else after;
+        const scalar_text = if (comment) |c| std.mem.trimEnd(u8, after[0..c], " \t") else after;
         value = try parseScalarFrom(p, scalar_text, after_off, after_off + scalar_text.len);
     }
     value.parent = pair;

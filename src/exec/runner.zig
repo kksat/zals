@@ -1,6 +1,7 @@
 //! Pluggable command execution.
 
 const std = @import("std");
+const fsio = @import("../fsio.zig");
 const Allocator = std.mem.Allocator;
 
 pub const Result = struct {
@@ -15,14 +16,14 @@ pub const Result = struct {
 
     pub fn success(self: Result) bool {
         return switch (self.term) {
-            .Exited => |code| code == 0,
+            .exited => |code| code == 0,
             else => false,
         };
     }
 };
 
 pub const Options = struct {
-    env_map: ?*const std.process.EnvMap = null,
+    env_map: ?*const std.process.Environ.Map = null,
     cwd: ?[]const u8 = null,
     /// Borrowed owner-lifetime token; cancellation terminates and reaps the child.
     cancel: ?*const std.atomic.Value(bool) = null,
@@ -67,46 +68,58 @@ pub const Posix = struct {
     }
 
     fn runWithOptions(_: *anyopaque, allocator: Allocator, argv: []const []const u8, options: Options) anyerror!Result {
+        const io = fsio.get();
+        const cwd: std.process.Child.Cwd = if (options.cwd) |c| .{ .path = c } else .inherit;
         if (options.cancel == null) {
-            const spawned = try std.process.Child.run(.{
-                .allocator = allocator,
+            const spawned = try std.process.run(allocator, io, .{
                 .argv = argv,
-                .env_map = options.env_map,
-                .cwd = options.cwd,
-                .max_output_bytes = max_output_bytes,
+                .cwd = cwd,
+                .environ_map = options.env_map,
+                .stdout_limit = .limited(max_output_bytes),
+                .stderr_limit = .limited(max_output_bytes),
             });
             return .{ .stdout = spawned.stdout, .stderr = spawned.stderr, .term = spawned.term };
         }
 
         try checkCancelled(options.cancel);
-        var child = std.process.Child.init(argv, allocator);
-        child.stdin_behavior = .Ignore;
-        child.stdout_behavior = .Pipe;
-        child.stderr_behavior = .Pipe;
-        child.env_map = options.env_map;
-        child.cwd = options.cwd;
-        try child.spawn();
-        errdefer terminateChild(&child);
-        try child.waitForSpawn();
-
-        var poller = std.Io.poll(allocator, enum { stdout, stderr }, .{
-            .stdout = child.stdout.?,
-            .stderr = child.stderr.?,
+        var child = try std.process.spawn(io, .{
+            .argv = argv,
+            .cwd = cwd,
+            .environ_map = options.env_map,
+            .stdin = .ignore,
+            .stdout = .pipe,
+            .stderr = .pipe,
         });
-        defer poller.deinit();
+        errdefer killChild(io, &child);
+
+        var multi_reader_buffer: std.Io.File.MultiReader.Buffer(2) = undefined;
+        var multi_reader: std.Io.File.MultiReader = undefined;
+        multi_reader.init(allocator, io, multi_reader_buffer.toStreams(), &.{ child.stdout.?, child.stderr.? });
+        defer multi_reader.deinit();
+
         while (true) {
             try checkCancelled(options.cancel);
-            const active = try poller.pollTimeout(cancel_interval_ns);
-            if (poller.reader(.stdout).bufferedLen() > max_output_bytes) return error.StdoutStreamTooLong;
-            if (poller.reader(.stderr).bufferedLen() > max_output_bytes) return error.StderrStreamTooLong;
-            if (!active) break;
+            multi_reader.fill(1, .{ .duration = .{ .raw = .{ .nanoseconds = cancel_interval_ns }, .clock = .awake } }) catch |err| switch (err) {
+                error.EndOfStream => {},
+                error.Timeout => {},
+                else => return err,
+            };
+            if (multi_reader.reader(0).buffered().len > max_output_bytes) return error.StdoutStreamTooLong;
+            if (multi_reader.reader(1).buffered().len > max_output_bytes) return error.StderrStreamTooLong;
+            var all_done = true;
+            for (multi_reader.streams.contexts()) |*context| {
+                if (context.err == null) {
+                    all_done = false;
+                    break;
+                }
+            }
+            if (all_done) break;
         }
-        // A child can close its output streams and remain alive. Do not turn
-        // that case back into an uncancellable blocking wait.
+        try multi_reader.checkAnyError();
         const term = try waitForTerm(&child, options.cancel);
-        const stdout = try poller.toOwnedSlice(.stdout);
+        const stdout = try multi_reader.toOwnedSlice(0);
         errdefer allocator.free(stdout);
-        const stderr = try poller.toOwnedSlice(.stderr);
+        const stderr = try multi_reader.toOwnedSlice(1);
         return .{ .stdout = stdout, .stderr = stderr, .term = term };
     }
 };
@@ -120,44 +133,48 @@ fn checkCancelled(token: ?*const std.atomic.Value(bool)) !void {
     }
 }
 
-fn terminateChild(child: *std.process.Child) void {
-    if (@import("builtin").os.tag == .windows or child.term != null) {
-        _ = child.kill() catch {};
-    } else {
-        // SIGTERM handlers in an external plugin must not stall server teardown.
-        std.posix.kill(child.id, std.posix.SIG.KILL) catch {};
-        _ = child.wait() catch {};
+fn killChild(io: std.Io, child: *std.process.Child) void {
+    if (@import("builtin").os.tag == .windows) {
+        child.kill(io);
+        return;
+    }
+    if (child.id) |pid| {
+        std.posix.kill(pid, std.posix.SIG.KILL) catch {};
+        _ = child.wait(io) catch {};
     }
 }
 
 fn waitForTerm(child: *std.process.Child, token: ?*const std.atomic.Value(bool)) !std.process.Child.Term {
     while (true) {
         try checkCancelled(token);
-        if (@import("builtin").os.tag == .windows) {
-            std.os.windows.WaitForSingleObjectEx(child.id, 25, false) catch |err| switch (err) {
-                error.WaitTimeOut => continue,
-                else => return err,
-            };
-            return child.wait();
-        } else {
-            const result = std.posix.waitpid(child.id, std.posix.W.NOHANG);
-            if (result.pid != 0) {
-                // waitpid reaped it. Cache the status so Child.wait only performs
-                // its normal stream cleanup rather than waiting a second time.
-                const status = result.status;
-                child.term = if (std.posix.W.IFEXITED(status))
-                    std.process.Child.Term{ .Exited = std.posix.W.EXITSTATUS(status) }
-                else if (std.posix.W.IFSIGNALED(status))
-                    std.process.Child.Term{ .Signal = std.posix.W.TERMSIG(status) }
-                else if (std.posix.W.IFSTOPPED(status))
-                    std.process.Child.Term{ .Stopped = std.posix.W.STOPSIG(status) }
-                else
-                    std.process.Child.Term{ .Unknown = status };
-                return child.wait();
-            }
-            std.Thread.sleep(cancel_interval_ns);
-        }
+        if (reapIfExited(child)) |term| return term;
+        @import("../sync.zig").sleep(cancel_interval_ns);
     }
+}
+
+fn reapIfExited(child: *std.process.Child) ?std.process.Child.Term {
+    const pid = child.id.?;
+    var status: c_int = undefined;
+    const nohang: c_int = @intCast(std.posix.W.NOHANG);
+    if (std.c.waitpid(pid, &status, nohang) == 0) return null;
+    child.id = null;
+    if (child.stdin) |f| {
+        f.close(fsio.get());
+        child.stdin = null;
+    }
+    if (child.stdout) |f| {
+        f.close(fsio.get());
+        child.stdout = null;
+    }
+    if (child.stderr) |f| {
+        f.close(fsio.get());
+        child.stderr = null;
+    }
+    const s: u32 = @bitCast(status);
+    if (std.posix.W.IFEXITED(s)) return .{ .exited = std.posix.W.EXITSTATUS(s) };
+    if (std.posix.W.IFSIGNALED(s)) return .{ .signal = std.posix.W.TERMSIG(s) };
+    if (std.posix.W.IFSTOPPED(s)) return .{ .stopped = std.posix.W.STOPSIG(s) };
+    return .{ .unknown = s };
 }
 
 test "bound cancellation prevents spawning an already cancelled command" {
@@ -176,5 +193,5 @@ test "cancellable command preserves output and exit status" {
     defer result.deinit(std.testing.allocator);
     try std.testing.expectEqualStrings("out", result.stdout);
     try std.testing.expectEqualStrings("err", result.stderr);
-    try std.testing.expectEqual(@as(u8, 7), result.term.Exited);
+    try std.testing.expectEqual(@as(u8, 7), result.term.exited);
 }

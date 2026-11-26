@@ -29,16 +29,16 @@ const Workspace = struct {
         var home_dir = std.testing.tmpDir(.{});
         errdefer home_dir.cleanup();
 
-        try ws_dir.dir.writeFile(.{ .sub_path = "negative-rename-root", .data = "" });
+        try ws_dir.dir.writeFile(std.testing.io, .{ .sub_path = "negative-rename-root", .data = "" });
         for (files) |file| {
-            if (std.fs.path.dirname(file.path)) |dir| try ws_dir.dir.makePath(dir);
-            try ws_dir.dir.writeFile(.{ .sub_path = file.path, .data = file.text });
+            if (std.fs.path.dirname(file.path)) |dir| try ws_dir.dir.createDirPath(std.testing.io, dir);
+            try ws_dir.dir.writeFile(std.testing.io, .{ .sub_path = file.path, .data = file.text });
         }
 
-        const root = try ws_dir.dir.realpathAlloc(a, ".");
-        const deps = try std.fs.cwd().realpathAlloc(a, "test/dependencies");
-        const binary = try std.fs.cwd().realpathAlloc(a, "zig-out/bin/zals");
-        var client = try lsp.Client.startWithOptions(a, binary, root, deps, try home_dir.dir.realpathAlloc(a, "."), .{
+        const root = try ws_dir.dir.realPathFileAlloc(std.testing.io, ".", a);
+        const deps = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "test/dependencies", a);
+        const binary = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "zig-out/bin/zals", a);
+        var client = try lsp.Client.startWithOptions(a, binary, root, deps, try home_dir.dir.realPathFileAlloc(std.testing.io, ".", a), .{
             .collections_path = "",
             .use_fixture_config = false,
         });
@@ -893,17 +893,17 @@ test "renaming a root variable in one Workspace of a multi-root session never mo
         .{ .path = "ws_b/roles/web/tasks/main.yml", .text = "---\n- debug:\n    msg: \"{{ shared_port }}\"\n" },
     };
     for (tree) |file| {
-        if (std.fs.path.dirname(file.path)) |dir| try root_dir.dir.makePath(dir);
-        try root_dir.dir.writeFile(.{ .sub_path = file.path, .data = file.text });
+        if (std.fs.path.dirname(file.path)) |dir| try root_dir.dir.createDirPath(std.testing.io, dir);
+        try root_dir.dir.writeFile(std.testing.io, .{ .sub_path = file.path, .data = file.text });
     }
 
-    const base = try root_dir.dir.realpathAlloc(a, ".");
+    const base = try root_dir.dir.realPathFileAlloc(std.testing.io, ".", a);
     const ws_a = try std.fs.path.join(a, &.{ base, "ws_a" });
     const ws_b = try std.fs.path.join(a, &.{ base, "ws_b" });
-    const deps = try std.fs.cwd().realpathAlloc(a, "test/dependencies");
-    const binary = try std.fs.cwd().realpathAlloc(a, "zig-out/bin/zals");
+    const deps = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "test/dependencies", a);
+    const binary = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "zig-out/bin/zals", a);
 
-    var client = try lsp.Client.startWithOptions(a, binary, base, deps, try home_dir.dir.realpathAlloc(a, "."), .{
+    var client = try lsp.Client.startWithOptions(a, binary, base, deps, try home_dir.dir.realPathFileAlloc(std.testing.io, ".", a), .{
         .collections_path = "",
         .use_fixture_config = false,
     });

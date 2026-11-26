@@ -2,6 +2,7 @@
 //! collection at a site that lists collections.
 
 const std = @import("std");
+const fsio = @import("../fsio.zig");
 const types = @import("../lsp/types.zig");
 const Document = @import("../workspace/document.zig").Document;
 const yaml = @import("../yaml/root.zig");
@@ -21,15 +22,15 @@ pub fn completion(context: *Context, doc: *const Document, offset: usize) !?[]co
     var items = std.array_list.Managed(types.CompletionItem).init(a);
     for (try context.collectionsPaths(path)) |cp| {
         const base = try std.fs.path.join(a, &.{ cp, "ansible_collections" });
-        var nsdir = std.fs.cwd().openDir(base, .{ .iterate = true }) catch continue;
-        defer nsdir.close();
+        var nsdir = fsio.openDir(base, .{ .iterate = true }) catch continue;
+        defer nsdir.close(fsio.get());
         var it = nsdir.iterate();
-        while (it.next() catch null) |ns| {
+        while (it.next(fsio.get()) catch null) |ns| {
             if (ns.kind != .directory or ns.name[0] == '.') continue;
-            var colldir = nsdir.openDir(ns.name, .{ .iterate = true }) catch continue;
-            defer colldir.close();
+            var colldir = nsdir.openDir(fsio.get(), ns.name, .{ .iterate = true }) catch continue;
+            defer colldir.close(fsio.get());
             var cit = colldir.iterate();
-            while (cit.next() catch null) |coll| {
+            while (cit.next(fsio.get()) catch null) |coll| {
                 if (coll.kind != .directory or coll.name[0] == '.') continue;
                 const name = try std.fmt.allocPrint(a, "{s}.{s}", .{ ns.name, coll.name });
                 if (seen.contains(name)) continue;

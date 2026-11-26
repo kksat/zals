@@ -1,6 +1,7 @@
 //! Synchronous document validation, independent of protocol publication.
 
 const std = @import("std");
+const fsio = @import("../fsio.zig");
 const Allocator = std.mem.Allocator;
 const Value = std.json.Value;
 const exec = @import("../exec/root.zig");
@@ -100,19 +101,19 @@ const Target = struct {
     temporary: bool,
 
     fn deinit(self: Target) void {
-        if (self.temporary) std.fs.deleteFileAbsolute(self.path) catch {};
+        if (self.temporary) std.Io.Dir.deleteFileAbsolute(fsio.get(), self.path) catch {};
     }
 };
 
 fn existingOrTemp(a: Allocator, path: []const u8, bytes: []const u8) !Target {
-    if (std.fs.openFileAbsolute(path, .{})) |f| {
-        f.close();
+    if (std.Io.Dir.openFileAbsolute(fsio.get(), path, .{})) |f| {
+        f.close(fsio.get());
         return .{ .path = path, .temporary = false };
     } else |_| {}
-    const tmp = try std.fmt.allocPrint(a, "/tmp/zals-{d}.yml", .{std.crypto.random.int(u32)});
-    var file = try std.fs.createFileAbsolute(tmp, .{});
-    errdefer std.fs.deleteFileAbsolute(tmp) catch {};
-    defer file.close();
-    try file.writeAll(bytes);
+    const tmp = try std.fmt.allocPrint(a, "/tmp/zals-{d}.yml", .{fsio.randomInt(u32)});
+    var file = try std.Io.Dir.createFileAbsolute(fsio.get(), tmp, .{});
+    errdefer std.Io.Dir.deleteFileAbsolute(fsio.get(), tmp) catch {};
+    defer file.close(fsio.get());
+    try file.writeStreamingAll(fsio.get(), bytes);
     return .{ .path = tmp, .temporary = true };
 }

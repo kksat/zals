@@ -19,12 +19,12 @@ const Session = struct {
         arena.* = std.heap.ArenaAllocator.init(std.testing.allocator);
         errdefer arena.deinit();
         const a = arena.allocator();
-        const fixture = try std.fs.cwd().realpathAlloc(a, "test/fixtures/collection-symbols-workspace");
-        const deps = try std.fs.cwd().realpathAlloc(a, "test/dependencies");
-        const binary = try std.fs.cwd().realpathAlloc(a, "zig-out/bin/zals");
+        const fixture = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "test/fixtures/collection-symbols-workspace", a);
+        const deps = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "test/dependencies", a);
+        const binary = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "zig-out/bin/zals", a);
         var home = std.testing.tmpDir(.{});
         errdefer home.cleanup();
-        const home_path = try home.dir.realpathAlloc(a, ".");
+        const home_path = try home.dir.realPathFileAlloc(std.testing.io, ".", a);
         var client = try lsp.Client.start(a, binary, fixture, deps, home_path);
         errdefer client.deinit();
         _ = try client.request("initialize", .{
@@ -145,8 +145,8 @@ fn symbolEqual(actual: Value, expected: ExpectedSymbol, location: anchor.Locatio
     const loc = lsp.field(actual, "location") orelse return error.MissingLocation;
     const uri = try stringField(loc, "uri");
     if (!std.mem.startsWith(u8, uri, "file:///")) return error.NonAbsoluteFileUri;
-    const target = try std.fs.openFileAbsolute(uri["file://".len..], .{});
-    target.close();
+    const target = try std.Io.Dir.openFileAbsolute(std.testing.io, uri["file://".len..], .{});
+    target.close(std.testing.io);
     const range = lsp.field(loc, "range") orelse return error.MissingRange;
     const start = lsp.field(range, "start") orelse return error.MissingStart;
     const end = lsp.field(range, "end") orelse return error.MissingEnd;

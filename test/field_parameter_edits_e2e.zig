@@ -73,12 +73,12 @@ test "passed field actions and Workspace references prefer changed schema and va
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const fixture = try std.fs.cwd().realpathAlloc(a, "test/fixtures/e2e-workspace");
-    const deps = try std.fs.cwd().realpathAlloc(a, "test/dependencies");
-    const binary = try std.fs.cwd().realpathAlloc(a, "zig-out/bin/zals");
+    const fixture = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "test/fixtures/e2e-workspace", a);
+    const deps = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "test/dependencies", a);
+    const binary = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "zig-out/bin/zals", a);
     var home_dir = std.testing.tmpDir(.{});
     defer home_dir.cleanup();
-    const home = try home_dir.dir.realpathAlloc(a, ".");
+    const home = try home_dir.dir.realPathFileAlloc(std.testing.io, ".", a);
     var client = try lsp.Client.start(a, binary, fixture, deps, home);
     defer client.deinit();
     _ = try client.request("initialize", .{
@@ -169,12 +169,12 @@ fn calleeLoadScenario(load_path: []const u8, buffer: []const u8, expected_range:
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const fixture = try std.fs.cwd().realpathAlloc(a, "test/fixtures/e2e-workspace");
-    const deps = try std.fs.cwd().realpathAlloc(a, "test/dependencies");
-    const binary = try std.fs.cwd().realpathAlloc(a, "zig-out/bin/zals");
+    const fixture = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "test/fixtures/e2e-workspace", a);
+    const deps = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "test/dependencies", a);
+    const binary = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "zig-out/bin/zals", a);
     var home_dir = std.testing.tmpDir(.{});
     defer home_dir.cleanup();
-    const home = try home_dir.dir.realpathAlloc(a, ".");
+    const home = try home_dir.dir.realPathFileAlloc(std.testing.io, ".", a);
     var client = try lsp.Client.start(a, binary, fixture, deps, home);
     defer client.deinit();
     _ = try client.request("initialize", .{

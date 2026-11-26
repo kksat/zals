@@ -15,8 +15,8 @@ pub const Task = struct {
 pub const ThreadPool = struct {
     allocator: Allocator,
     threads: []std.Thread,
-    mutex: std.Thread.Mutex = .{},
-    cond: std.Thread.Condition = .{},
+    mutex: @import("../sync.zig").Mutex = .{},
+    cond: @import("../sync.zig").Condition = .{},
     queue: std.ArrayList(*Task) = .empty,
     head: usize = 0,
     shutdown: bool = false,
@@ -105,6 +105,6 @@ test "pool runs tasks" {
         t.* = .{ .func = Ctx.run, .ctx = c };
         try pool.submit(t);
     }
-    while (counter.load(.monotonic) < 32) std.Thread.sleep(1 * std.time.ns_per_ms);
+    while (counter.load(.monotonic) < 32) @import("../sync.zig").sleep(1 * std.time.ns_per_ms);
     try std.testing.expectEqual(@as(usize, 32), counter.load(.monotonic));
 }

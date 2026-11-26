@@ -152,12 +152,12 @@ fn testFacts(a: Allocator, path: []const u8, text: []const u8) ![]const RoleRef 
 test "role references distinguish same-name roles and join short/FQCN aliases" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.makePath("collections/ansible_collections/ns/one/roles/web/tasks");
-    try tmp.dir.makePath("collections/ansible_collections/ns/two/roles/web/tasks");
+    try tmp.dir.createDirPath(std.testing.io, "collections/ansible_collections/ns/one/roles/web/tasks");
+    try tmp.dir.createDirPath(std.testing.io, "collections/ansible_collections/ns/two/roles/web/tasks");
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const root = try tmp.dir.realpathAlloc(a, ".");
+    const root = try tmp.dir.realPathFileAlloc(std.testing.io, ".", a);
     const cp = try std.fs.path.join(a, &.{ root, "collections" });
     const path = try std.fs.path.join(a, &.{ root, "site.yml" });
     const refs = try testFacts(a, path,
@@ -185,12 +185,12 @@ test "role references distinguish same-name roles and join short/FQCN aliases" {
 test "requirements collections are install dependencies, not role resolution context" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.makePath("collections/ansible_collections/ns/one/roles/web/tasks");
-    try tmp.dir.makePath("roles/web/tasks");
+    try tmp.dir.createDirPath(std.testing.io, "collections/ansible_collections/ns/one/roles/web/tasks");
+    try tmp.dir.createDirPath(std.testing.io, "roles/web/tasks");
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const root = try tmp.dir.realpathAlloc(a, ".");
+    const root = try tmp.dir.realPathFileAlloc(std.testing.io, ".", a);
     const cp = try std.fs.path.join(a, &.{ root, "collections" });
     const rp = try std.fs.path.join(a, &.{ root, "roles" });
     const req_path = try std.fs.path.join(a, &.{ root, "requirements.yml" });
@@ -222,15 +222,15 @@ test "requirements collections are install dependencies, not role resolution con
 test "ambiguous fallback matches any shared target, not just first" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.makePath("apps/roles/db/tasks");
-    try tmp.dir.makePath("infra/roles/db/tasks");
-    try tmp.dir.makePath("apps/playbooks");
-    try tmp.dir.makePath("infra/playbooks");
-    try tmp.dir.makePath("other");
+    try tmp.dir.createDirPath(std.testing.io, "apps/roles/db/tasks");
+    try tmp.dir.createDirPath(std.testing.io, "infra/roles/db/tasks");
+    try tmp.dir.createDirPath(std.testing.io, "apps/playbooks");
+    try tmp.dir.createDirPath(std.testing.io, "infra/playbooks");
+    try tmp.dir.createDirPath(std.testing.io, "other");
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const root = try tmp.dir.realpathAlloc(a, ".");
+    const root = try tmp.dir.realPathFileAlloc(std.testing.io, ".", a);
     const apps = try std.fs.path.join(a, &.{ root, "apps", "roles" });
     const infra = try std.fs.path.join(a, &.{ root, "infra", "roles" });
     const unknown_path = try std.fs.path.join(a, &.{ root, "other", "site.yml" });
@@ -276,22 +276,22 @@ test "unresolved role reference returns only its own location" {
 test "role card prefers README, then argument specs, then metadata" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.makePath("web/meta");
-    try tmp.dir.writeFile(.{ .sub_path = "web/meta/main.yml", .data = "galaxy_info:\n  author: me\n" });
+    try tmp.dir.createDirPath(std.testing.io, "web/meta");
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "web/meta/main.yml", .data = "galaxy_info:\n  author: me\n" });
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const dir = try tmp.dir.realpathAlloc(a, "web");
+    const dir = try tmp.dir.realPathFileAlloc(std.testing.io, "web", a);
 
     var card = try roleCard(a, "web", dir);
     try testing.expect(std.mem.indexOf(u8, card, "meta/main.yml") != null);
     try testing.expect(std.mem.indexOf(u8, card, "author: me") != null);
 
-    try tmp.dir.writeFile(.{ .sub_path = "web/meta/argument_specs.yml", .data = "argument_specs: {}\n" });
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "web/meta/argument_specs.yml", .data = "argument_specs: {}\n" });
     card = try roleCard(a, "web", dir);
     try testing.expect(std.mem.indexOf(u8, card, "argument_specs: {}") != null);
 
-    try tmp.dir.writeFile(.{ .sub_path = "web/README.md", .data = "# Web role\n" });
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "web/README.md", .data = "# Web role\n" });
     card = try roleCard(a, "web", dir);
     try testing.expectEqualStrings("# Web role\n", card);
 }
@@ -299,11 +299,11 @@ test "role card prefers README, then argument specs, then metadata" {
 test "role card falls back to the path" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.makePath("bare/tasks");
+    try tmp.dir.createDirPath(std.testing.io, "bare/tasks");
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const dir = try tmp.dir.realpathAlloc(a, "bare");
+    const dir = try tmp.dir.realPathFileAlloc(std.testing.io, "bare", a);
     const card = try roleCard(a, "bare", dir);
     try testing.expect(std.mem.indexOf(u8, card, dir) != null);
 }

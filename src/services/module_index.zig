@@ -6,6 +6,7 @@
 //! modules that resolve, so we scan the filesystem directly.
 
 const std = @import("std");
+const fsio = @import("../fsio.zig");
 const Allocator = std.mem.Allocator;
 const exec = @import("../exec/root.zig");
 const yaml = @import("../yaml/root.zig");
@@ -61,11 +62,11 @@ pub const Index = struct {
     }
 
     fn scanBuiltin(self: *Index, a: Allocator, dir: []const u8) void {
-        var d = std.fs.cwd().openDir(dir, .{ .iterate = true }) catch return;
-        defer d.close();
+        var d = fsio.openDir(dir, .{ .iterate = true }) catch return;
+        defer d.close(fsio.get());
         var walker = d.walk(self.allocator) catch return;
         defer walker.deinit();
-        while (walker.next() catch null) |entry| {
+        while (walker.next(fsio.get()) catch null) |entry| {
             if (entry.kind != .file) continue;
             if (!std.mem.endsWith(u8, entry.basename, ".py")) continue;
             if (std.mem.startsWith(u8, entry.basename, "_")) continue;
@@ -77,15 +78,15 @@ pub const Index = struct {
 
     fn scanCollections(self: *Index, a: Allocator, base: []const u8) void {
         const root = std.fs.path.join(a, &.{ base, "ansible_collections" }) catch return;
-        var d = std.fs.cwd().openDir(root, .{ .iterate = true }) catch return;
-        defer d.close();
+        var d = fsio.openDir(root, .{ .iterate = true }) catch return;
+        defer d.close(fsio.get());
         var ns_it = d.iterate();
-        while (ns_it.next() catch null) |ns_entry| {
+        while (ns_it.next(fsio.get()) catch null) |ns_entry| {
             if (ns_entry.kind != .directory) continue;
-            var ns_dir = d.openDir(ns_entry.name, .{ .iterate = true }) catch continue;
-            defer ns_dir.close();
+            var ns_dir = d.openDir(fsio.get(), ns_entry.name, .{ .iterate = true }) catch continue;
+            defer ns_dir.close(fsio.get());
             var coll_it = ns_dir.iterate();
-            while (coll_it.next() catch null) |coll_entry| {
+            while (coll_it.next(fsio.get()) catch null) |coll_entry| {
                 if (coll_entry.kind != .directory) continue;
                 const modules_dir = std.fs.path.join(a, &.{
                     base, "ansible_collections", ns_entry.name, coll_entry.name, "plugins", "modules",
@@ -101,11 +102,11 @@ pub const Index = struct {
     }
 
     fn scanCollectionModules(self: *Index, a: Allocator, dir: []const u8, ns: []const u8, coll: []const u8) void {
-        var d = std.fs.cwd().openDir(dir, .{ .iterate = true }) catch return;
-        defer d.close();
+        var d = fsio.openDir(dir, .{ .iterate = true }) catch return;
+        defer d.close(fsio.get());
         var walker = d.walk(self.allocator) catch return;
         defer walker.deinit();
-        while (walker.next() catch null) |entry| {
+        while (walker.next(fsio.get()) catch null) |entry| {
             if (entry.kind != .file) continue;
             if (!std.mem.endsWith(u8, entry.basename, ".py")) continue;
             if (std.mem.startsWith(u8, entry.basename, "_")) continue;
@@ -122,7 +123,7 @@ pub const Index = struct {
     }
 
     fn scanRuntime(self: *Index, a: Allocator, path: []const u8, collection: []const u8) void {
-        const bytes = std.fs.cwd().readFileAlloc(self.allocator, path, 64 * 1024 * 1024) catch return;
+        const bytes = fsio.readFileAlloc(self.allocator, path, 64 * 1024 * 1024) catch return;
         defer self.allocator.free(bytes);
         var forest = yaml.parse(self.allocator, bytes) catch return;
         defer forest.deinit();

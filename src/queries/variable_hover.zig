@@ -69,48 +69,49 @@ pub fn renderField(a: Allocator, name: []const u8, entries: []const Entry, root:
 }
 
 fn renderNamed(a: Allocator, label: []const u8, name: []const u8, entries: []const Entry, root: ?[]const u8) ![]const u8 {
-    var out = std.array_list.Managed(u8).init(a);
-    try out.writer().print("**{s}** `{s}`\n", .{ label, name });
+    var aw = std.Io.Writer.Allocating.init(a);
+    const out = &aw.writer;
+    try out.print("**{s}** `{s}`\n", .{ label, name });
     var reachable: usize = 0;
     for (entries) |e| if (e.reachable) {
         reachable += 1;
     };
     if (reachable > 0) {
-        try out.appendSlice("\n**Active:** ");
-        try line(a, &out, entries[0], root);
+        try out.writeAll("\n**Active:** ");
+        try line(a, out, entries[0], root);
     }
     if (reachable > 1) {
-        try out.appendSlice("\n**Shadowed:**\n");
+        try out.writeAll("\n**Shadowed:**\n");
         for (entries[1..reachable], 0..) |e, i| {
             if (i >= max_listed) break;
-            try out.appendSlice("- ");
-            try line(a, &out, e, root);
+            try out.writeAll("- ");
+            try line(a, out, e, root);
         }
     }
     if (entries.len > reachable) {
-        try out.appendSlice("\n**Elsewhere in the Workspace:**\n");
+        try out.writeAll("\n**Elsewhere in the Workspace:**\n");
         for (entries[reachable..], 0..) |e, i| {
             if (i >= max_listed) {
-                try out.writer().print("- … and {d} more\n", .{entries.len - reachable - max_listed});
+                try out.print("- … and {d} more\n", .{entries.len - reachable - max_listed});
                 break;
             }
-            try out.appendSlice("- ");
-            try line(a, &out, e, root);
+            try out.writeAll("- ");
+            try line(a, out, e, root);
         }
     }
-    return out.toOwnedSlice();
+    return aw.written();
 }
 
-fn line(a: Allocator, out: *std.array_list.Managed(u8), e: Entry, root: ?[]const u8) !void {
+fn line(a: Allocator, out: *std.Io.Writer, e: Entry, root: ?[]const u8) !void {
     const where = try display(a, e.uri, root);
     const site = if (e.site) |s| @tagName(s) else "definition";
     const value = e.value orelse "";
     if (value.len == 0) {
-        try out.writer().print("`{s}:{d}` ({s})\n", .{ where, e.line, site });
+        try out.print("`{s}:{d}` ({s})\n", .{ where, e.line, site });
     } else if (std.mem.indexOfScalar(u8, value, '\n') == null) {
-        try out.writer().print("`{s}` — `{s}:{d}` ({s})\n", .{ value, where, e.line, site });
+        try out.print("`{s}` — `{s}:{d}` ({s})\n", .{ value, where, e.line, site });
     } else {
-        try out.writer().print("`{s}:{d}` ({s})\n\n```yaml\n{s}\n```\n", .{ where, e.line, site, value });
+        try out.print("`{s}:{d}` ({s})\n\n```yaml\n{s}\n```\n", .{ where, e.line, site, value });
     }
 }
 
@@ -153,7 +154,7 @@ fn pairWithKeyAt(node: *yaml.Node, start: usize) ?*yaml.Node {
 }
 
 fn dedentValue(a: Allocator, text: []const u8, start: usize, end: usize) ![]const u8 {
-    const raw = std.mem.trimRight(u8, text[start..end], " \t\r\n");
+    const raw = std.mem.trimEnd(u8, text[start..end], " \t\r\n");
     if (std.mem.indexOfScalar(u8, raw, '\n') == null) return a.dupe(u8, raw);
     var lines = std.mem.splitScalar(u8, raw, '\n');
     var min_indent: usize = std.math.maxInt(usize);

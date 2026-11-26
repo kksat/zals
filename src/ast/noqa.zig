@@ -48,9 +48,9 @@ fn parseComment(alloc: std.mem.Allocator, comment: Comment) !?Directive {
     const marker_idx = findNoqaMarker(body) orelse return null;
     var rest = body[marker_idx + 4 ..];
     if (rest.len > 0 and !isBoundary(rest[0])) return null;
-    rest = std.mem.trimLeft(u8, rest, " \t");
+    rest = std.mem.trimStart(u8, rest, " \t");
     if (rest.len > 0 and rest[0] == ':') {
-        rest = std.mem.trimLeft(u8, rest[1..], " \t");
+        rest = std.mem.trimStart(u8, rest[1..], " \t");
     }
     if (rest.len == 0) {
         return .{ .line = comment.line, .all = true, .rule_ids = &.{} };

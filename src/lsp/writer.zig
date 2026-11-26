@@ -5,19 +5,20 @@
 //! a slow client. Ordering is FIFO, so responses stay in request order.
 
 const std = @import("std");
+const fsio = @import("../fsio.zig");
 const Allocator = std.mem.Allocator;
 
 pub const Writer = struct {
     allocator: Allocator,
-    out_file: std.fs.File,
-    mutex: std.Thread.Mutex = .{},
-    cond: std.Thread.Condition = .{},
+    out_file: std.Io.File,
+    mutex: @import("../sync.zig").Mutex = .{},
+    cond: @import("../sync.zig").Condition = .{},
     queue: std.ArrayList([]u8) = .empty,
     head: usize = 0,
     shutdown: bool = false,
     thread: ?std.Thread = null,
 
-    pub fn init(allocator: Allocator, out_file: std.fs.File) !*Writer {
+    pub fn init(allocator: Allocator, out_file: std.Io.File) !*Writer {
         const self = try allocator.create(Writer);
         errdefer allocator.destroy(self);
         self.* = .{ .allocator = allocator, .out_file = out_file };
@@ -78,17 +79,17 @@ pub const Writer = struct {
     }
 };
 
-fn writeFramed(file: std.fs.File, body: []const u8) !void {
+fn writeFramed(file: std.Io.File, body: []const u8) !void {
     var header_buf: [64]u8 = undefined;
     const header = try std.fmt.bufPrint(&header_buf, "Content-Length: {d}\r\n\r\n", .{body.len});
     try writeAll(file, header);
     try writeAll(file, body);
 }
 
-fn writeAll(file: std.fs.File, bytes: []const u8) !void {
+fn writeAll(file: std.Io.File, bytes: []const u8) !void {
     var written: usize = 0;
     while (written < bytes.len) {
-        written += file.write(bytes[written..]) catch |err| switch (err) {
+        written += file.writeStreaming(fsio.get(), &.{}, &.{bytes[written..]}, 1) catch |err| switch (err) {
             error.WouldBlock => continue,
             else => return err,
         };
@@ -99,15 +100,14 @@ test "writer frames and writes" {
     const allocator = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    const file = try tmp.dir.createFile("out", .{ .read = true });
-    defer file.close();
+    const file = try tmp.dir.createFile(std.testing.io, "out", .{ .read = true });
+    defer file.close(fsio.get());
 
     var writer = try Writer.init(allocator, file);
     try writer.writeMessage("{\"jsonrpc\":\"2.0\"}");
     writer.deinit();
 
-    try file.seekTo(0);
     var buf: [128]u8 = undefined;
-    const n = try file.read(&buf);
+    const n = try file.readPositionalAll(fsio.get(), &buf, 0);
     try std.testing.expectEqualStrings("Content-Length: 17\r\n\r\n{\"jsonrpc\":\"2.0\"}", buf[0..n]);
 }

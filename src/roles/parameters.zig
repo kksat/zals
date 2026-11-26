@@ -164,7 +164,7 @@ fn dedent(a: Allocator, text: []const u8, start: usize, end: usize) ![]const u8 
     const line_start = if (std.mem.lastIndexOfScalar(u8, text[0..start], '\n')) |i| i + 1 else 0;
     const indent = start - line_start;
     var out = std.array_list.Managed(u8).init(a);
-    var it = std.mem.splitScalar(u8, std.mem.trimRight(u8, text[line_start..@min(end, text.len)], " \t\r\n"), '\n');
+    var it = std.mem.splitScalar(u8, std.mem.trimEnd(u8, text[line_start..@min(end, text.len)], " \t\r\n"), '\n');
     var first = true;
     while (it.next()) |line| {
         if (!first) try out.append('\n');
@@ -244,7 +244,7 @@ test "plain task vars are not role parameters" {
 test "option spec is unrendered and dedented" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.makePath("web/meta");
+    try tmp.dir.createDirPath(std.testing.io, "web/meta");
     const specs =
         \\argument_specs:
         \\  main:
@@ -256,11 +256,11 @@ test "option spec is unrendered and dedented" {
         \\        type: str
         \\
     ;
-    try tmp.dir.writeFile(.{ .sub_path = "web/meta/argument_specs.yml", .data = specs });
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "web/meta/argument_specs.yml", .data = specs });
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const dir = try tmp.dir.realpathAlloc(a, "web");
+    const dir = try tmp.dir.realPathFileAlloc(std.testing.io, "web", a);
     const spec = (try optionSpec(a, dir, "main", "port")).?;
     try testing.expectEqualStrings("port:\n  type: int\n  description: Listening port", spec.yaml);
     try testing.expect((try optionSpec(a, dir, "main", "missing")) == null);

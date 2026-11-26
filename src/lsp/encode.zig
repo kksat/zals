@@ -12,9 +12,9 @@ pub fn hover(a: Allocator, item: ?types.Hover) !Value {
     try contents.put("kind", json_util.str(markupKind(h.contents.kind)));
     try contents.put("value", json_util.str(h.contents.value));
     var result = json_util.obj(a);
-    try result.put("contents", .{ .object = contents });
+    try result.put("contents", .{ .object = contents.map });
     if (h.range) |r| try result.put("range", .{ .object = try rangeObject(a, r) });
-    return .{ .object = result };
+    return .{ .object = result.map };
 }
 
 pub fn completionList(a: Allocator, list: types.CompletionList) !Value {
@@ -23,28 +23,28 @@ pub fn completionList(a: Allocator, list: types.CompletionList) !Value {
     var obj = json_util.obj(a);
     try obj.put("isIncomplete", json_util.booleanValue(list.isIncomplete));
     try obj.put("items", .{ .array = items });
-    return .{ .object = obj };
+    return .{ .object = obj.map };
 }
 
 pub fn completionItem(a: Allocator, item: types.CompletionItem) !Value {
     var obj = json_util.obj(a);
     try obj.put("label", json_util.str(item.label));
-    if (item.kind) |k| try obj.put("kind", json_util.num(@intFromEnum(k)));
+    if (item.kind) |k| try obj.put("kind", json_util.num(@backingInt(k)));
     if (item.detail) |d| try obj.put("detail", json_util.str(d));
     if (item.documentation) |doc| try obj.put("documentation", try markup(a, doc));
     if (item.insertText) |t| try obj.put("insertText", json_util.str(t));
-    if (item.insertTextFormat) |f| try obj.put("insertTextFormat", json_util.num(@intFromEnum(f)));
+    if (item.insertTextFormat) |f| try obj.put("insertTextFormat", json_util.num(@backingInt(f)));
     if (item.sortText) |t| try obj.put("sortText", json_util.str(t));
     if (item.filterText) |t| try obj.put("filterText", json_util.str(t));
     if (item.data) |d| try obj.put("data", d);
-    return .{ .object = obj };
+    return .{ .object = obj.map };
 }
 
 pub fn markup(a: Allocator, doc: types.MarkupContent) !Value {
     var obj = json_util.obj(a);
     try obj.put("kind", json_util.str(markupKind(doc.kind)));
     try obj.put("value", json_util.str(doc.value));
-    return .{ .object = obj };
+    return .{ .object = obj.map };
 }
 
 pub fn semanticTokens(a: Allocator, tokens: []const types.AbsoluteToken) !Value {
@@ -64,14 +64,14 @@ pub fn semanticTokens(a: Allocator, tokens: []const types.AbsoluteToken) !Value 
     }
     var obj = json_util.obj(a);
     try obj.put("data", .{ .array = data });
-    return .{ .object = obj };
+    return .{ .object = obj.map };
 }
 
 pub fn location(a: Allocator, loc: types.Location) !Value {
     var obj = json_util.obj(a);
     try obj.put("uri", json_util.str(loc.uri));
     try obj.put("range", .{ .object = try rangeObject(a, loc.range) });
-    return .{ .object = obj };
+    return .{ .object = obj.map };
 }
 
 pub fn optionalLocation(a: Allocator, loc: ?types.Location) !Value {
@@ -90,7 +90,7 @@ pub fn prepareRename(a: Allocator, item: ?types.PrepareRename) !Value {
     var obj = json_util.obj(a);
     try obj.put("range", .{ .object = try rangeObject(a, p.range) });
     try obj.put("placeholder", json_util.str(p.placeholder));
-    return .{ .object = obj };
+    return .{ .object = obj.map };
 }
 
 pub fn workspaceEditChanges(a: Allocator, locs: ?[]const types.Location, new_text: []const u8) !Value {
@@ -104,11 +104,11 @@ pub fn workspaceEditChanges(a: Allocator, locs: ?[]const types.Location, new_tex
         if (!gop.found_existing) {
             gop.value_ptr.* = .{ .array = std.json.Array.init(a) };
         }
-        try gop.value_ptr.array.append(.{ .object = edit });
+        try gop.value_ptr.array.append(.{ .object = edit.map });
     }
     var result = json_util.obj(a);
-    try result.put("changes", .{ .object = changes });
-    return .{ .object = result };
+    try result.put("changes", .{ .object = changes.map });
+    return .{ .object = result.map };
 }
 
 fn markupKind(kind: types.MarkupKind) []const u8 {
@@ -122,12 +122,12 @@ fn rangeObject(a: Allocator, r: types.Range) !std.json.ObjectMap {
     var obj = json_util.obj(a);
     try obj.put("start", try positionValue(a, r.start));
     try obj.put("end", try positionValue(a, r.end));
-    return obj;
+    return obj.map;
 }
 
 fn positionValue(a: Allocator, p: types.Position) !Value {
     var obj = json_util.obj(a);
     try obj.put("line", json_util.num(p.line));
     try obj.put("character", json_util.num(p.character));
-    return .{ .object = obj };
+    return .{ .object = obj.map };
 }

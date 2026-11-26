@@ -5,6 +5,7 @@
 //! library encodes a coherent snapshot before this adapter performs disk I/O.
 
 const std = @import("std");
+const fsio = @import("../fsio.zig");
 const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 const docs = @import("docs.zig");
@@ -13,19 +14,19 @@ pub const format_version = docs.cache_format_version;
 
 pub fn cacheDir(allocator: Allocator) ![]u8 {
     if (builtin.os.tag == .windows) {
-        if (std.process.getEnvVarOwned(allocator, "LOCALAPPDATA")) |base| {
+        if (fsio.getEnvVarOwned(allocator, "LOCALAPPDATA")) |base| {
             defer allocator.free(base);
             return std.fs.path.join(allocator, &.{ base, "zals", "cache" });
-        } else |_| {}
+        }
     } else {
-        if (std.process.getEnvVarOwned(allocator, "XDG_CACHE_HOME")) |x| {
+        if (fsio.getEnvVarOwned(allocator, "XDG_CACHE_HOME")) |x| {
             defer allocator.free(x);
             return std.fs.path.join(allocator, &.{ x, "zals" });
-        } else |_| {}
-        if (std.process.getEnvVarOwned(allocator, "HOME")) |h| {
+        }
+        if (fsio.getEnvVarOwned(allocator, "HOME")) |h| {
             defer allocator.free(h);
             return std.fs.path.join(allocator, &.{ h, ".cache", "zals" });
-        } else |_| {}
+        }
     }
     return error.NoCacheDir;
 }
@@ -44,22 +45,20 @@ pub fn save(allocator: Allocator, lib: *DocsLibrary, path: []const u8) !void {
     const bytes = try lib.encodeCache(allocator);
     defer allocator.free(bytes);
 
-    if (std.fs.path.dirname(path)) |dir| std.fs.cwd().makePath(dir) catch {};
+    if (std.fs.path.dirname(path)) |dir| fsio.makePath(dir) catch {};
     const tmp = try std.fmt.allocPrint(allocator, "{s}.tmp", .{path});
     defer allocator.free(tmp);
     {
-        const f = try std.fs.cwd().createFile(tmp, .{ .truncate = true });
-        defer f.close();
-        try f.writeAll(bytes);
+        const f = try fsio.createFile(tmp, .{ .truncate = true });
+        defer f.close(fsio.get());
+        try f.writeStreamingAll(fsio.get(), bytes);
     }
-    try std.fs.cwd().rename(tmp, path);
+    try fsio.rename(tmp, path);
 }
 
 /// Load a cache file into the library. Returns false if absent or incompatible.
 pub fn load(allocator: Allocator, lib: *DocsLibrary, path: []const u8) !bool {
-    const f = std.fs.cwd().openFile(path, .{}) catch return false;
-    defer f.close();
-    const bytes = f.readToEndAlloc(allocator, 128 * 1024 * 1024) catch return false;
+    const bytes = fsio.readFileAlloc(allocator, path, 128 * 1024 * 1024) catch return false;
     defer allocator.free(bytes);
     return lib.restoreCache(allocator, bytes);
 }
@@ -90,7 +89,7 @@ test "cache round trip" {
 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    const dir = try tmp.dir.realpathAlloc(allocator, ".");
+    const dir = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
     defer allocator.free(dir);
     const cache_file = try std.fs.path.join(allocator, &.{ dir, "docs.json" });
     defer allocator.free(cache_file);

@@ -2,6 +2,7 @@
 //! warning effects. Main-thread only (ADR-0011); no index or writer dependency.
 
 const std = @import("std");
+const fsio = @import("../fsio.zig");
 const Allocator = std.mem.Allocator;
 const roots_mod = @import("roots.zig");
 const discover = @import("discover.zig");
@@ -195,8 +196,8 @@ fn copyStrings(a: Allocator, strings: []const []const u8) ![]const []const u8 {
 const testing = std.testing;
 const test_marker = ".zals-session-marker";
 
-fn folderUri(a: Allocator, dir: std.fs.Dir, rel: []const u8) ![]const u8 {
-    const path = try dir.realpathAlloc(a, rel);
+fn folderUri(a: Allocator, dir: std.Io.Dir, rel: []const u8) ![]const u8 {
+    const path = try dir.realPathFileAlloc(fsio.get(), rel, a);
     defer a.free(path);
     return paths.pathToUri(a, path);
 }
@@ -209,9 +210,9 @@ fn expectNoEffects(effects: Effects) !void {
 test "initialization resolves roots but defers all effects until ready; warning is once" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.makePath("workspace/" ++ test_marker);
-    try tmp.dir.makeDir("missing");
-    try tmp.dir.makeDir("also-missing");
+    try tmp.dir.createDirPath(std.testing.io, "workspace/" ++ test_marker);
+    try tmp.dir.createDir(std.testing.io, "missing", .default_dir);
+    try tmp.dir.createDir(std.testing.io, "also-missing", .default_dir);
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
@@ -240,9 +241,9 @@ test "initialization resolves roots but defers all effects until ready; warning 
 test "marker change returns one rescan and rearms warning, unchanged config does neither" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.makePath("workspace/" ++ test_marker);
-    try tmp.dir.makePath("workspace/child/next-marker");
-    try tmp.dir.makeDir("missing");
+    try tmp.dir.createDirPath(std.testing.io, "workspace/" ++ test_marker);
+    try tmp.dir.createDirPath(std.testing.io, "workspace/child/next-marker");
+    try tmp.dir.createDir(std.testing.io, "missing", .default_dir);
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
@@ -257,7 +258,7 @@ test "marker change returns one rescan and rearms warning, unchanged config does
     const changed = try session.apply(a, .{ .config_changed = .{ .marker = "next-marker" } });
     try testing.expect(changed.sync.?.rescan);
     try testing.expectEqual(@as(usize, 1), changed.sync.?.roots.len);
-    try testing.expectEqualStrings(try tmp.dir.realpathAlloc(a, "workspace/child"), changed.sync.?.roots[0]);
+    try testing.expectEqualStrings(try tmp.dir.realPathFileAlloc(std.testing.io, "workspace/child", a), changed.sync.?.roots[0]);
     try testing.expect(changed.warning != null);
     try testing.expect(std.mem.indexOf(u8, changed.warning.?, "next-marker") != null);
     const repeated = try session.apply(a, .{ .config_changed = .{ .marker = "next-marker" } });
@@ -287,9 +288,9 @@ test "warning can be enabled later and folder/config changes before ready have n
 test "two opened folders share one root until both are removed; duplicate URIs form a set" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.makeDir(test_marker);
-    try tmp.dir.makeDir("playbooks");
-    try tmp.dir.makeDir("roles");
+    try tmp.dir.createDir(std.testing.io, test_marker, .default_dir);
+    try tmp.dir.createDir(std.testing.io, "playbooks", .default_dir);
+    try tmp.dir.createDir(std.testing.io, "roles", .default_dir);
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
@@ -311,9 +312,9 @@ test "two opened folders share one root until both are removed; duplicate URIs f
 test "distinct marker files/directories are roots; invalid folder URI is missing, not fatal" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.makePath("first/" ++ test_marker);
-    try tmp.dir.makeDir("second");
-    try tmp.dir.writeFile(.{ .sub_path = "second/" ++ test_marker, .data = "marker file" });
+    try tmp.dir.createDirPath(std.testing.io, "first/" ++ test_marker);
+    try tmp.dir.createDir(std.testing.io, "second", .default_dir);
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "second/" ++ test_marker, .data = "marker file" });
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
@@ -324,8 +325,8 @@ test "distinct marker files/directories are roots; invalid folder URI is missing
     }, .config = .{ .marker = test_marker } } });
     const ready = try session.apply(a, .ready);
     try testing.expectEqual(@as(usize, 2), ready.sync.?.roots.len);
-    try testing.expectEqualStrings(try tmp.dir.realpathAlloc(a, "first"), ready.sync.?.roots[0]);
-    try testing.expectEqualStrings(try tmp.dir.realpathAlloc(a, "second"), ready.sync.?.roots[1]);
+    try testing.expectEqualStrings(try tmp.dir.realPathFileAlloc(std.testing.io, "first", a), ready.sync.?.roots[0]);
+    try testing.expectEqualStrings(try tmp.dir.realPathFileAlloc(std.testing.io, "second", a), ready.sync.?.roots[1]);
     try testing.expect(ready.warning != null);
 }
 
@@ -356,12 +357,12 @@ test "configuration strings are owned, effective markers are sanitized, and venv
 test "owner differs from member for nested markers, virtual environments and excluded directories" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.makeDir(test_marker);
-    try tmp.dir.makePath("nested/tasks");
-    try tmp.dir.makePath(".venv/tasks");
-    try tmp.dir.makePath("custom-env/tasks");
-    try tmp.dir.writeFile(.{ .sub_path = "custom-env/pyvenv.cfg", .data = "" });
-    try tmp.dir.makePath("node_modules/tasks");
+    try tmp.dir.createDir(std.testing.io, test_marker, .default_dir);
+    try tmp.dir.createDirPath(std.testing.io, "nested/tasks");
+    try tmp.dir.createDirPath(std.testing.io, ".venv/tasks");
+    try tmp.dir.createDirPath(std.testing.io, "custom-env/tasks");
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "custom-env/pyvenv.cfg", .data = "" });
+    try tmp.dir.createDirPath(std.testing.io, "node_modules/tasks");
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
@@ -369,13 +370,13 @@ test "owner differs from member for nested markers, virtual environments and exc
     defer session.deinit();
     _ = try session.apply(a, .{ .initialize = .{ .folders = &.{try folderUri(a, tmp.dir, ".")}, .config = .{ .marker = test_marker } } });
     const snapshot = session.snapshot();
-    const root = try tmp.dir.realpathAlloc(a, ".");
+    const root = try tmp.dir.realPathFileAlloc(std.testing.io, ".", a);
     const nested = try std.fs.path.join(a, &.{ root, "nested/tasks/main.yml" });
     try testing.expectEqualStrings(root, snapshot.owner(a, nested).?);
     try testing.expectEqualStrings(root, snapshot.member(nested).?);
     // No session-lifetime owner memo: a marker created after the snapshot is
     // observed by the next query, without any folder/configuration event.
-    try tmp.dir.makePath("nested/" ++ test_marker);
+    try tmp.dir.createDirPath(std.testing.io, "nested/" ++ test_marker);
     try testing.expect(snapshot.owner(a, nested) == null);
     try testing.expect(snapshot.member(nested) == null);
     for ([_][]const u8{ ".venv/tasks/main.yml", "custom-env/tasks/main.yml", "node_modules/tasks/main.yml", "notes.txt" }) |rel| {
@@ -384,5 +385,5 @@ test "owner differs from member for nested markers, virtual environments and exc
         try testing.expect(snapshot.member(path) == null);
     }
     _ = try session.apply(a, .{ .folders_changed = .{ .added = &.{try folderUri(a, tmp.dir, "nested")}, .removed = &.{} } });
-    try testing.expectEqualStrings(try tmp.dir.realpathAlloc(a, "nested"), session.snapshot().member(nested).?);
+    try testing.expectEqualStrings(try tmp.dir.realPathFileAlloc(std.testing.io, "nested", a), session.snapshot().member(nested).?);
 }

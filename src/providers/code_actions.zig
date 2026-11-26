@@ -789,7 +789,7 @@ fn toValue(a: Allocator, doc: *const Document, uri: []const u8, act: Action) !Va
     try o.put("title", json_util.str(act.title));
     try o.put("kind", json_util.str(act.kind));
     try o.put("edit", try editValue(a, doc, uri, act));
-    return .{ .object = o };
+    return .{ .object = o.map };
 }
 
 fn editValue(a: Allocator, doc: *const Document, uri: []const u8, act: Action) !Value {
@@ -805,8 +805,8 @@ fn editValue(a: Allocator, doc: *const Document, uri: []const u8, act: Action) !
         try create.put("uri", json_util.str(new_uri));
         var opts = json_util.obj(a);
         try opts.put("overwrite", json_util.booleanValue(false));
-        try create.put("options", .{ .object = opts });
-        try changes.append(.{ .object = create });
+        try create.put("options", .{ .object = opts.map });
+        try changes.append(.{ .object = create.map });
 
         // Then fill it. A newly created file has no version.
         var ntd = json_util.obj(a);
@@ -819,11 +819,11 @@ fn editValue(a: Allocator, doc: *const Document, uri: []const u8, act: Action) !
         }));
         try nte.put("newText", json_util.str(c.text));
         var nedits = std.json.Array.init(a);
-        try nedits.append(.{ .object = nte });
+        try nedits.append(.{ .object = nte.map });
         var nchange = json_util.obj(a);
-        try nchange.put("textDocument", .{ .object = ntd });
+        try nchange.put("textDocument", .{ .object = ntd.map });
         try nchange.put("edits", .{ .array = nedits });
-        try changes.append(.{ .object = nchange });
+        try changes.append(.{ .object = nchange.map });
     }
 
     var td = json_util.obj(a);
@@ -835,29 +835,29 @@ fn editValue(a: Allocator, doc: *const Document, uri: []const u8, act: Action) !
     try te.put("newText", json_util.str(act.new_text));
 
     var edits = std.json.Array.init(a);
-    try edits.append(.{ .object = te });
+    try edits.append(.{ .object = te.map });
 
     var change = json_util.obj(a);
-    try change.put("textDocument", .{ .object = td });
+    try change.put("textDocument", .{ .object = td.map });
     try change.put("edits", .{ .array = edits });
-    try changes.append(.{ .object = change });
+    try changes.append(.{ .object = change.map });
 
     try edit.put("documentChanges", .{ .array = changes });
-    return .{ .object = edit };
+    return .{ .object = edit.map };
 }
 
 fn rangeValue(a: Allocator, r: types.Range) !Value {
     var o = json_util.obj(a);
     try o.put("start", try posValue(a, r.start));
     try o.put("end", try posValue(a, r.end));
-    return .{ .object = o };
+    return .{ .object = o.map };
 }
 
 fn posValue(a: Allocator, p: types.Position) !Value {
     var o = json_util.obj(a);
     try o.put("line", json_util.num(p.line));
     try o.put("character", json_util.num(p.character));
-    return .{ .object = o };
+    return .{ .object = o.map };
 }
 
 const testing = std.testing;

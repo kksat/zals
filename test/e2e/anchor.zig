@@ -17,9 +17,7 @@ pub const Resolver = struct {
 
     pub fn readText(self: Resolver, relative: []const u8) ![]u8 {
         const absolute = try self.path(relative);
-        const file = try std.fs.openFileAbsolute(absolute, .{});
-        defer file.close();
-        return file.readToEndAlloc(self.allocator, 1024 * 1024);
+        return std.Io.Dir.cwd().readFileAlloc(std.testing.io, absolute, self.allocator, .limited(1024 * 1024));
     }
 
     pub fn cursor(self: Resolver, anchor: model.Anchor) !Cursor {
@@ -46,8 +44,8 @@ pub const Resolver = struct {
             },
             .file_start => |relative| blk: {
                 const absolute = try self.path(relative);
-                const file = try std.fs.openFileAbsolute(absolute, .{});
-                file.close();
+                const file = try std.Io.Dir.openFileAbsolute(std.testing.io, absolute, .{});
+                file.close(std.testing.io);
                 break :blk .{
                     .uri = try self.uri(relative),
                     .range = .{

@@ -14,12 +14,12 @@ test "navigation contracts across a static Ansible Workspace" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const fixture = try std.fs.cwd().realpathAlloc(a, "test/fixtures/e2e-workspace");
-    const deps = try std.fs.cwd().realpathAlloc(a, "test/dependencies");
-    const binary = try std.fs.cwd().realpathAlloc(a, "zig-out/bin/zals");
+    const fixture = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "test/fixtures/e2e-workspace", a);
+    const deps = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "test/dependencies", a);
+    const binary = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "zig-out/bin/zals", a);
     var temp_home = std.testing.tmpDir(.{});
     defer temp_home.cleanup();
-    const home = try temp_home.dir.realpathAlloc(a, ".");
+    const home = try temp_home.dir.realPathFileAlloc(std.testing.io, ".", a);
 
     var client = try lsp.Client.start(a, binary, fixture, deps, home);
     defer client.deinit();

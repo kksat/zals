@@ -36,7 +36,7 @@ pub const DiagnosticSeverity = enum(u8) {
     hint = 4,
 
     pub fn jsonStringify(self: @This(), jws: anytype) !void {
-        try jws.write(@intFromEnum(self));
+        try jws.write(@backingInt(self));
     }
 };
 
@@ -106,7 +106,7 @@ pub const CompletionItemKind = enum(u8) {
     type_parameter = 25,
 
     pub fn jsonStringify(self: @This(), jws: anytype) !void {
-        try jws.write(@intFromEnum(self));
+        try jws.write(@backingInt(self));
     }
 };
 
@@ -115,7 +115,7 @@ pub const InsertTextFormat = enum(u8) {
     snippet = 2,
 
     pub fn jsonStringify(self: @This(), jws: anytype) !void {
-        try jws.write(@intFromEnum(self));
+        try jws.write(@backingInt(self));
     }
 };
 
@@ -199,7 +199,7 @@ pub const SymbolKind = enum(u8) {
     type_parameter = 26,
 
     pub fn jsonStringify(self: @This(), jws: anytype) !void {
-        try jws.write(@intFromEnum(self));
+        try jws.write(@backingInt(self));
     }
 };
 

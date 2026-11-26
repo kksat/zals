@@ -6,6 +6,7 @@
 //! bootstrap completes; full module docs are then prefetched in batches.
 
 const std = @import("std");
+const fsio = @import("../fsio.zig");
 const Allocator = std.mem.Allocator;
 const docs = @import("docs.zig");
 const DocsLibrary = docs.DocsLibrary;
@@ -168,7 +169,7 @@ test "bootstrap remains pending until readiness is consumed" {
 pub const ContextLibraries = struct {
     const ContextLibrary = struct {
         lib: DocsLibrary,
-        env: std.process.EnvMap,
+        env: std.process.Environ.Map,
     };
 
     allocator: Allocator,
@@ -207,14 +208,14 @@ pub const ContextLibraries = struct {
         errdefer a.destroy(context);
         context.* = .{
             .lib = DocsLibrary.init(a, self.runner, "ansible-doc"),
-            .env = try std.process.getEnvMap(a),
+            .env = try fsio.getEnvMap(a),
         };
         errdefer context.lib.deinit();
         errdefer context.env.deinit();
         const joined = try std.mem.join(a, &.{std.fs.path.delimiter}, paths);
         defer a.free(joined);
         try context.env.put("ANSIBLE_COLLECTIONS_PATH", joined);
-        context.env.remove("ANSIBLE_COLLECTIONS_PATHS");
+        _ = context.env.orderedRemove("ANSIBLE_COLLECTIONS_PATHS");
         // Do not let Python's unrelated sys.path reintroduce unselected venvs.
         try context.env.put("ANSIBLE_COLLECTIONS_SCAN_SYS_PATH", "false");
         context.lib.execution = .{ .env_map = &context.env };
@@ -240,7 +241,7 @@ test "ContextLibraries keys by collection paths and runs ansible-doc without a c
             return .{
                 .stdout = try a.dupe(u8, "{}"),
                 .stderr = try a.dupe(u8, ""),
-                .term = .{ .Exited = 0 },
+                .term = .{ .exited = 0 },
             };
         }
         const vtable = exec.Runner.VTable{ .run = run, .run_with_options = runWithOptions };

@@ -152,12 +152,12 @@ test "Handler files use Role-relative paths, not a Workspace ancestor" {
 test "standalone Role Handler files use the metadata-supported Role root" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.makePath("standalone/meta");
-    try tmp.dir.writeFile(.{ .sub_path = "standalone/meta/main.yml", .data = "" });
+    try tmp.dir.createDirPath(std.testing.io, "standalone/meta");
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "standalone/meta/main.yml", .data = "" });
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const root = try tmp.dir.realpathAlloc(a, "standalone");
+    const root = try tmp.dir.realPathFileAlloc(std.testing.io, "standalone", a);
     const path = try std.fs.path.join(a, &.{ root, "handlers/sub/more.yml" });
     var forest = try yaml.parse(a, "- name: Restart web\n  debug: msg=hi\n");
     defer forest.deinit();

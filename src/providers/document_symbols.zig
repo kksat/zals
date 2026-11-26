@@ -6,6 +6,7 @@
 //! is a task list. The file path is used only to label handlers.
 
 const std = @import("std");
+const fsio = @import("../fsio.zig");
 const Allocator = std.mem.Allocator;
 const Value = std.json.Value;
 const json_util = @import("../lsp/json_util.zig");
@@ -321,7 +322,7 @@ fn toValue(a: Allocator, sym: DocumentSymbol) Allocator.Error!Value {
     var o = json_util.obj(a);
     try o.put("name", json_util.str(sym.name));
     if (sym.detail) |d| try o.put("detail", json_util.str(d));
-    try o.put("kind", json_util.num(@intFromEnum(sym.kind)));
+    try o.put("kind", json_util.num(@backingInt(sym.kind)));
     try o.put("range", try rangeValue(a, sym.range));
     try o.put("selectionRange", try rangeValue(a, sym.selectionRange));
     if (sym.children) |kids| {
@@ -329,21 +330,21 @@ fn toValue(a: Allocator, sym: DocumentSymbol) Allocator.Error!Value {
         for (kids) |k| try arr.append(try toValue(a, k));
         try o.put("children", .{ .array = arr });
     }
-    return .{ .object = o };
+    return .{ .object = o.map };
 }
 
 fn rangeValue(a: Allocator, r: lsp.Range) Allocator.Error!Value {
     var o = json_util.obj(a);
     try o.put("start", try positionValue(a, r.start));
     try o.put("end", try positionValue(a, r.end));
-    return .{ .object = o };
+    return .{ .object = o.map };
 }
 
 fn positionValue(a: Allocator, p: lsp.Position) Allocator.Error!Value {
     var o = json_util.obj(a);
     try o.put("line", json_util.num(p.line));
     try o.put("character", json_util.num(p.character));
-    return .{ .object = o };
+    return .{ .object = o.map };
 }
 
 const testing = std.testing;
@@ -590,7 +591,7 @@ test "fixture playbook outline" {
     const a = arena.allocator();
 
     const uri = "file://test/fixtures/playbook.yml";
-    const bytes = try std.fs.cwd().readFileAlloc(a, "test/fixtures/playbook.yml", 1 << 20);
+    const bytes = try fsio.readFileAlloc(a, "test/fixtures/playbook.yml", 1 << 20);
     const syms = try outline(a, bytes, uri);
 
     try testing.expectEqual(@as(usize, 1), syms.len);
@@ -611,7 +612,7 @@ test "fixture role files outline" {
     const a = arena.allocator();
 
     const tasks_uri = "file://test/fixtures/roles/demo/tasks/main.yml";
-    const tasks_bytes = try std.fs.cwd().readFileAlloc(a, "test/fixtures/roles/demo/tasks/main.yml", 1 << 20);
+    const tasks_bytes = try fsio.readFileAlloc(a, "test/fixtures/roles/demo/tasks/main.yml", 1 << 20);
     const tasks = try outline(a, tasks_bytes, tasks_uri);
     try testing.expectEqual(@as(usize, 4), tasks.len);
     try testing.expectEqualStrings("Show the app", tasks[0].name);
@@ -620,14 +621,14 @@ test "fixture role files outline" {
     try testing.expectEqualStrings("Loop with a custom var", tasks[3].name);
 
     const vars_uri = "file://test/fixtures/roles/demo/vars/main.yml";
-    const vars_bytes = try std.fs.cwd().readFileAlloc(a, "test/fixtures/roles/demo/vars/main.yml", 1 << 20);
+    const vars_bytes = try fsio.readFileAlloc(a, "test/fixtures/roles/demo/vars/main.yml", 1 << 20);
     const vars = try outline(a, vars_bytes, vars_uri);
     try testing.expectEqual(@as(usize, 2), vars.len);
     try testing.expectEqualStrings("app_port", vars[0].name);
     try testing.expectEqual(SymbolKind.variable, vars[0].kind);
 
     const meta_uri = "file://test/fixtures/roles/demo/meta/main.yml";
-    const meta_bytes = try std.fs.cwd().readFileAlloc(a, "test/fixtures/roles/demo/meta/main.yml", 1 << 20);
+    const meta_bytes = try fsio.readFileAlloc(a, "test/fixtures/roles/demo/meta/main.yml", 1 << 20);
     const meta = try outline(a, meta_bytes, meta_uri);
     try testing.expectEqual(@as(usize, 2), meta.len);
     try testing.expectEqualStrings("galaxy_info", meta[0].name);

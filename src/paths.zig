@@ -2,6 +2,7 @@
 //! predicates, and small whole-file reads.
 
 const std = @import("std");
+const fsio = @import("fsio.zig");
 const Allocator = std.mem.Allocator;
 
 /// Strip a `file://` URI to a filesystem path and percent-decode once.
@@ -22,7 +23,7 @@ pub fn uriToPath(allocator: Allocator, uri: []const u8) ![]const u8 {
 pub fn pathToUri(allocator: Allocator, path: []const u8) ![]const u8 {
     if (std.mem.startsWith(u8, path, "file:")) return path;
     if (std.fs.path.isAbsolute(path)) return absolutePathToUri(allocator, path);
-    const cwd = try std.process.getCwdAlloc(allocator);
+    const cwd = try std.process.currentPathAlloc(fsio.get(), allocator);
     defer allocator.free(cwd);
     const absolute = try std.fs.path.join(allocator, &.{ cwd, path });
     defer allocator.free(absolute);
@@ -32,16 +33,16 @@ pub fn pathToUri(allocator: Allocator, path: []const u8) ![]const u8 {
 /// True when `path` names an existing regular file. Relative paths open
 /// against the process working directory.
 pub fn isFile(path: []const u8) bool {
-    const f = std.fs.cwd().openFile(path, .{}) catch return false;
-    defer f.close();
-    const st = f.stat() catch return false;
+    const f = fsio.openFile(path, .{}) catch return false;
+    defer f.close(fsio.get());
+    const st = f.stat(fsio.get()) catch return false;
     return st.kind == .file;
 }
 
 /// True when `path` names an existing directory.
 pub fn isDir(path: []const u8) bool {
-    var d = std.fs.cwd().openDir(path, .{}) catch return false;
-    d.close();
+    var d = fsio.openDir(path, .{}) catch return false;
+    d.close(fsio.get());
     return true;
 }
 
@@ -50,14 +51,12 @@ pub fn isDir(path: []const u8) bool {
 /// result. `max_bytes` is the caller's memory invariant: each call site
 /// passes the cap its own read budget allows, not a module-wide default.
 pub fn readFile(a: Allocator, path: []const u8, max_bytes: usize) ?[]const u8 {
-    const f = std.fs.cwd().openFile(path, .{}) catch return null;
-    defer f.close();
-    return f.readToEndAlloc(a, max_bytes) catch null;
+    return fsio.readFileAlloc(a, path, max_bytes) catch null;
 }
 
 /// `s` without trailing spaces, tabs, and newlines.
 pub fn trimEnd(s: []const u8) []const u8 {
-    return std.mem.trimRight(u8, s, " \t\r\n");
+    return std.mem.trimEnd(u8, s, " \t\r\n");
 }
 
 fn absolutePathToUri(allocator: Allocator, path: []const u8) ![]const u8 {
@@ -87,12 +86,12 @@ test "uri decodes spaces" {
 test "isFile requires a regular file" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.makePath("d");
-    try tmp.dir.writeFile(.{ .sub_path = "f.yml", .data = "x" });
+    try tmp.dir.createDirPath(std.testing.io, "d");
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "f.yml", .data = "x" });
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const root = try tmp.dir.realpathAlloc(a, ".");
+    const root = try tmp.dir.realPathFileAlloc(std.testing.io, ".", a);
     const file_path = try std.fs.path.join(a, &.{ root, "f.yml" });
     const dir_path = try std.fs.path.join(a, &.{ root, "d" });
     // A directory must answer false even where openFile on it succeeds
@@ -104,11 +103,11 @@ test "isFile requires a regular file" {
 test "readFile honours the caller's size cap" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.writeFile(.{ .sub_path = "f.yml", .data = "0123456789" });
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "f.yml", .data = "0123456789" });
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const root = try tmp.dir.realpathAlloc(a, ".");
+    const root = try tmp.dir.realPathFileAlloc(std.testing.io, ".", a);
     const file_path = try std.fs.path.join(a, &.{ root, "f.yml" });
     try testing.expectEqualStrings("0123456789", readFile(a, file_path, 256 * 1024).?);
     try testing.expect(readFile(a, file_path, 4) == null);
@@ -117,12 +116,12 @@ test "readFile honours the caller's size cap" {
 test "isFile, isDir, readFile, trimEnd" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.makePath("d");
-    try tmp.dir.writeFile(.{ .sub_path = "f.yml", .data = "x\n" });
+    try tmp.dir.createDirPath(std.testing.io, "d");
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "f.yml", .data = "x\n" });
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const root = try tmp.dir.realpathAlloc(a, ".");
+    const root = try tmp.dir.realPathFileAlloc(std.testing.io, ".", a);
     const file_path = try std.fs.path.join(a, &.{ root, "f.yml" });
     const dir_path = try std.fs.path.join(a, &.{ root, "d" });
     try testing.expect(isFile(file_path));

@@ -2,6 +2,7 @@
 //! referenced file; find-references lists every site that names it.
 
 const std = @import("std");
+const fsio = @import("../fsio.zig");
 const types = @import("../lsp/types.zig");
 const context_mod = @import("context.zig");
 const Context = context_mod.Context;
@@ -38,8 +39,8 @@ pub const Definition = union(enum) {
 
 pub fn definition(context: *Context, subject: *Subject) !Definition {
     const at = (try refAt(context, subject)) orelse return .skip;
-    const f = std.fs.cwd().openFile(at.ref.target, .{}) catch return .none;
-    f.close();
+    const f = fsio.openFile(at.ref.target, .{}) catch return .none;
+    f.close(fsio.get());
     return .{ .location = try context_mod.fileLocation(context.allocator, at.ref.target) };
 }
 

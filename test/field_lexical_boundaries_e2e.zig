@@ -189,11 +189,11 @@ const Session = struct {
             std.testing.allocator.destroy(arena);
         }
         const a = arena.allocator();
-        const fixture = try std.fs.cwd().realpathAlloc(a, "test/fixtures/field-lexical-boundaries-workspace");
-        const binary = try std.fs.cwd().realpathAlloc(a, "zig-out/bin/zals");
+        const fixture = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "test/fixtures/field-lexical-boundaries-workspace", a);
+        const binary = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "zig-out/bin/zals", a);
         var home = std.testing.tmpDir(.{});
         errdefer home.cleanup();
-        var client = try lsp.Client.startWithOptions(a, binary, fixture, fixture, try home.dir.realpathAlloc(a, "."), .{ .collections_path = fixture });
+        var client = try lsp.Client.startWithOptions(a, binary, fixture, fixture, try home.dir.realPathFileAlloc(std.testing.io, ".", a), .{ .collections_path = fixture });
         errdefer client.deinit();
         const initialized = try client.request("initialize", .{
             .processId = @as(?i64, null),

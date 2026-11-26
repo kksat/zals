@@ -7,15 +7,16 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 pub const Transport = struct {
-    in_file: std.fs.File,
-    out_file: std.fs.File,
+    io: std.Io,
+    in_file: std.Io.File,
+    out_file: std.Io.File,
     in_buf: [16 * 1024]u8 = undefined,
     in_len: usize = 0,
     in_pos: usize = 0,
-    write_mutex: std.Thread.Mutex = .{},
+    write_mutex: @import("../sync.zig").Mutex = .{},
 
-    pub fn init(in_file: std.fs.File, out_file: std.fs.File) Transport {
-        return .{ .in_file = in_file, .out_file = out_file };
+    pub fn init(io: std.Io, in_file: std.Io.File, out_file: std.Io.File) Transport {
+        return .{ .io = io, .in_file = in_file, .out_file = out_file };
     }
 
     /// Wait for the next input without stranding background readiness events.
@@ -38,7 +39,7 @@ pub const Transport = struct {
             var available: windows.DWORD = 0;
             // A closed pipe or non-pipe input should fall through to read.
             if (Pipe.PeekNamedPipe(self.in_file.handle, null, 0, null, &available, null) == 0 or available > 0) return true;
-            std.Thread.sleep(@as(u64, @intCast(timeout_ms)) * std.time.ns_per_ms);
+            @import("../sync.zig").sleep(@as(u64, @intCast(timeout_ms)) * std.time.ns_per_ms);
             return false;
         }
         var fds = [_]std.posix.pollfd{.{ .fd = self.in_file.handle, .events = std.posix.POLL.IN, .revents = 0 }};
@@ -47,8 +48,8 @@ pub const Transport = struct {
 
     fn fill(self: *Transport) !void {
         if (self.in_pos < self.in_len) return;
-        const n = self.in_file.read(&self.in_buf) catch |err| switch (err) {
-            error.WouldBlock => return error.WouldBlock,
+        const n = self.in_file.readStreaming(self.io, &.{&self.in_buf}) catch |err| switch (err) {
+            error.EndOfStream => return error.EndOfStream,
             else => return err,
         };
         if (n == 0) return error.EndOfStream;
@@ -114,7 +115,7 @@ pub const Transport = struct {
     fn writeAll(self: *Transport, bytes: []const u8) !void {
         var written: usize = 0;
         while (written < bytes.len) {
-            written += self.out_file.write(bytes[written..]) catch |err| switch (err) {
+            written += self.out_file.writeStreaming(self.io, &.{}, &.{bytes[written..]}, 1) catch |err| switch (err) {
                 error.WouldBlock => continue,
                 else => return err,
             };
@@ -134,24 +135,26 @@ pub const Transport = struct {
 
 test "frame round trip" {
     const allocator = std.testing.allocator;
+    const io = std.testing.io;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    const file = try tmp.dir.createFile("frame", .{ .read = true });
-    defer file.close();
+    const file = try tmp.dir.createFile(io, "frame", .{ .read = true });
+    defer file.close(io);
 
-    var writer = Transport.init(file, file);
+    var writer = Transport.init(io, file, file);
     try writer.writeMessage("{\"jsonrpc\":\"2.0\"}");
-    try file.seekTo(0);
 
-    var reader = Transport.init(file, file);
+    const input = try tmp.dir.openFile(io, "frame", .{});
+    defer input.close(io);
+    var reader = Transport.init(io, input, input);
     const msg = (try reader.readMessage(allocator)).?;
     defer allocator.free(msg);
     try std.testing.expectEqualStrings("{\"jsonrpc\":\"2.0\"}", msg);
 }
 
 test "input waiting honors already buffered messages" {
-    const file = std.fs.File.stdin();
-    var transport = Transport.init(file, std.fs.File.stdout());
+    const file = std.Io.File.stdin();
+    var transport = Transport.init(std.testing.io, file, std.Io.File.stdout());
     transport.in_len = 2;
     transport.in_pos = 1;
     try std.testing.expect(try transport.waitForInput(0));

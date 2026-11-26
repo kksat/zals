@@ -22,12 +22,12 @@ test "quoted and escaped root variable definitions preserve quotes on rename" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const fixture = try std.fs.cwd().realpathAlloc(a, "test/fixtures/e2e-workspace");
-    const deps = try std.fs.cwd().realpathAlloc(a, "test/dependencies");
-    const binary = try std.fs.cwd().realpathAlloc(a, "zig-out/bin/zals");
+    const fixture = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "test/fixtures/e2e-workspace", a);
+    const deps = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "test/dependencies", a);
+    const binary = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "zig-out/bin/zals", a);
     var home_dir = std.testing.tmpDir(.{});
     defer home_dir.cleanup();
-    const home = try home_dir.dir.realpathAlloc(a, ".");
+    const home = try home_dir.dir.realPathFileAlloc(std.testing.io, ".", a);
 
     var client = try lsp.Client.start(a, binary, fixture, deps, home);
     defer client.deinit();
@@ -173,12 +173,12 @@ test "rename rejects invalid variable names and returns null on non-root-variabl
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const fixture = try std.fs.cwd().realpathAlloc(a, "test/fixtures/e2e-workspace");
-    const deps = try std.fs.cwd().realpathAlloc(a, "test/dependencies");
-    const binary = try std.fs.cwd().realpathAlloc(a, "zig-out/bin/zals");
+    const fixture = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "test/fixtures/e2e-workspace", a);
+    const deps = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "test/dependencies", a);
+    const binary = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "zig-out/bin/zals", a);
     var home_dir = std.testing.tmpDir(.{});
     defer home_dir.cleanup();
-    const home = try home_dir.dir.realpathAlloc(a, ".");
+    const home = try home_dir.dir.realPathFileAlloc(std.testing.io, ".", a);
 
     var client = try lsp.Client.start(a, binary, fixture, deps, home);
     defer client.deinit();
@@ -270,12 +270,12 @@ test "rename reflects unsaved didChange edits across open buffers" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const fixture = try std.fs.cwd().realpathAlloc(a, "test/fixtures/e2e-workspace");
-    const deps = try std.fs.cwd().realpathAlloc(a, "test/dependencies");
-    const binary = try std.fs.cwd().realpathAlloc(a, "zig-out/bin/zals");
+    const fixture = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "test/fixtures/e2e-workspace", a);
+    const deps = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "test/dependencies", a);
+    const binary = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "zig-out/bin/zals", a);
     var home_dir = std.testing.tmpDir(.{});
     defer home_dir.cleanup();
-    const home = try home_dir.dir.realpathAlloc(a, ".");
+    const home = try home_dir.dir.realPathFileAlloc(std.testing.io, ".", a);
 
     var client = try lsp.Client.start(a, binary, fixture, deps, home);
     defer client.deinit();
@@ -340,10 +340,10 @@ test "runtime-supplied names and filter keyword arguments are not renamable, whi
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const fixture = try std.fs.cwd().realpathAlloc(a, "test/fixtures/e2e-workspace");
+    const fixture = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "test/fixtures/e2e-workspace", a);
     var home_dir = std.testing.tmpDir(.{});
     defer home_dir.cleanup();
-    var client = try startIndexed(a, fixture, try home_dir.dir.realpathAlloc(a, "."));
+    var client = try startIndexed(a, fixture, try home_dir.dir.realPathFileAlloc(std.testing.io, ".", a));
     defer client.deinit();
 
     const common_uri = try std.fmt.allocPrint(a, "file://{s}/{s}", .{ fixture, common });
@@ -416,22 +416,22 @@ test "rename never returns a partial edit while the Workspace index is scanning"
     // Enough Role files that the initial scan is still running when the first
     // request arrives; every Role reads the one binding being renamed.
     const roles = 2000;
-    try workspace_dir.dir.writeFile(.{ .sub_path = "rename-scan-root", .data = "" });
-    try workspace_dir.dir.makePath("roles/r0/defaults");
+    try workspace_dir.dir.writeFile(std.testing.io, .{ .sub_path = "rename-scan-root", .data = "" });
+    try workspace_dir.dir.createDirPath(std.testing.io, "roles/r0/defaults");
     const defaults_text = "---\nscan_var: 1\n";
-    try workspace_dir.dir.writeFile(.{ .sub_path = "roles/r0/defaults/main.yml", .data = defaults_text });
+    try workspace_dir.dir.writeFile(std.testing.io, .{ .sub_path = "roles/r0/defaults/main.yml", .data = defaults_text });
     for (0..roles) |i| {
         const dir = try std.fmt.allocPrint(a, "roles/r{d}/tasks", .{i});
-        try workspace_dir.dir.makePath(dir);
-        try workspace_dir.dir.writeFile(.{
+        try workspace_dir.dir.createDirPath(std.testing.io, dir);
+        try workspace_dir.dir.writeFile(std.testing.io, .{
             .sub_path = try std.fmt.allocPrint(a, "{s}/main.yml", .{dir}),
             .data = "---\n- ansible.builtin.debug:\n    msg: \"{{ scan_var }}\"\n",
         });
     }
-    const root = try workspace_dir.dir.realpathAlloc(a, ".");
-    const deps = try std.fs.cwd().realpathAlloc(a, "test/dependencies");
-    const binary = try std.fs.cwd().realpathAlloc(a, "zig-out/bin/zals");
-    var client = try lsp.Client.startWithOptions(a, binary, root, deps, try home_dir.dir.realpathAlloc(a, "."), .{ .collections_path = "", .use_fixture_config = false });
+    const root = try workspace_dir.dir.realPathFileAlloc(std.testing.io, ".", a);
+    const deps = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "test/dependencies", a);
+    const binary = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "zig-out/bin/zals", a);
+    var client = try lsp.Client.startWithOptions(a, binary, root, deps, try home_dir.dir.realPathFileAlloc(std.testing.io, ".", a), .{ .collections_path = "", .use_fixture_config = false });
     defer client.deinit();
     _ = try client.request("initialize", .{
         .processId = @as(?i64, null),
@@ -487,13 +487,13 @@ test "rename leaves Installed collections untouched" {
         .{ .path = installed ++ "roles/r/tasks/main.yml", .text = "---\n- ansible.builtin.debug:\n    msg: \"{{ shared_port }}\"\n" },
     };
     for (files) |file| {
-        if (std.fs.path.dirname(file.path)) |dir| try workspace_dir.dir.makePath(dir);
-        try workspace_dir.dir.writeFile(.{ .sub_path = file.path, .data = file.text });
+        if (std.fs.path.dirname(file.path)) |dir| try workspace_dir.dir.createDirPath(std.testing.io, dir);
+        try workspace_dir.dir.writeFile(std.testing.io, .{ .sub_path = file.path, .data = file.text });
     }
-    const root = try workspace_dir.dir.realpathAlloc(a, ".");
-    const deps = try std.fs.cwd().realpathAlloc(a, "test/dependencies");
-    const binary = try std.fs.cwd().realpathAlloc(a, "zig-out/bin/zals");
-    var client = try lsp.Client.startWithOptions(a, binary, root, deps, try home_dir.dir.realpathAlloc(a, "."), .{ .collections_path = "", .use_fixture_config = false });
+    const root = try workspace_dir.dir.realPathFileAlloc(std.testing.io, ".", a);
+    const deps = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "test/dependencies", a);
+    const binary = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "zig-out/bin/zals", a);
+    var client = try lsp.Client.startWithOptions(a, binary, root, deps, try home_dir.dir.realPathFileAlloc(std.testing.io, ".", a), .{ .collections_path = "", .use_fixture_config = false });
     defer client.deinit();
     _ = try client.request("initialize", .{
         .processId = @as(?i64, null),
@@ -551,13 +551,13 @@ test "rename from documents outside the Workspace files returns null" {
         .{ .path = hidden, .text = "---\n- ansible.builtin.debug:\n    msg: \"{{ web_only_port }}\"\n" },
     };
     for (files) |file| {
-        if (std.fs.path.dirname(file.path)) |dir| try workspace_dir.dir.makePath(dir);
-        try workspace_dir.dir.writeFile(.{ .sub_path = file.path, .data = file.text });
+        if (std.fs.path.dirname(file.path)) |dir| try workspace_dir.dir.createDirPath(std.testing.io, dir);
+        try workspace_dir.dir.writeFile(std.testing.io, .{ .sub_path = file.path, .data = file.text });
     }
-    const root = try workspace_dir.dir.realpathAlloc(a, ".");
-    const deps = try std.fs.cwd().realpathAlloc(a, "test/dependencies");
-    const binary = try std.fs.cwd().realpathAlloc(a, "zig-out/bin/zals");
-    var client = try lsp.Client.startWithOptions(a, binary, root, deps, try home_dir.dir.realpathAlloc(a, "."), .{ .collections_path = "", .use_fixture_config = false });
+    const root = try workspace_dir.dir.realPathFileAlloc(std.testing.io, ".", a);
+    const deps = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "test/dependencies", a);
+    const binary = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "zig-out/bin/zals", a);
+    var client = try lsp.Client.startWithOptions(a, binary, root, deps, try home_dir.dir.realPathFileAlloc(std.testing.io, ".", a), .{ .collections_path = "", .use_fixture_config = false });
     defer client.deinit();
     _ = try client.request("initialize", .{
         .processId = @as(?i64, null),
@@ -598,13 +598,13 @@ test "rename without a session Workspace is refused, not partial" {
         .{ .path = "site.yml", .text = "---\n- hosts: all\n  roles:\n    - role: web\n      web_port: 8080\n" },
     };
     for (files) |file| {
-        if (std.fs.path.dirname(file.path)) |dir| try workspace_dir.dir.makePath(dir);
-        try workspace_dir.dir.writeFile(.{ .sub_path = file.path, .data = file.text });
+        if (std.fs.path.dirname(file.path)) |dir| try workspace_dir.dir.createDirPath(std.testing.io, dir);
+        try workspace_dir.dir.writeFile(std.testing.io, .{ .sub_path = file.path, .data = file.text });
     }
-    const root = try workspace_dir.dir.realpathAlloc(a, ".");
-    const deps = try std.fs.cwd().realpathAlloc(a, "test/dependencies");
-    const binary = try std.fs.cwd().realpathAlloc(a, "zig-out/bin/zals");
-    var client = try lsp.Client.startWithOptions(a, binary, root, deps, try home_dir.dir.realpathAlloc(a, "."), .{ .collections_path = "", .use_fixture_config = false });
+    const root = try workspace_dir.dir.realPathFileAlloc(std.testing.io, ".", a);
+    const deps = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "test/dependencies", a);
+    const binary = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "zig-out/bin/zals", a);
+    var client = try lsp.Client.startWithOptions(a, binary, root, deps, try home_dir.dir.realPathFileAlloc(std.testing.io, ".", a), .{ .collections_path = "", .use_fixture_config = false });
     defer client.deinit();
     _ = try client.request("initialize", .{
         .processId = @as(?i64, null),
@@ -636,13 +636,13 @@ test "rename rejects Python keywords, supplied names, existing variables, and no
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const fixture = try std.fs.cwd().realpathAlloc(a, "test/fixtures/e2e-workspace");
+    const fixture = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "test/fixtures/e2e-workspace", a);
     var home_dir = std.testing.tmpDir(.{});
     defer home_dir.cleanup();
-    var client = try startIndexed(a, fixture, try home_dir.dir.realpathAlloc(a, "."));
+    var client = try startIndexed(a, fixture, try home_dir.dir.realPathFileAlloc(std.testing.io, ".", a));
     defer client.deinit();
 
-    const resolver = anchor.Resolver{ .allocator = a, .fixture = fixture, .deps = try std.fs.cwd().realpathAlloc(a, "test/dependencies") };
+    const resolver = anchor.Resolver{ .allocator = a, .fixture = fixture, .deps = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "test/dependencies", a) };
     const valid_source = try resolver.cursor(m.cursor(pf_defaults, "<app_port>: 8080"));
     try open(&client, valid_source.uri, "---\nrelease_tag: candidate\napp_port: 8080\ndeployment_enabled: true\n\"my-var\": 1\n");
 
@@ -696,8 +696,8 @@ test "rename rejects Python keywords, supplied names, existing variables, and no
 }
 
 fn startIndexed(a: Allocator, fixture: []const u8, home: []const u8) !lsp.Client {
-    const deps = try std.fs.cwd().realpathAlloc(a, "test/dependencies");
-    const binary = try std.fs.cwd().realpathAlloc(a, "zig-out/bin/zals");
+    const deps = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "test/dependencies", a);
+    const binary = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "zig-out/bin/zals", a);
     var client = try lsp.Client.start(a, binary, fixture, deps, home);
     errdefer client.deinit();
     _ = try client.request("initialize", .{

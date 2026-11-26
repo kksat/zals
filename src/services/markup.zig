@@ -81,7 +81,7 @@ fn parseArgs(a: Allocator, text: []const u8, start: usize, count: usize, escaped
             idx += 1;
         }
         var s: []const u8 = try buf.toOwnedSlice(a);
-        s = if (i == 0) std.mem.trimRight(u8, s, " ") else std.mem.trim(u8, s, " ");
+        s = if (i == 0) std.mem.trimEnd(u8, s, " ") else std.mem.trim(u8, s, " ");
         args[i] = s;
     }
     return .{ .args = args, .end = idx };

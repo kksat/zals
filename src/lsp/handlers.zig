@@ -1,6 +1,7 @@
 //! Request and notification handlers.
 
 const std = @import("std");
+const fsio = @import("../fsio.zig");
 const Allocator = std.mem.Allocator;
 const Value = std.json.Value;
 const json_util = @import("json_util.zig");
@@ -146,7 +147,7 @@ fn completionResult(context: *Context, params: Value) !Value {
     var data = json_util.obj(a);
     try data.put("uri", json_util.str(loc.doc.uri));
     if (result.object.getPtr("items")) |items| {
-        for (items.array.items) |*item| try item.object.put("data", .{ .object = data });
+        for (items.array.items) |*item| try item.object.put(a, "data", data.value());
     }
     return result;
 }
@@ -161,8 +162,8 @@ fn resolveResult(self: *Server, context: *Context, params: Value) !Value {
         .object => |o| o,
         else => return params,
     };
-    if (extra.detail) |d| try obj.put("detail", json_util.str(d));
-    if (extra.documentation) |doc| try obj.put("documentation", try encode.markup(a, doc));
+    if (extra.detail) |d| try obj.put(a, "detail", json_util.str(d));
+    if (extra.documentation) |doc| try obj.put(a, "documentation", try encode.markup(a, doc));
     return .{ .object = obj };
 }
 
@@ -275,9 +276,9 @@ fn onInitialize(self: *Server, a: Allocator, id: Value, params: Value) !void {
     var info = json_util.obj(a);
     try info.put("name", json_util.str("zals"));
     try info.put("version", json_util.str("0.0.0"));
-    try result.put("serverInfo", .{ .object = info });
+    try result.put("serverInfo", .{ .object = info.map });
 
-    try self.sendResult(a, id, .{ .object = result });
+    try self.sendResult(a, id, .{ .object = result.map });
 }
 
 test "removed refresh leaves settings and Workspaces unchanged (ADR-0043)" {
@@ -285,22 +286,22 @@ test "removed refresh leaves settings and Workspaces unchanged (ADR-0043)" {
     const Transport = @import("transport.zig").Transport;
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    (try tmp.dir.createFile("workspace-marker", .{})).close();
-    const output = try tmp.dir.createFile("messages", .{ .read = true });
-    defer output.close();
+    (try tmp.dir.createFile(std.testing.io, "workspace-marker", .{})).close(fsio.get());
+    const output = try tmp.dir.createFile(std.testing.io, "messages", .{ .read = true });
+    defer output.close(fsio.get());
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const root_path = try tmp.dir.realpathAlloc(a, ".");
+    const root_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", a);
     const root_uri = try @import("../paths.zig").pathToUri(a, root_path);
     const ids = [_]Value{ .{ .integer = 0 }, json_util.str("refresh") };
     {
-        var server = try Server.init(testing.allocator, Transport.init(output, output), null);
+        var server = try Server.init(testing.allocator, Transport.init(std.testing.io, output, output), null);
         defer server.deinit(); // Flush the writer before inspecting the wire output.
         var params = try std.json.parseFromSliceLeaky(Value, a,
             \\{"initializationOptions":{"ansible":{"workspace":{"rootMarker":"workspace-marker"},"python":{"venvPath":"custom-venv"},"validation":{"enabled":false}}}}
         , .{});
-        try params.object.put("rootUri", json_util.str(root_uri));
+        try params.object.put(a, "rootUri", json_util.str(root_uri));
         try handleRequest(&server, a, .{ .integer = 1 }, "initialize", params);
         // Requests are rejected and notifications ignored (ADR-0043).
         for ([_]?Value{ ids[0], ids[1], null }) |maybe_id| {
@@ -320,8 +321,9 @@ test "removed refresh leaves settings and Workspaces unchanged (ADR-0043)" {
         }
     }
 
-    try output.seekTo(0);
-    var transport = Transport.init(output, output);
+    const input = try tmp.dir.openFile(std.testing.io, "messages", .{});
+    defer input.close(std.testing.io);
+    var transport = Transport.init(std.testing.io, input, input);
     const initialized = try std.json.parseFromSliceLeaky(Value, a, (try transport.readMessage(a)).?, .{});
     try testing.expectEqual(@as(i64, 1), json_util.field(initialized, "id").?.integer);
     try testing.expect(json_util.field(initialized, "result") != null);

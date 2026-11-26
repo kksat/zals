@@ -8,6 +8,7 @@
 //! Workspace's own `ansible_collections/` directories add collection paths.
 
 const std = @import("std");
+const fsio = @import("../fsio.zig");
 const Allocator = std.mem.Allocator;
 const paths = @import("../paths.zig");
 
@@ -21,7 +22,7 @@ pub const default_roles_paths = [_][]const u8{ "~/.ansible/roles", "/usr/share/a
 pub const Env = *const fn (allocator: Allocator, name: []const u8) ?[]u8;
 
 pub fn processEnv(allocator: Allocator, name: []const u8) ?[]u8 {
-    return std.process.getEnvVarOwned(allocator, name) catch null;
+    return fsio.getEnvVarOwned(allocator, name);
 }
 
 pub const Context = struct {
@@ -151,7 +152,7 @@ pub fn collectionsPaths(a: Allocator, ctx: Context, file_path: []const u8) ![]co
     for (out.items) |p| {
         const root = collectionPathRoot(p);
         const absolute = if (std.fs.path.isAbsolute(root)) root else blk: {
-            if (cwd == null) cwd = try std.process.getCwdAlloc(a);
+            if (cwd == null) cwd = try fsio.realpathAlloc(a, ".");
             break :blk if (std.mem.eql(u8, root, ".")) cwd.? else try std.fs.path.join(a, &.{ cwd.?, root });
         };
         try appendUnique(&normalized, absolute);
@@ -190,11 +191,11 @@ fn venvSitePackagesPaths(a: Allocator, ctx: Context) ![]const []const u8 {
     if (hasCollections(a, win)) try appendUnique(&out, win);
 
     const lib = try std.fs.path.join(a, &.{ venv, "lib" });
-    var dir = std.fs.cwd().openDir(lib, .{ .iterate = true }) catch return out.toOwnedSlice();
-    defer dir.close();
+    var dir = fsio.openDir(lib, .{ .iterate = true }) catch return out.toOwnedSlice();
+    defer dir.close(fsio.get());
     var names = std.array_list.Managed([]const u8).init(a);
     var it = dir.iterate();
-    while (it.next() catch null) |entry| {
+    while (it.next(fsio.get()) catch null) |entry| {
         if (entry.kind != .directory and entry.kind != .sym_link) continue;
         if (!std.mem.startsWith(u8, entry.name, "python")) continue;
         try names.append(try a.dupe(u8, entry.name));
@@ -285,28 +286,28 @@ const Tree = struct {
 
     fn init() !Tree {
         var n: u64 = 0;
-        std.crypto.random.bytes(std.mem.asBytes(&n));
+        fsio.randomBytes(std.mem.asBytes(&n));
         const root = try std.fmt.allocPrint(testing.allocator, "/tmp/zals-cfg-{x}", .{n});
-        try std.fs.cwd().makePath(root);
+        try fsio.makePath(root);
         return .{ .root = root };
     }
 
     fn deinit(self: *Tree) void {
-        std.fs.cwd().deleteTree(self.root) catch {};
+        fsio.deleteTree(self.root) catch {};
         testing.allocator.free(self.root);
     }
 
     fn write(self: Tree, rel: []const u8, data: []const u8) !void {
-        var dir = try std.fs.cwd().openDir(self.root, .{});
-        defer dir.close();
-        if (std.fs.path.dirname(rel)) |parent| try dir.makePath(parent);
-        try dir.writeFile(.{ .sub_path = rel, .data = data });
+        var dir = try fsio.openDir(self.root, .{});
+        defer dir.close(fsio.get());
+        if (std.fs.path.dirname(rel)) |parent| try dir.createDirPath(fsio.get(), parent);
+        try dir.writeFile(fsio.get(), .{ .sub_path = rel, .data = data });
     }
 
     fn mkdir(self: Tree, rel: []const u8) !void {
-        var dir = try std.fs.cwd().openDir(self.root, .{});
-        defer dir.close();
-        try dir.makePath(rel);
+        var dir = try fsio.openDir(self.root, .{});
+        defer dir.close(fsio.get());
+        try dir.createDirPath(fsio.get(), rel);
     }
 
     fn path(self: Tree, a: Allocator, rel: []const u8) ![]const u8 {
@@ -378,7 +379,7 @@ test "config dump is lazy behind environment and file paths, then cached" {
             return .{
                 .stdout = try a.dupe(u8, "DEFAULT_ROLES_PATH(default) = ['/dump/roles']\nCOLLECTIONS_PATHS(default) = ['/dump/collections']\n"),
                 .stderr = try a.dupe(u8, ""),
-                .term = .{ .Exited = 0 },
+                .term = .{ .exited = 0 },
             };
         }
         const vtable = exec.Runner.VTable{ .run = run };
@@ -402,7 +403,7 @@ test "config dump is lazy behind environment and file paths, then cached" {
     _ = try rolesPaths(a, ctx, file);
     try testing.expectEqual(@as(usize, 0), probe.calls);
 
-    try std.fs.cwd().deleteFile(try tree.path(a, "ansible.cfg"));
+    try fsio.deleteFile(try tree.path(a, "ansible.cfg"));
     try testing.expectEqualStrings("/dump/roles", (try rolesPaths(a, ctx, file))[0]);
     try testing.expectEqualStrings("/dump/collections", (try collectionsPaths(a, ctx, file))[0]);
     try testing.expectEqual(@as(usize, 1), probe.calls);

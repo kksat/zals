@@ -65,9 +65,9 @@ const Session = struct {
 };
 
 fn start(a: Allocator, home: []const u8) !Session {
-    const fixture = try std.fs.cwd().realpathAlloc(a, "test/fixtures/e2e-workspace");
-    const deps = try std.fs.cwd().realpathAlloc(a, "test/dependencies");
-    const binary = try std.fs.cwd().realpathAlloc(a, "zig-out/bin/zals");
+    const fixture = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "test/fixtures/e2e-workspace", a);
+    const deps = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "test/dependencies", a);
+    const binary = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "zig-out/bin/zals", a);
     var client = try lsp.Client.start(a, binary, fixture, deps, home);
     errdefer client.deinit();
     _ = try client.request("initialize", .{
@@ -90,7 +90,7 @@ test "removing a vars load in an unsaved playbook unbinds its target outside var
     defer arena.deinit();
     var home = std.testing.tmpDir(.{});
     defer home.cleanup();
-    var s = try start(arena.allocator(), try home.dir.realpathAlloc(arena.allocator(), "."));
+    var s = try start(arena.allocator(), try home.dir.realPathFileAlloc(std.testing.io, ".", arena.allocator()));
     defer s.deinit();
 
     const play_uri = try s.openDisk(play);
@@ -134,7 +134,7 @@ test "adding a vars load in an unsaved playbook makes a Compose file a Variable 
     defer arena.deinit();
     var home = std.testing.tmpDir(.{});
     defer home.cleanup();
-    var s = try start(arena.allocator(), try home.dir.realpathAlloc(arena.allocator(), "."));
+    var s = try start(arena.allocator(), try home.dir.realPathFileAlloc(std.testing.io, ".", arena.allocator()));
     defer s.deinit();
 
     const play_uri = try s.openDisk(play);
@@ -183,7 +183,7 @@ test "a callee load outside vars/ supplies a passed field implementation from th
     defer arena.deinit();
     var home = std.testing.tmpDir(.{});
     defer home.cleanup();
-    var s = try start(arena.allocator(), try home.dir.realpathAlloc(arena.allocator(), "."));
+    var s = try start(arena.allocator(), try home.dir.realPathFileAlloc(std.testing.io, ".", arena.allocator()));
     defer s.deinit();
 
     _ = try s.openDisk(field_play);
@@ -208,7 +208,7 @@ test "a callee load outside vars/ supplies a passed field implementation from an
     defer arena.deinit();
     var home = std.testing.tmpDir(.{});
     defer home.cleanup();
-    var s = try start(arena.allocator(), try home.dir.realpathAlloc(arena.allocator(), "."));
+    var s = try start(arena.allocator(), try home.dir.realPathFileAlloc(std.testing.io, ".", arena.allocator()));
     defer s.deinit();
 
     _ = try s.openDisk(field_play);

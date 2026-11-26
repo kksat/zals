@@ -1,4 +1,8 @@
 const std = @import("std");
+
+fn sleepNs(ns: u64) void {
+    std.testing.io.sleep(.fromNanoseconds(ns), .awake) catch {};
+}
 const Value = std.json.Value;
 
 const DiagClient = struct {
@@ -9,22 +13,22 @@ const DiagClient = struct {
     diagnostics: std.StringHashMap(Value),
 
     fn start(a: std.mem.Allocator, binary: []const u8, path_env: []const u8, home: []const u8) !DiagClient {
-        var env = try std.process.getEnvMap(a);
+        var env = try std.process.Environ.createMap(std.testing.environ, a);
         defer env.deinit();
         try env.put("PATH", path_env);
         try env.put("HOME", home);
         try env.put("XDG_CACHE_HOME", try std.fs.path.join(a, &.{ home, ".cache" }));
-        env.remove("VIRTUAL_ENV");
-        env.remove("ANSIBLE_CONFIG");
-        env.remove("ANSIBLE_COLLECTIONS_PATH");
+        _ = env.orderedRemove("VIRTUAL_ENV");
+        _ = env.orderedRemove("ANSIBLE_CONFIG");
+        _ = env.orderedRemove("ANSIBLE_COLLECTIONS_PATH");
 
-        var child = std.process.Child.init(&.{ binary, "--stdio", "--log-level", "error" }, a);
-        child.env_map = &env;
-        child.stdin_behavior = .Pipe;
-        child.stdout_behavior = .Pipe;
-        child.stderr_behavior = .Inherit;
-        try child.spawn();
-        child.env_map = null;
+        const child = try std.process.spawn(std.testing.io, .{
+            .argv = &.{ binary, "--stdio", "--log-level", "error" },
+            .environ_map = &env,
+            .stdin = .pipe,
+            .stdout = .pipe,
+            .stderr = .inherit,
+        });
         return .{
             .allocator = a,
             .child = child,
@@ -34,20 +38,18 @@ const DiagClient = struct {
 
     fn deinit(self: *DiagClient) void {
         if (self.child.stdin) |f| {
-            f.close();
+            f.close(std.testing.io);
             self.child.stdin = null;
         }
-        _ = self.child.kill() catch {
-            _ = self.child.wait() catch {};
-        };
+        self.child.kill(std.testing.io);
     }
 
     fn send(self: *DiagClient, payload: anytype) !void {
         const body = try std.json.Stringify.valueAlloc(self.allocator, payload, .{});
         const header = try std.fmt.allocPrint(self.allocator, "Content-Length: {d}\r\n\r\n", .{body.len});
         const pipe = self.child.stdin orelse return error.ServerClosed;
-        try pipe.writeAll(header);
-        try pipe.writeAll(body);
+        try pipe.writeStreamingAll(std.testing.io, header);
+        try pipe.writeStreamingAll(std.testing.io, body);
     }
 
     fn notify(self: *DiagClient, method: []const u8, params: anytype) !void {
@@ -86,8 +88,8 @@ const DiagClient = struct {
     }
 
     fn pumpUntil(self: *DiagClient, uri: []const u8, check: *const fn (Value) bool) !Value {
-        const began = std.time.milliTimestamp();
-        while (std.time.milliTimestamp() - began < 15_000) {
+        const began = std.Io.Timestamp.now(std.testing.io, .real).toMilliseconds();
+        while (std.Io.Timestamp.now(std.testing.io, .real).toMilliseconds() - began < 15_000) {
             if (self.diagnostics.get(uri)) |d| {
                 if (check(d)) return d;
             }
@@ -95,7 +97,7 @@ const DiagClient = struct {
             if (self.diagnostics.get(uri)) |d| {
                 if (check(d)) return d;
             }
-            std.Thread.sleep(15 * std.time.ns_per_ms);
+            sleepNs(15 * std.time.ns_per_ms);
         }
         return error.DiagnosticsTimeout;
     }
@@ -124,12 +126,15 @@ const DiagClient = struct {
     }
 };
 
-fn readExact(file: std.fs.File, buffer: []u8) !void {
+fn readExact(file: std.Io.File, buffer: []u8) !void {
     var offset: usize = 0;
     while (offset < buffer.len) {
         var ready = [_]std.posix.pollfd{.{ .fd = file.handle, .events = std.posix.POLL.IN, .revents = 0 }};
         if (try std.posix.poll(&ready, 15_000) == 0) return error.ServerResponseTimeout;
-        const count = try file.read(buffer[offset..]);
+        const count = file.readStreaming(std.testing.io, &.{buffer[offset..]}) catch |err| switch (err) {
+            error.EndOfStream => return error.ServerClosed,
+            else => return err,
+        };
         if (count == 0) return error.ServerClosed;
         offset += count;
     }
@@ -167,20 +172,20 @@ test "stdio native cel diagnostics cover unopened files, unsaved edits, suppress
 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.makePath("ws/.git");
-    try tmp.dir.makePath("bin");
+    try tmp.dir.createDirPath(std.testing.io, "ws/.git");
+    try tmp.dir.createDirPath(std.testing.io, "bin");
 
-    const ws_root = try tmp.dir.realpathAlloc(a, "ws");
-    const bin_dir = try tmp.dir.realpathAlloc(a, "bin");
+    const ws_root = try tmp.dir.realPathFileAlloc(std.testing.io, "ws", a);
+    const bin_dir = try tmp.dir.realPathFileAlloc(std.testing.io, "bin", a);
     const marker_path = try std.fs.path.join(a, &.{ bin_dir, "forbidden-called" });
 
     const trap_script = try std.fmt.allocPrint(a, "#!/bin/sh\necho called > '{s}'\nexit 0\n", .{marker_path});
     for ([_][]const u8{ "ansible-lint", "ansible-playbook" }) |tool| {
         const sub = try std.fs.path.join(a, &.{ "bin", tool });
-        try tmp.dir.writeFile(.{ .sub_path = sub, .data = trap_script });
-        var f = try tmp.dir.openFile(sub, .{});
-        defer f.close();
-        try f.chmod(0o755);
+        try tmp.dir.writeFile(std.testing.io, .{ .sub_path = sub, .data = trap_script });
+        var f = try tmp.dir.openFile(std.testing.io, sub, .{});
+        defer f.close(std.testing.io);
+        try f.setPermissions(std.testing.io, .fromMode(0o755));
     }
 
     const disk_src =
@@ -191,12 +196,12 @@ test "stdio native cel diagnostics cover unopened files, unsaved edits, suppress
         \\    - name: broken task without action
         \\
     ;
-    try tmp.dir.writeFile(.{ .sub_path = "ws/site.yml", .data = disk_src });
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "ws/site.yml", .data = disk_src });
 
     const site_path = try std.fs.path.join(a, &.{ ws_root, "site.yml" });
     const site_uri = try std.fmt.allocPrint(a, "file://{s}", .{site_path});
     const root_uri = try std.fmt.allocPrint(a, "file://{s}", .{ws_root});
-    const binary = try std.fs.cwd().realpathAlloc(a, "zig-out/bin/zals");
+    const binary = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "zig-out/bin/zals", a);
 
     var client = try DiagClient.start(a, binary, bin_dir, ws_root);
     defer client.deinit();
@@ -253,7 +258,7 @@ test "stdio native cel diagnostics cover unopened files, unsaved edits, suppress
     });
     _ = try client.pumpUntil(site_uri, hasUnopenedFindings);
 
-    try std.testing.expectError(error.FileNotFound, std.fs.openFileAbsolute(marker_path, .{}));
+    try std.testing.expectError(error.FileNotFound, std.Io.Dir.openFileAbsolute(std.testing.io, marker_path, .{}));
 }
 
 fn hasSource(diags: Value, expected: []const u8) bool {
@@ -292,14 +297,14 @@ test "stdio custom workspace rule trust, invalid-save deactivation, reload, and 
 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.makePath("ws/.git");
-    try tmp.dir.makePath("ws/rules");
-    try tmp.dir.makePath("bin");
+    try tmp.dir.createDirPath(std.testing.io, "ws/.git");
+    try tmp.dir.createDirPath(std.testing.io, "ws/rules");
+    try tmp.dir.createDirPath(std.testing.io, "bin");
 
-    const ws_root = try tmp.dir.realpathAlloc(a, "ws");
-    const bin_dir = try tmp.dir.realpathAlloc(a, "bin");
+    const ws_root = try tmp.dir.realPathFileAlloc(std.testing.io, "ws", a);
+    const bin_dir = try tmp.dir.realPathFileAlloc(std.testing.io, "bin", a);
 
-    try tmp.dir.writeFile(.{
+    try tmp.dir.writeFile(std.testing.io, .{
         .sub_path = "ws/.ansible-lint",
         .data = "skip_list:\n  - name[play]\n  - no-changed-when\n",
     });
@@ -313,7 +318,7 @@ test "stdio custom workspace rule trust, invalid-save deactivation, reload, and 
         \\  message: "Avoid ping in production."
         \\}
     ;
-    try tmp.dir.writeFile(.{ .sub_path = "ws/rules/no_ping.cel", .data = valid_rule });
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "ws/rules/no_ping.cel", .data = valid_rule });
     const site_src =
         \\- hosts: all
         \\  tasks:
@@ -323,14 +328,14 @@ test "stdio custom workspace rule trust, invalid-save deactivation, reload, and 
         \\        - skip_ansible_lint
         \\
     ;
-    try tmp.dir.writeFile(.{ .sub_path = "ws/site.yml", .data = site_src });
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "ws/site.yml", .data = site_src });
 
     const site_path = try std.fs.path.join(a, &.{ ws_root, "site.yml" });
     const rule_path = try std.fs.path.join(a, &.{ ws_root, "rules/no_ping.cel" });
     const site_uri = try std.fmt.allocPrint(a, "file://{s}", .{site_path});
     const rule_uri = try std.fmt.allocPrint(a, "file://{s}", .{rule_path});
     const root_uri = try std.fmt.allocPrint(a, "file://{s}", .{ws_root});
-    const binary = try std.fs.cwd().realpathAlloc(a, "zig-out/bin/zals");
+    const binary = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "zig-out/bin/zals", a);
 
     var client = try DiagClient.start(a, binary, bin_dir, ws_root);
     defer client.deinit();
@@ -362,7 +367,7 @@ test "stdio custom workspace rule trust, invalid-save deactivation, reload, and 
     try std.testing.expect(hasCode(allowed, "name[play]"));
     try std.testing.expect(hasCode(allowed, "custom/no-ping"));
 
-    try tmp.dir.writeFile(.{
+    try tmp.dir.writeFile(std.testing.io, .{
         .sub_path = "ws/rules/no_ping.cel",
         .data = "zals.Rule{ id: \"custom/no-ping\", target: \"task\", severity: \"warning\", condition: bad_ident, message: \"x\" }",
     });
@@ -373,14 +378,14 @@ test "stdio custom workspace rule trust, invalid-save deactivation, reload, and 
     const after_invalid = try client.pumpUntil(site_uri, hasNoCustomPing);
     try std.testing.expect(hasCode(after_invalid, "name[play]"));
 
-    try tmp.dir.writeFile(.{ .sub_path = "ws/rules/no_ping.cel", .data = valid_rule });
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "ws/rules/no_ping.cel", .data = valid_rule });
     try client.notify("textDocument/didSave", .{
         .textDocument = .{ .uri = rule_uri },
     });
     _ = try client.pumpUntil(rule_uri, hasNoFindings);
     _ = try client.pumpUntil(site_uri, hasCustomPing);
 
-    try tmp.dir.deleteFile("ws/site.yml");
+    try tmp.dir.deleteFile(std.testing.io, "ws/site.yml");
     try client.notify("workspace/didChangeWatchedFiles", .{
         .changes = &[_]struct { uri: []const u8, type: i64 }{.{ .uri = site_uri, .type = 3 }},
     });
@@ -394,11 +399,11 @@ test "stdio multi-provider independence keeps both cel and external findings wit
 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.makePath("ws/.git");
-    try tmp.dir.makePath("bin");
+    try tmp.dir.createDirPath(std.testing.io, "ws/.git");
+    try tmp.dir.createDirPath(std.testing.io, "bin");
 
-    const ws_root = try tmp.dir.realpathAlloc(a, "ws");
-    const bin_dir = try tmp.dir.realpathAlloc(a, "bin");
+    const ws_root = try tmp.dir.realPathFileAlloc(std.testing.io, "ws", a);
+    const bin_dir = try tmp.dir.realPathFileAlloc(std.testing.io, "bin", a);
     const site_path = try std.fs.path.join(a, &.{ ws_root, "site.yml" });
     const site_uri = try std.fmt.allocPrint(a, "file://{s}", .{site_path});
     const root_uri = try std.fmt.allocPrint(a, "file://{s}", .{ws_root});
@@ -408,17 +413,17 @@ test "stdio multi-provider independence keeps both cel and external findings wit
         "#!/bin/sh\necho '[{{\"description\":\"external unnamed play\",\"check_name\":\"name[play]\",\"severity\":\"major\",\"location\":{{\"path\":\"{s}\",\"lines\":{{\"begin\":1}}}}}}]'\nexit 2\n",
         .{site_path},
     );
-    try tmp.dir.writeFile(.{ .sub_path = "bin/ansible-lint", .data = fake_lint });
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "bin/ansible-lint", .data = fake_lint });
     {
-        var f = try tmp.dir.openFile("bin/ansible-lint", .{});
-        defer f.close();
-        try f.chmod(0o755);
+        var f = try tmp.dir.openFile(std.testing.io, "bin/ansible-lint", .{});
+        defer f.close(std.testing.io);
+        try f.setPermissions(std.testing.io, .fromMode(0o755));
     }
 
     const site_src = "- hosts: all\n  tasks: []\n";
-    try tmp.dir.writeFile(.{ .sub_path = "ws/site.yml", .data = site_src });
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "ws/site.yml", .data = site_src });
 
-    const binary = try std.fs.cwd().realpathAlloc(a, "zig-out/bin/zals");
+    const binary = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "zig-out/bin/zals", a);
     var client = try DiagClient.start(a, binary, bin_dir, ws_root);
     defer client.deinit();
 
@@ -490,17 +495,17 @@ test "stdio cross-file role context checks directory-style defaults, live siblin
 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.makePath("ws/.git");
-    try tmp.dir.makePath("ws/roles/demo/meta");
-    try tmp.dir.makePath("ws/roles/demo/defaults/main");
-    try tmp.dir.makePath("ws/roles/legacy/meta");
-    try tmp.dir.makePath("ws/roles/legacy/defaults");
-    try tmp.dir.makePath("bin");
+    try tmp.dir.createDirPath(std.testing.io, "ws/.git");
+    try tmp.dir.createDirPath(std.testing.io, "ws/roles/demo/meta");
+    try tmp.dir.createDirPath(std.testing.io, "ws/roles/demo/defaults/main");
+    try tmp.dir.createDirPath(std.testing.io, "ws/roles/legacy/meta");
+    try tmp.dir.createDirPath(std.testing.io, "ws/roles/legacy/defaults");
+    try tmp.dir.createDirPath(std.testing.io, "bin");
 
-    const ws_root = try tmp.dir.realpathAlloc(a, "ws");
-    const bin_dir = try tmp.dir.realpathAlloc(a, "bin");
+    const ws_root = try tmp.dir.realPathFileAlloc(std.testing.io, "ws", a);
+    const bin_dir = try tmp.dir.realPathFileAlloc(std.testing.io, "bin", a);
 
-    try tmp.dir.writeFile(.{
+    try tmp.dir.writeFile(std.testing.io, .{
         .sub_path = "ws/roles/demo/meta/argument_specs.yml",
         .data =
         \\argument_specs:
@@ -531,15 +536,15 @@ test "stdio cross-file role context checks directory-style defaults, live siblin
         \\
     ;
     const override_defaults = "port: \"80\"\n";
-    try tmp.dir.writeFile(.{ .sub_path = "ws/roles/demo/defaults/main/01_base.yml", .data = base_defaults });
-    try tmp.dir.writeFile(.{ .sub_path = "ws/roles/demo/defaults/main/02_override.yml", .data = override_defaults });
-    try tmp.dir.writeFile(.{ .sub_path = "ws/roles/demo/defaults/extra.yml", .data = "extra_var: 1\n" });
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "ws/roles/demo/defaults/main/01_base.yml", .data = base_defaults });
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "ws/roles/demo/defaults/main/02_override.yml", .data = override_defaults });
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "ws/roles/demo/defaults/extra.yml", .data = "extra_var: 1\n" });
 
-    try tmp.dir.writeFile(.{
+    try tmp.dir.writeFile(std.testing.io, .{
         .sub_path = "ws/roles/legacy/meta/main.yml",
         .data = "galaxy_info:\n  author: Jane\n  description: Legacy role\n  license: MIT\n  galaxy_tags: [web]\n",
     });
-    try tmp.dir.writeFile(.{
+    try tmp.dir.writeFile(std.testing.io, .{
         .sub_path = "ws/roles/legacy/defaults/main.yml",
         .data = "legacy_var: 1\n",
     });
@@ -550,7 +555,7 @@ test "stdio cross-file role context checks directory-style defaults, live siblin
     const extra_uri = try std.fmt.allocPrint(a, "file://{s}/roles/demo/defaults/extra.yml", .{ws_root});
     const legacy_meta_uri = try std.fmt.allocPrint(a, "file://{s}/roles/legacy/meta/main.yml", .{ws_root});
     const root_uri = try std.fmt.allocPrint(a, "file://{s}", .{ws_root});
-    const binary = try std.fs.cwd().realpathAlloc(a, "zig-out/bin/zals");
+    const binary = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "zig-out/bin/zals", a);
 
     var client = try DiagClient.start(a, binary, bin_dir, ws_root);
     defer client.deinit();
@@ -690,14 +695,14 @@ test "stdio builtin rule batch reports task, play, variable, and mode findings w
 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.makePath("ws/.git");
-    try tmp.dir.makePath("ws/vars");
-    try tmp.dir.makePath("bin");
+    try tmp.dir.createDirPath(std.testing.io, "ws/.git");
+    try tmp.dir.createDirPath(std.testing.io, "ws/vars");
+    try tmp.dir.createDirPath(std.testing.io, "bin");
 
-    const ws_root = try tmp.dir.realpathAlloc(a, "ws");
-    const bin_dir = try tmp.dir.realpathAlloc(a, "bin");
+    const ws_root = try tmp.dir.realPathFileAlloc(std.testing.io, "ws", a);
+    const bin_dir = try tmp.dir.realPathFileAlloc(std.testing.io, "bin", a);
 
-    try tmp.dir.writeFile(.{
+    try tmp.dir.writeFile(std.testing.io, .{
         .sub_path = "ws/tasks.yml",
         .data =
         \\- name: task structure findings
@@ -740,7 +745,7 @@ test "stdio builtin rule batch reports task, play, variable, and mode findings w
         ,
     });
 
-    try tmp.dir.writeFile(.{
+    try tmp.dir.writeFile(std.testing.io, .{
         .sub_path = "ws/modes.yml",
         .data =
         \\- name: mode and value findings
@@ -792,7 +797,7 @@ test "stdio builtin rule batch reports task, play, variable, and mode findings w
         ,
     });
 
-    try tmp.dir.writeFile(.{
+    try tmp.dir.writeFile(std.testing.io, .{
         .sub_path = "ws/plays.yml",
         .data =
         \\- name: play findings
@@ -815,7 +820,7 @@ test "stdio builtin rule batch reports task, play, variable, and mode findings w
         ,
     });
 
-    try tmp.dir.writeFile(.{
+    try tmp.dir.writeFile(std.testing.io, .{
         .sub_path = "ws/vars/main.yml",
         .data =
         \\service_password: hunter2
@@ -827,7 +832,7 @@ test "stdio builtin rule batch reports task, play, variable, and mode findings w
         ,
     });
 
-    try tmp.dir.writeFile(.{
+    try tmp.dir.writeFile(std.testing.io, .{
         .sub_path = "ws/nohosts.yml",
         .data =
         \\- name: play without hosts
@@ -838,7 +843,7 @@ test "stdio builtin rule batch reports task, play, variable, and mode findings w
         ,
     });
 
-    try tmp.dir.writeFile(.{
+    try tmp.dir.writeFile(std.testing.io, .{
         .sub_path = "ws/good.yml",
         .data =
         \\- name: clean play
@@ -867,7 +872,7 @@ test "stdio builtin rule batch reports task, play, variable, and mode findings w
     });
 
     const root_uri = try std.fmt.allocPrint(a, "file://{s}", .{ws_root});
-    const binary = try std.fs.cwd().realpathAlloc(a, "zig-out/bin/zals");
+    const binary = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "zig-out/bin/zals", a);
     var client = try DiagClient.start(a, binary, bin_dir, ws_root);
     defer client.deinit();
 

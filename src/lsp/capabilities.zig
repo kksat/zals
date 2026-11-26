@@ -30,22 +30,22 @@ pub fn build(a: Allocator, encoding: []const u8, workspace_folders: bool) !Value
     try sync.put("change", json_util.num(2)); // Incremental
     var save = json_util.obj(a);
     try save.put("includeText", json_util.booleanValue(false));
-    try sync.put("save", .{ .object = save });
-    try caps.put("textDocumentSync", .{ .object = sync });
+    try sync.put("save", .{ .object = save.map });
+    try caps.put("textDocumentSync", .{ .object = sync.map });
 
     var legend = json_util.obj(a);
     try legend.put("tokenTypes", try stringArray(a, &token_types));
     try legend.put("tokenModifiers", try stringArray(a, &token_modifiers));
     var sem = json_util.obj(a);
     try sem.put("full", json_util.booleanValue(true));
-    try sem.put("legend", .{ .object = legend });
-    try caps.put("semanticTokensProvider", .{ .object = sem });
+    try sem.put("legend", .{ .object = legend.map });
+    try caps.put("semanticTokensProvider", .{ .object = sem.map });
 
     try caps.put("hoverProvider", json_util.booleanValue(true));
 
     var completion = json_util.obj(a);
     try completion.put("resolveProvider", json_util.booleanValue(true));
-    try caps.put("completionProvider", .{ .object = completion });
+    try caps.put("completionProvider", .{ .object = completion.map });
 
     try caps.put("definitionProvider", json_util.booleanValue(true));
     try caps.put("implementationProvider", json_util.booleanValue(true));
@@ -53,11 +53,11 @@ pub fn build(a: Allocator, encoding: []const u8, workspace_folders: bool) !Value
 
     var rename = json_util.obj(a);
     try rename.put("prepareProvider", json_util.booleanValue(true));
-    try caps.put("renameProvider", .{ .object = rename });
+    try caps.put("renameProvider", .{ .object = rename.map });
 
     var doc_symbol = json_util.obj(a);
     try doc_symbol.put("label", json_util.str("zals"));
-    try caps.put("documentSymbolProvider", .{ .object = doc_symbol });
+    try caps.put("documentSymbolProvider", .{ .object = doc_symbol.map });
     try caps.put("workspaceSymbolProvider", json_util.booleanValue(true));
 
     var code_action = json_util.obj(a);
@@ -65,18 +65,18 @@ pub fn build(a: Allocator, encoding: []const u8, workspace_folders: bool) !Value
     try code_action_kinds.append(json_util.str("refactor"));
     try code_action_kinds.append(json_util.str("refactor.extract"));
     try code_action.put("codeActionKinds", .{ .array = code_action_kinds });
-    try caps.put("codeActionProvider", .{ .object = code_action });
+    try caps.put("codeActionProvider", .{ .object = code_action.map });
 
     var workspace = json_util.obj(a);
     if (workspace_folders) {
         var wf = json_util.obj(a);
         try wf.put("supported", json_util.booleanValue(true));
         try wf.put("changeNotifications", json_util.booleanValue(true));
-        try workspace.put("workspaceFolders", .{ .object = wf });
+        try workspace.put("workspaceFolders", .{ .object = wf.map });
     }
-    try caps.put("workspace", .{ .object = workspace });
+    try caps.put("workspace", .{ .object = workspace.map });
 
-    return .{ .object = caps };
+    return .{ .object = caps.map };
 }
 
 fn stringArray(a: Allocator, items: []const []const u8) !Value {

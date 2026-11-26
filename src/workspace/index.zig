@@ -8,6 +8,7 @@
 //! a request; worker results remain pending until the lease is released.
 
 const std = @import("std");
+const fsio = @import("../fsio.zig");
 const Allocator = std.mem.Allocator;
 const facts_mod = @import("facts.zig");
 const discover_mod = @import("discover.zig");
@@ -24,17 +25,17 @@ pub const Entry = struct {
     path: []const u8,
     /// Workspace root the file belongs to.
     root: []const u8,
-    mtime: i128,
+    mtime: std.Io.Timestamp,
     facts: Facts,
 
     /// Parse `path` (or `text` when given) into a new entry.
-    pub fn build(gpa: Allocator, root: []const u8, path: []const u8, text: ?[]const u8, mtime: i128) !*Entry {
+    pub fn build(gpa: Allocator, root: []const u8, path: []const u8, text: ?[]const u8, mtime: std.Io.Timestamp) !*Entry {
         var scratch = std.heap.ArenaAllocator.init(gpa);
         defer scratch.deinit();
         return buildWithScratch(gpa, scratch.allocator(), root, path, text, mtime);
     }
 
-    fn buildWithScratch(gpa: Allocator, temporary: Allocator, root: []const u8, path: []const u8, text: ?[]const u8, mtime: i128) !*Entry {
+    fn buildWithScratch(gpa: Allocator, temporary: Allocator, root: []const u8, path: []const u8, text: ?[]const u8, mtime: std.Io.Timestamp) !*Entry {
         const self = try gpa.create(Entry);
         errdefer gpa.destroy(self);
         self.arena = std.heap.ArenaAllocator.init(gpa);
@@ -100,7 +101,7 @@ pub const WorkspaceIndex = struct {
     /// Set when the last active scan finished and not yet reported.
     ready_event: bool = false,
     /// Worker → main handoff.
-    mutex: std.Thread.Mutex = .{},
+    mutex: @import("../sync.zig").Mutex = .{},
     pending: std.ArrayList(Pending) = .empty,
     shutdown: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
 
@@ -312,7 +313,7 @@ pub const WorkspaceIndex = struct {
     /// Explicit save/watch notifications run outside the request lease.
     pub fn reindex(self: *WorkspaceIndex, root: []const u8, path: []const u8) void {
         std.debug.assert(!self.query_entries_borrowed);
-        const st = std.fs.cwd().statFile(path) catch {
+        const st = fsio.statFile(path) catch {
             self.remove(path);
             return;
         };
@@ -336,11 +337,11 @@ pub const WorkspaceIndex = struct {
         defer stale.deinit();
         var it = self.entries.valueIterator();
         while (it.next()) |e| {
-            const st = std.fs.cwd().statFile(e.*.path) catch {
+            const st = fsio.statFile(e.*.path) catch {
                 stale.append(e.*) catch {};
                 continue;
             };
-            if (st.mtime != e.*.mtime) stale.append(e.*) catch {};
+            if (st.mtime.nanoseconds != e.*.mtime.nanoseconds) stale.append(e.*) catch {};
         }
         for (stale.items) |e| {
             const root = self.gpa.dupe(u8, e.root) catch continue;
@@ -515,7 +516,7 @@ const ScanWork = struct {
             if (i >= self.files.len) return;
             _ = scratch.reset(.{ .retain_with_limit = 1024 * 1024 });
             const path = self.files[i];
-            const st = std.fs.cwd().statFile(path) catch continue;
+            const st = fsio.statFile(path) catch continue;
             const e = Entry.buildWithScratch(self.index.gpa, scratch.allocator(), self.root, path, null, st.mtime) catch continue;
             self.index.push(.{ .generation = self.generation, .root = e.root, .entry = e });
         }
@@ -553,22 +554,22 @@ const Tree = struct {
 
     fn init() !Tree {
         var n: u64 = 0;
-        std.crypto.random.bytes(std.mem.asBytes(&n));
+        fsio.randomBytes(std.mem.asBytes(&n));
         const root = try std.fmt.allocPrint(testing.allocator, "/tmp/zals-index-{x}", .{n});
-        try std.fs.cwd().makePath(root);
+        try fsio.makePath(root);
         return .{ .root = root };
     }
 
     fn deinit(self: *Tree) void {
-        std.fs.cwd().deleteTree(self.root) catch {};
+        fsio.deleteTree(self.root) catch {};
         testing.allocator.free(self.root);
     }
 
     fn write(self: Tree, rel: []const u8, data: []const u8) !void {
-        var dir = try std.fs.cwd().openDir(self.root, .{});
-        defer dir.close();
-        if (std.fs.path.dirname(rel)) |parent| try dir.makePath(parent);
-        try dir.writeFile(.{ .sub_path = rel, .data = data });
+        var dir = try fsio.openDir(self.root, .{});
+        defer dir.close(fsio.get());
+        if (std.fs.path.dirname(rel)) |parent| try dir.createDirPath(fsio.get(), parent);
+        try dir.writeFile(fsio.get(), .{ .sub_path = rel, .data = data });
     }
 
     fn path(self: Tree, rel: []const u8) ![]u8 {
@@ -586,7 +587,7 @@ test "entries retain facts without retaining file text or parse storage" {
     try tree.write("data.yml", body.items);
     const path = try tree.path("data.yml");
     defer testing.allocator.free(path);
-    const entry = try Entry.build(testing.allocator, tree.root, path, null, 0);
+    const entry = try Entry.build(testing.allocator, tree.root, path, null, .{ .nanoseconds = 0 });
     defer entry.destroy(testing.allocator);
     try testing.expectEqualStrings("live_value", entry.facts.var_refs[0].name);
     try testing.expect(entry.arena.queryCapacity() < 32 * 1024);
@@ -628,7 +629,7 @@ test "reindex and refreshStale pick up changes" {
     index.reindex(tree.root, site);
     try testing.expectEqualStrings("other", index.get(site).?.facts.var_defs[0].name);
 
-    try std.fs.cwd().deleteFile(site);
+    try fsio.deleteFile(site);
     index.refreshStale();
     try testing.expect(index.get(site) == null);
 }
@@ -645,7 +646,7 @@ test "pool scan delivers through drain" {
     var tries: usize = 0;
     while (index.isScanning() and tries < 2000) : (tries += 1) {
         index.drain();
-        std.Thread.sleep(1 * std.time.ns_per_ms);
+        @import("../sync.zig").sleep(1 * std.time.ns_per_ms);
     }
     try testing.expectEqual(@as(usize, 2), index.count());
     try index.syncRoots(pool, &.{}, ".git", false);
@@ -655,10 +656,11 @@ test "pool scan delivers through drain" {
 }
 
 fn waitForScans(index: *WorkspaceIndex) !void {
-    var timer = try std.time.Timer.start();
-    while (index.isScanning() and timer.read() < 10 * std.time.ns_per_s) {
+    const io = std.testing.io;
+    const deadline = std.Io.Timestamp.now(io, .awake).addDuration(.fromNanoseconds(10 * std.time.ns_per_s));
+    while (index.isScanning() and std.Io.Timestamp.now(io, .awake).nanoseconds < deadline.nanoseconds) {
         index.drain();
-        std.Thread.sleep(std.time.ns_per_ms);
+        @import("../sync.zig").sleep(std.time.ns_per_ms);
     }
     try testing.expect(!index.isScanning());
 }

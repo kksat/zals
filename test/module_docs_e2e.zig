@@ -4,6 +4,10 @@
 //! cache the bootstrap persists, and a warm restart serving from that cache.
 //! Stdio LSP only, no service imports; skips when ansible-doc is absent.
 const std = @import("std");
+
+fn sleepNs(ns: u64) void {
+    std.testing.io.sleep(.fromNanoseconds(ns), .awake) catch {};
+}
 const lsp = @import("e2e/client.zig");
 const anchor = @import("e2e/anchor.zig");
 const model = @import("e2e/model.zig");
@@ -46,9 +50,9 @@ const Session = struct {
     /// cache home. `home` may be shared across sessions to test warm starts;
     /// ownership stays with the caller.
     fn start(a: std.mem.Allocator, workspace: std.testing.TmpDir, home: std.testing.TmpDir) !Session {
-        const ws = try workspace.dir.realpathAlloc(a, ".");
-        const home_path = try home.dir.realpathAlloc(a, ".");
-        const binary = try std.fs.cwd().realpathAlloc(a, "zig-out/bin/zals");
+        const ws = try workspace.dir.realPathFileAlloc(std.testing.io, ".", a);
+        const home_path = try home.dir.realPathFileAlloc(std.testing.io, ".", a);
+        const binary = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "zig-out/bin/zals", a);
         // An empty collections path keeps the catalog deterministic
         // (ansible.builtin only) whatever the machine has installed.
         const collections = try std.fs.path.join(a, &.{ ws, "collections" });
@@ -112,9 +116,9 @@ fn expectContains(haystack: []const u8, needle: []const u8) !void {
 fn makeWorkspace() !std.testing.TmpDir {
     var workspace = std.testing.tmpDir(.{});
     errdefer workspace.cleanup();
-    try workspace.dir.makeDir(".git");
-    try workspace.dir.makeDir("collections");
-    try workspace.dir.writeFile(.{ .sub_path = "playbook.yml", .data = playbook });
+    try workspace.dir.createDir(std.testing.io, ".git", .default_dir);
+    try workspace.dir.createDir(std.testing.io, "collections", .default_dir);
+    try workspace.dir.writeFile(std.testing.io, .{ .sub_path = "playbook.yml", .data = playbook });
     return workspace;
 }
 
@@ -149,7 +153,7 @@ test "real ansible-doc serves builtin module documentation and completion" {
     // list is eventually consistent with the background bootstrap, so a
     // user typing right after startup sees the catalog once ansible-doc has
     // answered; poll for it rather than asserting a specific interleaving.
-    const deadline = std.time.milliTimestamp() + 30_000;
+    const deadline = std.Io.Timestamp.now(std.testing.io, .real).toMilliseconds() + 30_000;
     while (true) {
         const completion = try session.requestAt("textDocument/completion", model.cursor("playbook.yml", "      <module_choice>:"));
         const items = lsp.field(completion, "items") orelse return error.MissingCompletions;
@@ -163,28 +167,28 @@ test "real ansible-doc serves builtin module documentation and completion" {
             std.debug.print("module docs e2e: real ansible-doc hover, completion, and resolve\n", .{});
             return;
         }
-        if (std.time.milliTimestamp() > deadline) return error.MissingBuiltinModuleCompletion;
-        std.Thread.sleep(100 * std.time.ns_per_ms);
+        if (std.Io.Timestamp.now(std.testing.io, .real).toMilliseconds() > deadline) return error.MissingBuiltinModuleCompletion;
+        sleepNs(100 * std.time.ns_per_ms);
     }
 }
 
 /// Await the docs cache file the bootstrap persists, and return its path.
 fn waitForDocsCache(a: std.mem.Allocator, home: *std.testing.TmpDir) ![]const u8 {
-    const cache_dir = try std.fs.path.join(a, &.{ try home.dir.realpathAlloc(a, "."), ".cache", "zals" });
-    const deadline = std.time.milliTimestamp() + 120_000;
-    while (std.time.milliTimestamp() < deadline) {
-        var dir = std.fs.openDirAbsolute(cache_dir, .{ .iterate = true }) catch {
-            std.Thread.sleep(50 * std.time.ns_per_ms);
+    const cache_dir = try std.fs.path.join(a, &.{ try home.dir.realPathFileAlloc(std.testing.io, ".", a), ".cache", "zals" });
+    const deadline = std.Io.Timestamp.now(std.testing.io, .real).toMilliseconds() + 120_000;
+    while (std.Io.Timestamp.now(std.testing.io, .real).toMilliseconds() < deadline) {
+        var dir = std.Io.Dir.openDirAbsolute(std.testing.io, cache_dir, .{ .iterate = true }) catch {
+            sleepNs(50 * std.time.ns_per_ms);
             continue;
         };
-        defer dir.close();
+        defer dir.close(std.testing.io);
         var it = dir.iterate();
-        while (it.next() catch null) |entry| {
+        while (it.next(std.testing.io) catch null) |entry| {
             if (std.mem.startsWith(u8, entry.name, "docs-") and std.mem.endsWith(u8, entry.name, ".json")) {
                 return try std.fs.path.join(a, &.{ cache_dir, entry.name });
             }
         }
-        std.Thread.sleep(50 * std.time.ns_per_ms);
+        sleepNs(50 * std.time.ns_per_ms);
     }
     return error.DocsCacheNeverWritten;
 }
@@ -208,7 +212,7 @@ test "docs bootstrap persists real documentation and a warm restart serves it" {
         try session.openPlaybook(a);
         const cache_path = try waitForDocsCache(a, &home);
 
-        const bytes = try std.fs.cwd().readFileAlloc(a, cache_path, 256 << 20);
+        const bytes = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, cache_path, a, .limited(256 << 20));
         const parsed = try std.json.parseFromSlice(Value, a, bytes, .{});
         defer parsed.deinit();
         const modules = lsp.field(parsed.value, "modules") orelse return error.MissingCachedModules;

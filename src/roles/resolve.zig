@@ -14,6 +14,7 @@
 //! short name.
 
 const std = @import("std");
+const fsio = @import("../fsio.zig");
 const Allocator = std.mem.Allocator;
 const paths = @import("../paths.zig");
 
@@ -188,8 +189,8 @@ fn isRoleDir(dir: []const u8) bool {
     var buf: [std.fs.max_path_bytes]u8 = undefined;
     for ([_][]const u8{ "main.yml", "main.yaml", "argument_specs.yml", "argument_specs.yaml" }) |name| {
         const meta = std.fmt.bufPrint(&buf, "{s}/meta/{s}", .{ dir, name }) catch continue;
-        const f = std.fs.cwd().openFile(meta, .{}) catch continue;
-        f.close();
+        const f = fsio.openFile(meta, .{}) catch continue;
+        f.close(fsio.get());
         return true;
     }
     return false;
@@ -212,9 +213,9 @@ test "resolve playbook-adjacent role" {
     const a = testing.allocator;
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.makePath("roles/demo/tasks");
-    try tmp.dir.writeFile(.{ .sub_path = "roles/demo/tasks/main.yml", .data = "" });
-    const root = try tmp.dir.realpathAlloc(a, ".");
+    try tmp.dir.createDirPath(std.testing.io, "roles/demo/tasks");
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "roles/demo/tasks/main.yml", .data = "" });
+    const root = try tmp.dir.realPathFileAlloc(std.testing.io, ".", a);
     defer a.free(root);
 
     var arena = std.heap.ArenaAllocator.init(a);
@@ -232,9 +233,9 @@ test "resolve from roles_path" {
     const a = testing.allocator;
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.makePath("external/demo/tasks");
-    try tmp.dir.writeFile(.{ .sub_path = "external/demo/tasks/main.yml", .data = "" });
-    const root = try tmp.dir.realpathAlloc(a, ".");
+    try tmp.dir.createDirPath(std.testing.io, "external/demo/tasks");
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "external/demo/tasks/main.yml", .data = "" });
+    const root = try tmp.dir.realPathFileAlloc(std.testing.io, ".", a);
     defer a.free(root);
 
     var arena = std.heap.ArenaAllocator.init(a);
@@ -254,12 +255,12 @@ test "resolve FQCN from collections path" {
     const a = testing.allocator;
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.makePath("collections/ansible_collections/ns/coll/roles/demo/tasks");
-    try tmp.dir.writeFile(.{
+    try tmp.dir.createDirPath(std.testing.io, "collections/ansible_collections/ns/coll/roles/demo/tasks");
+    try tmp.dir.writeFile(std.testing.io, .{
         .sub_path = "collections/ansible_collections/ns/coll/roles/demo/tasks/main.yml",
         .data = "",
     });
-    const root = try tmp.dir.realpathAlloc(a, ".");
+    const root = try tmp.dir.realPathFileAlloc(std.testing.io, ".", a);
     defer a.free(root);
 
     var arena = std.heap.ArenaAllocator.init(a);
@@ -281,12 +282,12 @@ test "resolve short name via declared collection" {
     const a = testing.allocator;
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.makePath("collections/ansible_collections/ns/coll/roles/demo/tasks");
-    try tmp.dir.writeFile(.{
+    try tmp.dir.createDirPath(std.testing.io, "collections/ansible_collections/ns/coll/roles/demo/tasks");
+    try tmp.dir.writeFile(std.testing.io, .{
         .sub_path = "collections/ansible_collections/ns/coll/roles/demo/tasks/main.yml",
         .data = "",
     });
-    const root = try tmp.dir.realpathAlloc(a, ".");
+    const root = try tmp.dir.realPathFileAlloc(std.testing.io, ".", a);
     defer a.free(root);
 
     var arena = std.heap.ArenaAllocator.init(a);
@@ -322,8 +323,8 @@ test "galaxy role name resolves as a short name" {
     const a = testing.allocator;
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.makePath("galaxy/geerlingguy.nginx/tasks");
-    const root = try tmp.dir.realpathAlloc(a, ".");
+    try tmp.dir.createDirPath(std.testing.io, "galaxy/geerlingguy.nginx/tasks");
+    const root = try tmp.dir.realPathFileAlloc(std.testing.io, ".", a);
     defer a.free(root);
 
     var arena = std.heap.ArenaAllocator.init(a);
@@ -341,9 +342,9 @@ test "declared collection wins over adjacent roles" {
     const a = testing.allocator;
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.makePath("roles/demo/tasks");
-    try tmp.dir.makePath("collections/ansible_collections/ns/coll/roles/demo/tasks");
-    const root = try tmp.dir.realpathAlloc(a, ".");
+    try tmp.dir.createDirPath(std.testing.io, "roles/demo/tasks");
+    try tmp.dir.createDirPath(std.testing.io, "collections/ansible_collections/ns/coll/roles/demo/tasks");
+    const root = try tmp.dir.realPathFileAlloc(std.testing.io, ".", a);
     defer a.free(root);
 
     var arena = std.heap.ArenaAllocator.init(a);
@@ -366,10 +367,10 @@ test "sibling role wins over roles_path" {
     const a = testing.allocator;
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.makePath("roles/web/meta");
-    try tmp.dir.makePath("roles/common/tasks");
-    try tmp.dir.makePath("elsewhere/common/tasks");
-    const root = try tmp.dir.realpathAlloc(a, ".");
+    try tmp.dir.createDirPath(std.testing.io, "roles/web/meta");
+    try tmp.dir.createDirPath(std.testing.io, "roles/common/tasks");
+    try tmp.dir.createDirPath(std.testing.io, "elsewhere/common/tasks");
+    const root = try tmp.dir.realPathFileAlloc(std.testing.io, ".", a);
     defer a.free(root);
 
     var arena = std.heap.ArenaAllocator.init(a);
@@ -387,9 +388,9 @@ test "adjacent walk stops at the Workspace root" {
     const a = testing.allocator;
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.makePath("roles/demo/tasks");
-    try tmp.dir.makePath("ws/playbooks");
-    const root = try tmp.dir.realpathAlloc(a, ".");
+    try tmp.dir.createDirPath(std.testing.io, "roles/demo/tasks");
+    try tmp.dir.createDirPath(std.testing.io, "ws/playbooks");
+    const root = try tmp.dir.realPathFileAlloc(std.testing.io, ".", a);
     defer a.free(root);
 
     var arena = std.heap.ArenaAllocator.init(a);
@@ -406,10 +407,10 @@ test "workspace fallback returns every match, nearest first" {
     const a = testing.allocator;
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.makePath("infra/roles/db/tasks");
-    try tmp.dir.makePath("apps/roles/db/tasks");
-    try tmp.dir.makePath("apps/playbooks");
-    const root = try tmp.dir.realpathAlloc(a, ".");
+    try tmp.dir.createDirPath(std.testing.io, "infra/roles/db/tasks");
+    try tmp.dir.createDirPath(std.testing.io, "apps/roles/db/tasks");
+    try tmp.dir.createDirPath(std.testing.io, "apps/playbooks");
+    const root = try tmp.dir.realPathFileAlloc(std.testing.io, ".", a);
     defer a.free(root);
 
     var arena = std.heap.ArenaAllocator.init(a);

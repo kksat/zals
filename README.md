@@ -78,7 +78,7 @@ and execution environments.
 
 ## Requirements
 
-- [Zig](https://ziglang.org/download/) **0.15.1** (pinned)
+- [Zig](https://ziglang.org/download/) **0.17.1** (pinned)
 - Ansible (`ansible`, `ansible-config`, `ansible-doc`)
 - `ansible-lint` (optional; validation falls back to `ansible-playbook --syntax-check`)
 
@@ -161,9 +161,10 @@ tables and optional raw JSON samples. `make test` also runs the benchmark's
 Python statistics/validation checks using `python3`; `zig build test` runs
 only the Zig unit tests.
 
-> **macOS 26 + Xcode 26.5 SDK:** Zig 0.15.1's bundled lld fails to link against
+> **macOS 26 + Xcode 26.5 SDK:** Zig 0.15.1's bundled lld failed to link against
 > the SDK's `libSystem.B.tbd` (it lists `arm64e-macos` but not `arm64-macos`),
-> producing undefined libc symbols. The `Makefile` works around this by setting
+> producing undefined libc symbols. The workaround is retained for 0.17.1 until
+> the lld matching is confirmed fixed on macOS 26. The `Makefile` works around this by setting
 > `DEVELOPER_DIR=/nonexistent`, which makes Zig use its bundled libc stubs. Run
 > Zig through `make` (`make help`; `make zig ARGS=...` for anything else). See
 > [ADR-0019](docs/adr/0019-toolchain-build-and-platforms.md).
