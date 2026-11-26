@@ -63,9 +63,25 @@ pub fn range(v: Value) ?@import("types.zig").Range {
     return .{ .start = position(start) orelse return null, .end = position(end) orelse return null };
 }
 
-/// Build a JSON object with the given allocator.
-pub fn obj(allocator: std.mem.Allocator) std.json.ObjectMap {
-    return std.json.ObjectMap.init(allocator);
+pub const Obj = struct {
+    map: std.json.ObjectMap = .empty,
+    allocator: std.mem.Allocator,
+
+    pub fn put(self: *Obj, key: []const u8, v: Value) std.mem.Allocator.Error!void {
+        return self.map.put(self.allocator, key, v);
+    }
+
+    pub fn getOrPut(self: *Obj, key: []const u8) std.mem.Allocator.Error!std.json.ObjectMap.GetOrPutResult {
+        return self.map.getOrPut(self.allocator, key);
+    }
+
+    pub fn value(self: *const Obj) Value {
+        return .{ .object = self.map };
+    }
+};
+
+pub fn obj(allocator: std.mem.Allocator) Obj {
+    return .{ .allocator = allocator };
 }
 
 pub fn str(s: []const u8) Value {

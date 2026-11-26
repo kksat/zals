@@ -450,8 +450,9 @@ pub fn load(
     const msg_idx = message_root orelse return failLoad(backing, arena, owned_source, .missing_field, root_node.start, root_node.end, "missing required field 'message'", .{});
 
     if (field_opt) |field_sel| {
-        inline for (std.meta.fields(TargetKind)) |f| {
-            const tk: TargetKind = @enumFromInt(f.value);
+        const ti = @typeInfo(TargetKind).@"enum";
+        inline for (ti.field_values) |value| {
+            const tk: TargetKind = @fromBackingInt(@intCast(value));
             if (targets.contains(tk) and !tk.isValidField(field_sel)) {
                 return failLoad(
                     backing,

@@ -3,9 +3,7 @@ const Allocator = std.mem.Allocator;
 const span_mod = @import("span.zig");
 const noqa_mod = @import("noqa.zig");
 
-const c = @cImport({
-    @cInclude("tree_sitter/api.h");
-});
+const c = @import("../tree_sitter.zig");
 
 extern fn tree_sitter_yaml() *const c.TSLanguage;
 
@@ -573,7 +571,7 @@ fn convertBlockScalar(ctx: *ParseCtx, node: c.TSNode) !*YamlNode {
     var min_indent: usize = std.math.maxInt(usize);
     var it = std.mem.splitScalar(u8, body, '\n');
     while (it.next()) |line| {
-        const trimmed_cr = std.mem.trimRight(u8, line, "\r");
+        const trimmed_cr = std.mem.trimEnd(u8, line, "\r");
         if (trimmed_cr.len == 0) continue;
         var ind: usize = 0;
         while (ind < trimmed_cr.len and trimmed_cr[ind] == ' ') : (ind += 1) {}
@@ -584,7 +582,7 @@ fn convertBlockScalar(ctx: *ParseCtx, node: c.TSNode) !*YamlNode {
     var lines = std.ArrayList([]const u8).empty;
     var it2 = std.mem.splitScalar(u8, body, '\n');
     while (it2.next()) |line| {
-        const trimmed_cr = std.mem.trimRight(u8, line, "\r");
+        const trimmed_cr = std.mem.trimEnd(u8, line, "\r");
         const stripped = if (trimmed_cr.len >= min_indent) trimmed_cr[min_indent..] else "";
         try lines.append(ctx.alloc, stripped);
     }
@@ -687,7 +685,7 @@ fn recoverRegionLines(
         const line_start = pos;
         const nl_rel = std.mem.indexOfScalar(u8, ctx.text[pos..region_end], '\n');
         const line_end = if (nl_rel) |r| pos + r else region_end;
-        const line = std.mem.trimRight(u8, ctx.text[line_start..line_end], "\r");
+        const line = std.mem.trimEnd(u8, ctx.text[line_start..line_end], "\r");
         pos = if (nl_rel != null) line_end + 1 else region_end;
 
         var ind: usize = 0;

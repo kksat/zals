@@ -18,11 +18,11 @@ fn standaloneRole(comptime name: []const u8, comptime ext: []const u8, vars: []c
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const fixture = try std.fs.cwd().realpathAlloc(a, "test/fixtures/standalone-role/" ++ name);
-    const binary = try std.fs.cwd().realpathAlloc(a, "zig-out/bin/zals");
+    const fixture = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "test/fixtures/standalone-role/" ++ name, a);
+    const binary = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "zig-out/bin/zals", a);
     var home = std.testing.tmpDir(.{});
     defer home.cleanup();
-    const isolated_home = try home.dir.realpathAlloc(a, ".");
+    const isolated_home = try home.dir.realPathFileAlloc(std.testing.io, ".", a);
     var client = try lsp.Client.startWithOptions(a, binary, fixture, fixture, isolated_home, .{
         .use_fixture_config = false, // Like RHEL10-CIS, no ansible.cfg is needed.
         .collections_path = try std.fs.path.join(a, &.{ isolated_home, "no-collections" }),

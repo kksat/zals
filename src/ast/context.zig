@@ -1,4 +1,5 @@
 const std = @import("std");
+const fsio = @import("../fsio.zig");
 const Allocator = std.mem.Allocator;
 const cel_env = @import("../cel/env.zig");
 const paths = @import("../paths.zig");
@@ -573,11 +574,11 @@ fn walkYamlDir(
     seen: *std.StringHashMapUnmanaged(void),
 ) !void {
     if (depth >= max_dir_walk_depth or out.items.len >= max_dir_walk_files) return;
-    var dir = std.fs.cwd().openDir(dir_path, .{ .iterate = true }) catch return;
-    defer dir.close();
+    var dir = fsio.openDir(dir_path, .{ .iterate = true }) catch return;
+    defer dir.close(fsio.get());
 
     var it = dir.iterate();
-    while (it.next() catch null) |entry| {
+    while (it.next(fsio.get()) catch null) |entry| {
         if (out.items.len >= max_dir_walk_files) break;
         if (entry.name.len == 0 or entry.name[0] == '.') continue;
         const full = try std.fs.path.join(alloc, &.{ dir_path, entry.name });
@@ -630,18 +631,18 @@ fn readFileOrOverlay(alloc: Allocator, path: []const u8, overlays: []const Sourc
 test "build role context merges directory-style defaults in Ansible lexicographical order and respects overlays" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.makePath("ws/roles/demo/meta");
-    try tmp.dir.makePath("ws/roles/demo/defaults/main");
-    try tmp.dir.makePath("ws/roles/demo/tasks");
-    try tmp.dir.writeFile(.{
+    try tmp.dir.createDirPath(std.testing.io, "ws/roles/demo/meta");
+    try tmp.dir.createDirPath(std.testing.io, "ws/roles/demo/defaults/main");
+    try tmp.dir.createDirPath(std.testing.io, "ws/roles/demo/tasks");
+    try tmp.dir.writeFile(std.testing.io, .{
         .sub_path = "ws/galaxy.yml",
         .data = "namespace: acme\nname: web\n",
     });
-    try tmp.dir.writeFile(.{
+    try tmp.dir.writeFile(std.testing.io, .{
         .sub_path = "ws/CHANGELOG.rst",
         .data = "changelog\n",
     });
-    try tmp.dir.writeFile(.{
+    try tmp.dir.writeFile(std.testing.io, .{
         .sub_path = "ws/roles/demo/meta/argument_specs.yml",
         .data =
         \\argument_specs:
@@ -656,15 +657,15 @@ test "build role context merges directory-style defaults in Ansible lexicographi
         \\
         ,
     });
-    try tmp.dir.writeFile(.{
+    try tmp.dir.writeFile(std.testing.io, .{
         .sub_path = "ws/roles/demo/defaults/main/01_base.yml",
         .data = "app_port: 80\nbase_only: one\n",
     });
-    try tmp.dir.writeFile(.{
+    try tmp.dir.writeFile(std.testing.io, .{
         .sub_path = "ws/roles/demo/defaults/main/02_override.yml",
         .data = "app_port: 8080\n",
     });
-    try tmp.dir.writeFile(.{
+    try tmp.dir.writeFile(std.testing.io, .{
         .sub_path = "ws/roles/demo/tasks/main.yml",
         .data = "- name: ok\n  ansible.builtin.ping:\n",
     });
@@ -673,7 +674,7 @@ test "build role context merges directory-style defaults in Ansible lexicographi
     defer arena.deinit();
     const a = arena.allocator();
 
-    const ws_root = try tmp.dir.realpathAlloc(a, "ws");
+    const ws_root = try tmp.dir.realPathFileAlloc(std.testing.io, "ws", a);
     const def_path = try std.fs.path.join(a, &.{ ws_root, "roles/demo/defaults/main/01_base.yml" });
     const override_path = try std.fs.path.join(a, &.{ ws_root, "roles/demo/defaults/main/02_override.yml" });
 

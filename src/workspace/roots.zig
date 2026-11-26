@@ -5,6 +5,7 @@
 //! nested marker is its own Workspace. See GLOSSARY.md.
 
 const std = @import("std");
+const fsio = @import("../fsio.zig");
 const Allocator = std.mem.Allocator;
 
 pub const default_marker = ".git";
@@ -114,10 +115,10 @@ pub fn owning(
 /// A not-yet-existing path keeps its suffix below the nearest existing ancestor.
 /// The caller frees the result.
 pub fn resolvedPath(allocator: Allocator, path: []const u8) ![]const u8 {
-    return std.fs.cwd().realpathAlloc(allocator, path) catch |err| {
+    return fsio.realpathAlloc(allocator, path) catch |err| {
         if (err == error.OutOfMemory) return error.OutOfMemory;
         const parent = std.fs.path.dirname(path) orelse {
-            const cwd = try std.process.getCwdAlloc(allocator);
+            const cwd = try fsio.realpathAlloc(allocator, ".");
             defer allocator.free(cwd);
             return std.fs.path.join(allocator, &.{ cwd, path });
         };
@@ -130,23 +131,23 @@ pub fn resolvedPath(allocator: Allocator, path: []const u8) ![]const u8 {
 
 fn locateStart(allocator: Allocator, start: []const u8) !?[]u8 {
     if (start.len == 0) return null;
-    if (std.fs.cwd().openDir(start, .{})) |opened| {
+    if (fsio.openDir(start, .{})) |opened| {
         var dir = opened;
-        defer dir.close();
-        return try dir.realpathAlloc(allocator, ".");
+        defer dir.close(fsio.get());
+        return try dir.realPathFileAlloc(fsio.get(), ".", allocator);
     } else |_| {}
 
     const parent = std.fs.path.dirname(start) orelse return null;
     if (std.mem.eql(u8, parent, start)) return null;
     // A file, or a path that does not exist yet: keep walking from its parent.
-    if (std.fs.cwd().openFile(start, .{})) |file| file.close() else |_| {}
+    if (fsio.openFile(start, .{})) |file| file.close(fsio.get()) else |_| {}
     return locateStart(allocator, parent);
 }
 
 fn hasMarker(dir_path: []const u8, marker: []const u8) bool {
-    var dir = std.fs.cwd().openDir(dir_path, .{}) catch return false;
-    defer dir.close();
-    dir.access(marker, .{}) catch return false;
+    var dir = fsio.openDir(dir_path, .{}) catch return false;
+    defer dir.close(fsio.get());
+    dir.access(fsio.get(), marker, .{}) catch return false;
     return true;
 }
 
@@ -158,27 +159,27 @@ const Fix = struct {
 
     fn init(allocator: Allocator) !Fix {
         var n: u64 = 0;
-        std.crypto.random.bytes(std.mem.asBytes(&n));
+        fsio.randomBytes(std.mem.asBytes(&n));
         const root = try std.fmt.allocPrint(allocator, "/tmp/zals-ws-{x}", .{n});
         errdefer allocator.free(root);
-        try std.fs.cwd().makePath(root);
+        try fsio.makePath(root);
         return .{ .allocator = allocator, .root = root };
     }
 
     fn deinit(self: *Fix) void {
-        std.fs.cwd().deleteTree(self.root) catch {};
+        fsio.deleteTree(self.root) catch {};
         self.allocator.free(self.root);
     }
 
-    fn open(self: Fix) !std.fs.Dir {
-        return std.fs.cwd().openDir(self.root, .{});
+    fn open(self: Fix) !std.Io.Dir {
+        return fsio.openDir(self.root, .{});
     }
 
     fn real(self: Fix, a: Allocator, rel: []const u8) ![]u8 {
         var dir = try self.open();
-        defer dir.close();
-        if (rel.len == 0) return dir.realpathAlloc(a, ".");
-        return dir.realpathAlloc(a, rel);
+        defer dir.close(fsio.get());
+        if (rel.len == 0) return dir.realPathFileAlloc(fsio.get(), ".", a);
+        return dir.realPathFileAlloc(fsio.get(), rel, a);
     }
 
     fn join(self: Fix, a: Allocator, rel: []const u8) ![]u8 {
@@ -187,36 +188,36 @@ const Fix = struct {
 
     fn gitDir(self: Fix, rel: []const u8) !void {
         var dir = try self.open();
-        defer dir.close();
+        defer dir.close(fsio.get());
         if (rel.len == 0) {
-            try dir.makeDir(".git");
+            try dir.createDir(std.testing.io, ".git", .default_dir);
             return;
         }
-        try dir.makePath(rel);
-        var sub = try dir.openDir(rel, .{});
-        defer sub.close();
-        try sub.makeDir(".git");
+        try dir.createDirPath(fsio.get(), rel);
+        var sub = try dir.openDir(fsio.get(), rel, .{});
+        defer sub.close(fsio.get());
+        try sub.createDir(std.testing.io, ".git", .default_dir);
     }
 
     fn gitFile(self: Fix, rel: []const u8) !void {
         var dir = try self.open();
-        defer dir.close();
-        if (rel.len != 0) try dir.makePath(rel);
+        defer dir.close(fsio.get());
+        if (rel.len != 0) try dir.createDirPath(fsio.get(), rel);
         const sub_path = if (rel.len == 0)
             ".git"
         else
             try std.fs.path.join(self.allocator, &.{ rel, ".git" });
         defer if (rel.len != 0) self.allocator.free(sub_path);
-        try dir.writeFile(.{ .sub_path = sub_path, .data = "gitdir: /unused\n" });
+        try dir.writeFile(fsio.get(), .{ .sub_path = sub_path, .data = "gitdir: /unused\n" });
     }
 
     fn touch(self: Fix, rel: []const u8) !void {
         var dir = try self.open();
-        defer dir.close();
+        defer dir.close(fsio.get());
         if (std.fs.path.dirname(rel)) |parent| {
-            if (parent.len > 0) try dir.makePath(parent);
+            if (parent.len > 0) try dir.createDirPath(fsio.get(), parent);
         }
-        try dir.writeFile(.{ .sub_path = rel, .data = "" });
+        try dir.writeFile(fsio.get(), .{ .sub_path = rel, .data = "" });
     }
 };
 

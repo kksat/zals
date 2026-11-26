@@ -30,8 +30,9 @@ pub const TargetKind = enum(u8) {
     }
 
     pub fn parse(s: []const u8) ?TargetKind {
-        inline for (std.meta.fields(TargetKind)) |f| {
-            if (std.mem.eql(u8, f.name, s)) return @enumFromInt(f.value);
+        const ti = @typeInfo(TargetKind).@"enum";
+        inline for (ti.field_names, ti.field_values) |field_name, value| {
+            if (std.mem.eql(u8, field_name, s)) return @fromBackingInt(@intCast(value));
         }
         return null;
     }

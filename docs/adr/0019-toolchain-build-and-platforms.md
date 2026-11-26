@@ -13,7 +13,7 @@ time. Target platforms are Linux and macOS first, Windows later.
 
 ## Decision
 
-- Pin **Zig 0.15.1** via `minimum_zig_version` in `build.zig.zon`.
+- Pin **Zig 0.17.1** via `minimum_zig_version` in `build.zig.zon`.
 - Use `build.zig.zon` for dependencies (tree-sitter) and materialize the schema
   snapshot into `vendor/schemas/` at build time
   ([ADR-0006](0006-bundle-schema-snapshot.md)).
@@ -22,7 +22,7 @@ time. Target platforms are Linux and macOS first, Windows later.
 
 ### macOS 26 + Xcode 26.5 SDK workaround
 
-Zig 0.15.1's bundled lld does not match a plain `arm64-macos` request against the
+Zig 0.15.1's bundled lld did not match a plain `arm64-macos` request against the
 SDK's `libSystem.B.tbd`, which lists `arm64e-macos` but not `arm64-macos`. The
 link fails with undefined libc symbols (`_abort`, `_getenv`, ...). Setting
 `DEVELOPER_DIR=/nonexistent` makes Zig skip SDK discovery and use its bundled
@@ -33,7 +33,8 @@ Darwin. This is safe for a pure-Zig project with vendored C sources.
 
 - Builds are reproducible across machines with the same Zig version.
 - The macOS workaround is a local build-environment concern, not a code change;
-  it should be revisited when a newer Zig fixes the lld matching.
+  retained through the 0.17.1 upgrade until the lld matching is confirmed fixed
+  on macOS 26.
 - Vendoring C means the build needs a C toolchain, which `zig cc` provides.
 - Windows support will require revisiting process spawning, path handling, and
   the self-pipe wakeup.

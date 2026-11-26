@@ -20,11 +20,11 @@ const Session = struct {
         arena.* = std.heap.ArenaAllocator.init(std.testing.allocator);
         errdefer arena.deinit();
         const a = arena.allocator();
-        const fixture = try std.fs.cwd().realpathAlloc(a, "test/fixtures/selected-venv");
-        const binary = try std.fs.cwd().realpathAlloc(a, "zig-out/bin/zals");
+        const fixture = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "test/fixtures/selected-venv", a);
+        const binary = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "zig-out/bin/zals", a);
         var home = std.testing.tmpDir(.{});
         errdefer home.cleanup();
-        var client = try lsp.Client.startWithOptions(a, binary, fixture, fixture, try home.dir.realpathAlloc(a, "."), options);
+        var client = try lsp.Client.startWithOptions(a, binary, fixture, fixture, try home.dir.realPathFileAlloc(std.testing.io, ".", a), options);
         errdefer client.deinit();
         const initialized = try client.request("initialize", .{
             .processId = @as(?i64, null),
@@ -118,7 +118,7 @@ const Session = struct {
 test "direct ansible_collections environment path resolves the dependency with venv disabled" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-    const direct = try std.fs.cwd().realpathAlloc(arena.allocator(), "test/fixtures/selected-venv/.venv/ansible_collections");
+    const direct = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "test/fixtures/selected-venv/.venv/ansible_collections", arena.allocator());
     var session = try Session.start("", .{ .collections_path = direct });
     defer session.deinit();
     const from = model.cursor("site.yml", "    - <fixture.root>");
@@ -157,8 +157,8 @@ test "direct collection aliases preserve path order and do not duplicate module 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const root = try std.fs.cwd().realpathAlloc(a, "test/fixtures/selected-venv/.venv");
-    const other = try std.fs.cwd().realpathAlloc(a, "test/fixtures/selected-venv/other-env");
+    const root = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "test/fixtures/selected-venv/.venv", a);
+    const other = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "test/fixtures/selected-venv/other-env", a);
     {
         // The direct entry must remain first when deduplicated with its parent,
         // rather than letting the intervening dependency take precedence.
@@ -374,7 +374,7 @@ test "venv selection, empty disable, CLI override, and path precedence are prese
     {
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
-        const absolute_venv = try std.fs.cwd().realpathAlloc(arena.allocator(), "test/fixtures/selected-venv/other-env");
+        const absolute_venv = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "test/fixtures/selected-venv/other-env", arena.allocator());
         var s = try Session.start(absolute_venv, .{});
         defer s.deinit();
         try s.definition(from, "other-env/ansible_collections/fixture/root/galaxy.yml");
@@ -382,7 +382,7 @@ test "venv selection, empty disable, CLI override, and path precedence are prese
     {
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
-        const env_path = try std.fs.cwd().realpathAlloc(arena.allocator(), "test/fixtures/selected-venv/adjacent/collections");
+        const env_path = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "test/fixtures/selected-venv/adjacent/collections", arena.allocator());
         var s = try Session.start(".venv", .{ .collections_path = env_path });
         defer s.deinit();
         try s.definition(from, "adjacent/collections/ansible_collections/fixture/root/galaxy.yml");

@@ -79,7 +79,7 @@ fn emit(
         .line = start.line,
         .start = start.character,
         .length = length,
-        .kind = @intFromEnum(kind),
+        .kind = @backingInt(kind),
     });
 }
 
@@ -112,7 +112,7 @@ test "hosts is a keyword token" {
     var doc = try Document.init(testing.allocator, "file:///play.yml", "ansible", 1, src, .utf8);
     defer doc.deinit();
     const tokens = try collect(arena.allocator(), &doc, cursor.emptyDocs());
-    const keyword = @intFromEnum(capabilities.TokenType.keyword);
+    const keyword = @backingInt(capabilities.TokenType.keyword);
     var saw = false;
     for (tokens) |t| {
         if (t.kind == keyword and t.length == 5) saw = true;
@@ -138,8 +138,8 @@ test "module option is a method token" {
     var doc = try Document.init(testing.allocator, "file:///play.yml", "ansible", 1, src, .utf8);
     defer doc.deinit();
     const tokens = try collect(a, &doc, lookup);
-    const method = @intFromEnum(capabilities.TokenType.method);
-    const class = @intFromEnum(capabilities.TokenType.class);
+    const method = @backingInt(capabilities.TokenType.method);
+    const class = @backingInt(capabilities.TokenType.class);
     var saw_method = false;
     var saw_class = false;
     for (tokens) |t| {

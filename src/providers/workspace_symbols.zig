@@ -64,12 +64,12 @@ pub fn collect(context: *Context, v: *FileSet, query: []const u8) ![]const Info 
 
     // Roles prefer their main task source, accepting both YAML extensions.
     const RoleTarget = struct { uri: []const u8, priority: u8 };
-    var role_targets = std.StringArrayHashMap(RoleTarget).init(a);
+    var role_targets: std.StringArrayHashMapUnmanaged(RoleTarget) = .empty;
     for (v.files) |f| {
         const dir = resolve.enclosingRole(f.path) orelse continue;
         const role_path = f.path[dir.len..];
         const priority: u8 = if (std.mem.eql(u8, role_path, "/tasks/main.yml")) 2 else if (std.mem.eql(u8, role_path, "/tasks/main.yaml")) 1 else 0;
-        const gop = try role_targets.getOrPut(dir);
+        const gop = try role_targets.getOrPut(a, dir);
         if (!gop.found_existing or priority > gop.value_ptr.priority) gop.value_ptr.* = .{ .uri = f.uri, .priority = priority };
     }
     var rit = role_targets.iterator();
@@ -202,8 +202,8 @@ fn toValue(context: *Context, info: Info) !Value {
         try context.location(info.uri, info.start, info.end);
     var obj = json_util.obj(a);
     try obj.put("name", json_util.str(info.name));
-    try obj.put("kind", json_util.num(@intFromEnum(info.kind)));
+    try obj.put("kind", json_util.num(@backingInt(info.kind)));
     try obj.put("location", try encode.location(a, loc));
     if (info.container.len > 0) try obj.put("containerName", json_util.str(info.container));
-    return .{ .object = obj };
+    return .{ .object = obj.map };
 }

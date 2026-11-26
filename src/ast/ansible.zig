@@ -1436,7 +1436,7 @@ const AstBuilder = struct {
                     if (split.next()) |mod_name| {
                         task.raw_action = mod_name;
                         splitActionName(mod_name, &task.action_namespace, &task.short_action);
-                        const rest = std.mem.trimLeft(u8, split.rest(), " \t");
+                        const rest = std.mem.trimStart(u8, split.rest(), " \t");
                         if (rest.len > 0) {
                             task.is_free_form = true;
                             task.free_form_text = rest;

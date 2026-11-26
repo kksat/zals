@@ -10,7 +10,7 @@
     "after": "void *tree_sitter_yaml_external_scanner_create(void) {"
   },
   "optimize": "ReleaseSafe",
-  "zig_version": "0.15.1",
+  "zig_version": "0.17.1",
   "ci_python": "3.12",
   "seeds": [
     42,

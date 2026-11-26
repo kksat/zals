@@ -27,14 +27,14 @@ pub fn build(b: *std.Build) void {
         .root_module = b.createModule(.{ .target = target, .optimize = optimize }),
         .linkage = .static,
     });
-    ts.addCSourceFiles(.{
+    ts.root_module.addCSourceFiles(.{
         .files = &tree_sitter_c,
-        .flags = if (optimize == .Debug) &.{ "-std=gnu11", "-O2" } else &.{"-std=gnu11"},
+        .flags = if (optimize == .debug) &.{ "-std=gnu11", "-O2" } else &.{"-std=gnu11"},
     });
-    ts.addIncludePath(b.path("vendor/tree-sitter/include"));
-    ts.addIncludePath(b.path("vendor/tree-sitter/src"));
-    ts.addIncludePath(b.path("vendor/tree-sitter-yaml/src"));
-    ts.linkLibC();
+    ts.root_module.addIncludePath(b.path("vendor/tree-sitter/include"));
+    ts.root_module.addIncludePath(b.path("vendor/tree-sitter/src"));
+    ts.root_module.addIncludePath(b.path("vendor/tree-sitter-yaml/src"));
+    ts.root_module.link_libc = true;
 
     const schemas = b.createModule(.{
         .root_source_file = b.path("vendor/schemas/embed.zig"),
@@ -64,21 +64,21 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
-    exe.linkLibrary(ts);
+    exe.root_module.linkLibrary(ts);
     b.installArtifact(exe);
 
     const run_step = b.step("run", "Run the server");
     const run_cmd = b.addRunArtifact(exe);
     run_step.dependOn(&run_cmd.step);
     run_cmd.step.dependOn(b.getInstallStep());
-    if (b.args) |args| run_cmd.addArgs(args);
+    run_cmd.addPassthruArgs();
 
     const mod_tests = b.addTest(.{ .root_module = mod });
-    mod_tests.linkLibrary(ts);
+    mod_tests.root_module.linkLibrary(ts);
     const run_mod_tests = b.addRunArtifact(mod_tests);
 
     const exe_tests = b.addTest(.{ .root_module = exe.root_module });
-    exe_tests.linkLibrary(ts);
+    exe_tests.root_module.linkLibrary(ts);
     const run_exe_tests = b.addRunArtifact(exe_tests);
 
     const test_step = b.step("test", "Run unit tests");
@@ -203,11 +203,12 @@ pub fn build(b: *std.Build) void {
 }
 
 fn addE2eInputs(b: *std.Build, run: *std.Build.Step.Run, path: []const u8) void {
-    var dir = std.fs.cwd().openDir(path, .{ .iterate = true }) catch @panic("missing E2E fixture directory");
-    defer dir.close();
-    var walker = dir.walk(b.allocator) catch @panic("cannot walk E2E fixtures");
+    const io = b.graph.io;
+    var dir = std.Io.Dir.cwd().openDir(io, path, .{ .iterate = true }) catch @panic("missing E2E fixture directory");
+    defer dir.close(io);
+    var walker = dir.walk(b.graph.arena) catch @panic("cannot walk E2E fixtures");
     defer walker.deinit();
-    while (walker.next() catch @panic("cannot read E2E fixture")) |entry| {
+    while (walker.next(io) catch @panic("cannot read E2E fixture")) |entry| {
         if (entry.kind != .file) continue;
         run.addFileInput(b.path(b.fmt("{s}/{s}", .{ path, entry.path })));
     }

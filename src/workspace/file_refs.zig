@@ -160,12 +160,12 @@ test "collects task and vars file references" {
 test "a role task file resolves into the role's tasks directory" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.makePath("roles/web/tasks");
-    try tmp.dir.writeFile(.{ .sub_path = "roles/web/tasks/install.yml", .data = "" });
+    try tmp.dir.createDirPath(std.testing.io, "roles/web/tasks");
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "roles/web/tasks/install.yml", .data = "" });
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const root = try tmp.dir.realpathAlloc(a, ".");
+    const root = try tmp.dir.realPathFileAlloc(std.testing.io, ".", a);
     const handlers = try std.fs.path.join(a, &.{ root, "roles", "web", "handlers", "main.yml" });
     const target = try resolveTarget(a, .task_file, "install.yml", handlers, root);
     try testing.expectEqualStrings(try std.fs.path.join(a, &.{ root, "roles", "web", "tasks", "install.yml" }), target);

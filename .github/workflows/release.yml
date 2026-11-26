@@ -85,7 +85,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  ZIG_VERSION: "0.15.1"
+  ZIG_VERSION: "0.17.1"
   TAG: ${{ inputs.tag }}
 
 jobs:

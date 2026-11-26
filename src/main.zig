@@ -18,7 +18,7 @@ const usage =
     \\
 ;
 
-var log_file: ?std.fs.File = null;
+var log_file: ?std.Io.File = null;
 var runtime_log_level: std.log.Level = .info;
 
 pub const std_options: std.Options = .{
@@ -32,15 +32,18 @@ fn logFn(
     comptime format: []const u8,
     args: anytype,
 ) void {
-    if (@intFromEnum(message_level) > @intFromEnum(runtime_log_level)) return;
+    if (@backingInt(message_level) > @backingInt(runtime_log_level)) return;
     const level_txt = comptime message_level.asText();
     const prefix2 = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
     var buf: [4096]u8 = undefined;
     const msg = std.fmt.bufPrint(&buf, level_txt ++ prefix2 ++ format ++ "\n", args) catch blk: {
         break :blk level_txt ++ prefix2 ++ format ++ "\n";
     };
-    const fd = if (log_file) |f| f else std.fs.File.stderr();
-    fd.writeAll(msg) catch {};
+    if (log_file) |f| {
+        f.writeStreamingAll(zals.fsio.get(), msg) catch {};
+    } else {
+        std.Io.File.stderr().writeStreamingAll(zals.fsio.get(), msg) catch {};
+    }
 }
 
 fn applyLogLevel(level: zals.cli.LogLevel) std.log.Level {
@@ -52,19 +55,26 @@ fn applyLogLevel(level: zals.cli.LogLevel) std.log.Level {
     };
 }
 
-pub fn main() !void {
-    var gpa: if (builtin.mode == .Debug) std.heap.GeneralPurposeAllocator(.{}) else void =
-        if (builtin.mode == .Debug) .{} else {};
-    defer if (builtin.mode == .Debug) {
+pub fn main(init: std.process.Init) !void {
+    zals.fsio.set(init.io, init.minimal.environ);
+    const io = zals.fsio.get();
+
+    var gpa: if (builtin.mode == .debug) std.heap.DebugAllocator(.{}) else void =
+        if (builtin.mode == .debug) .{} else {};
+    defer if (builtin.mode == .debug) {
         _ = gpa.deinit();
     };
-    const allocator = if (builtin.mode == .Debug) gpa.allocator() else std.heap.c_allocator;
+    const allocator = if (builtin.mode == .debug) gpa.allocator() else std.heap.c_allocator;
 
-    const args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, args);
+    var args_it = try std.process.Args.Iterator.initAllocator(init.minimal.args, allocator);
+    defer args_it.deinit();
+    _ = args_it.next();
+    var args = std.ArrayList([]const u8).empty;
+    defer args.deinit(allocator);
+    while (args_it.next()) |arg| try args.append(allocator, arg);
 
     var options = zals.cli.Options{};
-    zals.cli.parse(args[1..], &options) catch |err| {
+    zals.cli.parse(args.items, &options) catch |err| {
         std.debug.print("zals: {s}\n\n{s}", .{ @errorName(err), usage });
         std.process.exit(2);
     };
@@ -80,13 +90,14 @@ pub fn main() !void {
 
     runtime_log_level = applyLogLevel(options.log_level);
     if (options.log_file) |path| {
-        log_file = try std.fs.cwd().createFile(path, .{ .truncate = true });
+        log_file = try std.Io.Dir.cwd().createFile(io, path, .{ .truncate = true });
     }
-    defer if (log_file) |f| f.close();
+    defer if (log_file) |f| f.close(io);
 
     const transport = zals.lsp.Transport.init(
-        std.fs.File.stdin(),
-        std.fs.File.stdout(),
+        io,
+        std.Io.File.stdin(),
+        std.Io.File.stdout(),
     );
     var server = try zals.lsp.Server.init(allocator, transport, options.venv);
     defer server.deinit();

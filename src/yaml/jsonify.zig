@@ -14,11 +14,11 @@ pub fn toJson(arena: Allocator, node: *const Node) !Value {
             break :blk .{ .array = arr };
         },
         .map => blk: {
-            var obj = std.json.ObjectMap.init(arena);
+            var obj: std.json.ObjectMap = .empty;
             for (node.items) |pair| {
                 const key = if (pair.key) |k| k.stringValue() orelse continue else continue;
                 const val = if (pair.val) |v| try toJson(arena, v) else Value.null;
-                try obj.put(key, val);
+                try obj.put(arena, key, val);
             }
             break :blk .{ .object = obj };
         },

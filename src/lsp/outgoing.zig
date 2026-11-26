@@ -21,7 +21,7 @@ pub fn sendResult(writer: *Writer, a: Allocator, id: Value, result: Value) !void
     try o.put("jsonrpc", json_util.str("2.0"));
     try o.put("id", id);
     try o.put("result", result);
-    try sendValue(writer, a, .{ .object = o });
+    try sendValue(writer, a, .{ .object = o.map });
 }
 
 pub fn sendError(writer: *Writer, a: Allocator, id: Value, code: i64, message: []const u8) !void {
@@ -31,8 +31,8 @@ pub fn sendError(writer: *Writer, a: Allocator, id: Value, code: i64, message: [
     var o = json_util.obj(a);
     try o.put("jsonrpc", json_util.str("2.0"));
     try o.put("id", id);
-    try o.put("error", .{ .object = err_obj });
-    try sendValue(writer, a, .{ .object = o });
+    try o.put("error", .{ .object = err_obj.map });
+    try sendValue(writer, a, .{ .object = o.map });
 }
 
 pub fn sendNotification(writer: *Writer, a: Allocator, method: []const u8, params: Value) !void {
@@ -40,21 +40,21 @@ pub fn sendNotification(writer: *Writer, a: Allocator, method: []const u8, param
     try o.put("jsonrpc", json_util.str("2.0"));
     try o.put("method", json_util.str(method));
     try o.put("params", params);
-    try sendValue(writer, a, .{ .object = o });
+    try sendValue(writer, a, .{ .object = o.map });
 }
 
 pub fn logMessage(writer: *Writer, a: Allocator, level: i64, message: []const u8) !void {
     var p = json_util.obj(a);
     try p.put("type", json_util.num(level));
     try p.put("message", json_util.str(message));
-    try sendNotification(writer, a, "window/logMessage", .{ .object = p });
+    try sendNotification(writer, a, "window/logMessage", .{ .object = p.map });
 }
 
 pub fn showMessage(writer: *Writer, a: Allocator, level: i64, message: []const u8) !void {
     var p = json_util.obj(a);
     try p.put("type", json_util.num(level));
     try p.put("message", json_util.str(message));
-    try sendNotification(writer, a, "window/showMessage", .{ .object = p });
+    try sendNotification(writer, a, "window/showMessage", .{ .object = p.map });
 }
 
 /// Send a server-to-client request. The client's response carries `id` and is
@@ -65,5 +65,5 @@ pub fn sendRequest(writer: *Writer, a: Allocator, id: []const u8, method: []cons
     try o.put("id", json_util.str(id));
     try o.put("method", json_util.str(method));
     try o.put("params", params);
-    try sendValue(writer, a, .{ .object = o });
+    try sendValue(writer, a, .{ .object = o.map });
 }

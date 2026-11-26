@@ -475,9 +475,9 @@ test "vertical slice evaluates parse issues, tasks, plays, field selectors, and 
 test "evaluator populates namespaced role, collection, play, and block context" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.makePath("ws/roles/demo/tasks");
-    try tmp.dir.writeFile(.{ .sub_path = "ws/galaxy.yml", .data = "namespace: acme\nname: web\n" });
-    try tmp.dir.writeFile(.{
+    try tmp.dir.createDirPath(std.testing.io, "ws/roles/demo/tasks");
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "ws/galaxy.yml", .data = "namespace: acme\nname: web\n" });
+    try tmp.dir.writeFile(std.testing.io, .{
         .sub_path = "ws/rule.cel",
         .data =
         \\zals.Rule{
@@ -502,7 +502,7 @@ test "evaluator populates namespaced role, collection, play, and block context" 
     defer arena.deinit();
     const a = arena.allocator();
 
-    const ws_root = try tmp.dir.realpathAlloc(a, "ws");
+    const ws_root = try tmp.dir.realPathFileAlloc(std.testing.io, "ws", a);
     const rule_path = try std.fs.path.join(a, &.{ ws_root, "rule.cel" });
     const site_path = try std.fs.path.join(a, &.{ ws_root, "site.yml" });
 

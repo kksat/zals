@@ -388,7 +388,7 @@ fn dupeOptions(a: Allocator, entries: []const RuleOptionEntry) ![]const RuleOpti
 test "builtin ruleset loads cleanly and workspace rules require permission" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.writeFile(.{
+    try tmp.dir.writeFile(std.testing.io, .{
         .sub_path = "custom.cel",
         .data =
         \\zals.Rule{
@@ -400,7 +400,7 @@ test "builtin ruleset loads cleanly and workspace rules require permission" {
         \\}
         ,
     });
-    const root = try tmp.dir.realpathAlloc(std.testing.allocator, ".");
+    const root = try tmp.dir.realPathFileAlloc(std.testing.io, ".", std.testing.allocator);
     defer std.testing.allocator.free(root);
 
     var rs_denied = try buildRuleSet(std.testing.allocator, 1, .{
@@ -425,7 +425,7 @@ test "builtin ruleset loads cleanly and workspace rules require permission" {
 test "duplicate custom rule id is rejected and invalid rule is isolated" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.writeFile(.{
+    try tmp.dir.writeFile(std.testing.io, .{
         .sub_path = "dup.cel",
         .data =
         \\zals.Rule{
@@ -437,13 +437,13 @@ test "duplicate custom rule id is rejected and invalid rule is isolated" {
         \\}
         ,
     });
-    try tmp.dir.writeFile(.{
+    try tmp.dir.writeFile(std.testing.io, .{
         .sub_path = "broken.cel",
         .data = "zals.Rule{ id: \"custom/broken\", target: \"task\", severity: \"error\", condition: ???, message: \"x\" }",
     });
-    const dup_path = try tmp.dir.realpathAlloc(std.testing.allocator, "dup.cel");
+    const dup_path = try tmp.dir.realPathFileAlloc(std.testing.io, "dup.cel", std.testing.allocator);
     defer std.testing.allocator.free(dup_path);
-    const broken_path = try tmp.dir.realpathAlloc(std.testing.allocator, "broken.cel");
+    const broken_path = try tmp.dir.realPathFileAlloc(std.testing.io, "broken.cel", std.testing.allocator);
     defer std.testing.allocator.free(broken_path);
 
     var rs = try buildRuleSet(std.testing.allocator, 1, .{

@@ -339,14 +339,14 @@ test "vars_files and include_vars targets" {
 test "key-value include_vars loads use Workspace-root fallback and skip namespaced vars" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.makePath("playbooks/vars");
-    try tmp.dir.makePath("negative");
-    try tmp.dir.writeFile(.{ .sub_path = "playbooks/vars/runtime.yml", .data = "flag: true\n" });
-    try tmp.dir.writeFile(.{ .sub_path = "playbooks/vars/release.yml", .data = "flag: false\n" });
+    try tmp.dir.createDirPath(std.testing.io, "playbooks/vars");
+    try tmp.dir.createDirPath(std.testing.io, "negative");
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "playbooks/vars/runtime.yml", .data = "flag: true\n" });
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "playbooks/vars/release.yml", .data = "flag: false\n" });
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const root = try tmp.dir.realpathAlloc(a, ".");
+    const root = try tmp.dir.realPathFileAlloc(std.testing.io, ".", a);
     const path = try std.fs.path.join(a, &.{ root, "negative", "play.yml" });
     var forest = try yaml.parse(a,
         \\- hosts: all

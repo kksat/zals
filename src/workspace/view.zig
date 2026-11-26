@@ -380,9 +380,9 @@ test "standalone Role directory-style defaults and vars retain precedence" {
         var arena = std.heap.ArenaAllocator.init(testing.allocator);
         defer arena.deinit();
         const a = arena.allocator();
-        try tmp.dir.makePath("meta");
-        try tmp.dir.writeFile(.{ .sub_path = try std.fmt.allocPrint(a, "meta/main.{s}", .{ext}), .data = "galaxy_info: {}\n" });
-        const root = try tmp.dir.realpathAlloc(a, ".");
+        try tmp.dir.createDirPath(std.testing.io, "meta");
+        try tmp.dir.writeFile(std.testing.io, .{ .sub_path = try std.fmt.allocPrint(a, "meta/main.{s}", .{ext}), .data = "galaxy_info: {}\n" });
+        const root = try tmp.dir.realPathFileAlloc(std.testing.io, ".", a);
         const default_path = try std.fmt.allocPrint(a, "{s}/defaults/main/settings.{s}", .{ root, ext });
         const vars_path = try std.fmt.allocPrint(a, "{s}/vars/main/nested/settings.{s}", .{ root, ext });
         const task_path = try std.fmt.allocPrint(a, "{s}/tasks/main.{s}", .{ root, ext });

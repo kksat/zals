@@ -28,7 +28,7 @@ pub const Fixture = struct {
         const gpa = std.testing.allocator;
         var tmp = std.testing.tmpDir(.{});
         errdefer tmp.cleanup();
-        if (workspace) try tmp.dir.makePath(".git");
+        if (workspace) try tmp.dir.createDirPath(std.testing.io, ".git");
         const arena = try gpa.create(std.heap.ArenaAllocator);
         arena.* = std.heap.ArenaAllocator.init(gpa);
         errdefer {
@@ -38,7 +38,7 @@ pub const Fixture = struct {
         return .{
             .tmp = tmp,
             .arena = arena,
-            .root = try tmp.dir.realpathAlloc(arena.allocator(), "."),
+            .root = try tmp.dir.realPathFileAlloc(std.testing.io, ".", arena.allocator()),
             .workspace = workspace,
             .index = try WorkspaceIndex.create(gpa),
             .documents = DocumentStore.init(gpa, .utf16),
@@ -68,8 +68,8 @@ pub const Fixture = struct {
 
     /// Write a file on disk, creating its directories.
     pub fn write(self: *Fixture, relative: []const u8, text: []const u8) !void {
-        if (std.fs.path.dirname(relative)) |dir| try self.tmp.dir.makePath(dir);
-        try self.tmp.dir.writeFile(.{ .sub_path = relative, .data = text });
+        if (std.fs.path.dirname(relative)) |dir| try self.tmp.dir.createDirPath(std.testing.io, dir);
+        try self.tmp.dir.writeFile(std.testing.io, .{ .sub_path = relative, .data = text });
     }
 
     /// Open a document with unsaved `text`; returns its URI.

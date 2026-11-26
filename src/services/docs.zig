@@ -73,7 +73,7 @@ pub const DocsLibrary = struct {
     ready: bool = false,
     /// Guards all maps, arena allocation, readiness, and version. Never held
     /// across a subprocess or disk I/O; cache encoding stays under the lock.
-    mutex: std.Thread.Mutex = .{},
+    mutex: @import("../sync.zig").Mutex = .{},
     /// Ansible version string used as part of the on-disk cache fingerprint.
     ansible_version: []const u8 = "",
 
@@ -668,7 +668,7 @@ test "loadMetadataDump ingests every module from one call" {
             return .{
                 .stdout = try a.dupe(u8, self.stdout),
                 .stderr = try a.dupe(u8, ""),
-                .term = .{ .Exited = self.exit },
+                .term = .{ .exited = self.exit },
             };
         }
         const vtable = exec.Runner.VTable{ .run = run, .run_with_options = runWithOptions };

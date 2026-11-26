@@ -88,7 +88,7 @@ def config():
     data = load_json(CONFIG_PATH)
     require(type(data) is dict, "config must be an object")
     for key, expected in {"schema_version": 1, "baseline_sha": BASELINE_SHA, "optimize": MODE,
-                          "zig_version": "0.15.1", "ci_python": "3.12", "seeds": SEEDS,
+                          "zig_version": "0.17.1", "ci_python": "3.12", "seeds": SEEDS,
                           "thresholds": THRESHOLDS, "workloads": WORKLOADS,
                           "baseline_build_repair": BASELINE_BUILD_REPAIR}.items():
         require(data.get(key) == expected, f"pinned config {key} changed; explicit policy review required")

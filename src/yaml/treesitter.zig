@@ -5,13 +5,12 @@
 //! the indent-based subset parser, so every consumer is backend-agnostic.
 
 const std = @import("std");
+const fsio = @import("../fsio.zig");
 const Allocator = std.mem.Allocator;
 const dom = @import("dom.zig");
 const Node = dom.Node;
 
-const c = @cImport({
-    @cInclude("tree_sitter/api.h");
-});
+const c = @import("../tree_sitter.zig");
 
 extern fn tree_sitter_yaml() *const c.TSLanguage;
 
@@ -449,16 +448,16 @@ test "audit-passing documents parse identically on every checked-in fixture" {
 }
 
 fn diffWalk(a: std.mem.Allocator, dir_path: []const u8, checked: *usize, deferred: *usize) !void {
-    var dir = std.fs.cwd().openDir(dir_path, .{ .iterate = true }) catch return;
-    defer dir.close();
+    var dir = fsio.openDir(dir_path, .{ .iterate = true }) catch return;
+    defer dir.close(fsio.get());
     var walker = try dir.walk(a);
     defer walker.deinit();
-    while (try walker.next()) |entry| {
+    while (try walker.next(fsio.get())) |entry| {
         if (entry.kind != .file) continue;
         if (!std.mem.endsWith(u8, entry.path, ".yml") and
             !std.mem.endsWith(u8, entry.path, ".yaml") and
             !std.mem.endsWith(u8, entry.path, ".j2")) continue;
-        const text = try entry.dir.readFileAlloc(a, entry.basename, 1 << 20);
+        const text = try entry.dir.readFileAlloc(fsio.get(), entry.basename, a, .limited(1 << 20));
         defer a.free(text);
 
         var sub = @import("parser.zig").parseChecked(a, text) catch |err| switch (err) {

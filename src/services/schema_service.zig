@@ -25,7 +25,7 @@ const mappings = [_]Mapping{
 
 pub const Catalog = struct {
     arena: std.heap.ArenaAllocator,
-    parsed: [mappings.len]?Value = .{null} ** mappings.len,
+    parsed: [mappings.len]?Value = @splat(null),
 
     pub fn init(allocator: Allocator) Catalog {
         return .{ .arena = std.heap.ArenaAllocator.init(allocator) };

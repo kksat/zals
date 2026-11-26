@@ -60,7 +60,7 @@ pub fn lintFile(
     const outcome = try parseCodeclimate(arena, parsed);
     if (outcome.status == .failed) return outcome;
     return switch (result.term) {
-        .Exited => |code| if (code == 0 or outcome.diagnostics.len > 0)
+        .exited => |code| if (code == 0 or outcome.diagnostics.len > 0)
             outcome
         else
             .{ .status = .{ .failed = .{ .abnormal_exit = result.term } } },
@@ -143,7 +143,7 @@ pub fn syntaxCheck(
         .message = trimmed,
     };
     return .{
-        .status = if (result.term == .Exited) .findings else failed,
+        .status = if (result.term == .exited) .findings else failed,
         .diagnostics = diags,
     };
 }

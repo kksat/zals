@@ -41,12 +41,12 @@ test "definition prefers argument specs" {
     const a = testing.allocator;
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.makePath("role/meta");
-    try tmp.dir.makePath("role/tasks");
-    try tmp.dir.writeFile(.{ .sub_path = "role/meta/argument_specs.yml", .data = "" });
-    try tmp.dir.writeFile(.{ .sub_path = "role/meta/main.yml", .data = "" });
-    try tmp.dir.writeFile(.{ .sub_path = "role/tasks/main.yml", .data = "" });
-    const root = try tmp.dir.realpathAlloc(a, ".");
+    try tmp.dir.createDirPath(std.testing.io, "role/meta");
+    try tmp.dir.createDirPath(std.testing.io, "role/tasks");
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "role/meta/argument_specs.yml", .data = "" });
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "role/meta/main.yml", .data = "" });
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "role/tasks/main.yml", .data = "" });
+    const root = try tmp.dir.realPathFileAlloc(std.testing.io, ".", a);
     defer a.free(root);
 
     const role = try std.fs.path.join(a, &.{ root, "role" });
@@ -62,9 +62,9 @@ test "definition falls back to meta then tasks" {
     const a = testing.allocator;
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.makePath("role/tasks");
-    try tmp.dir.writeFile(.{ .sub_path = "role/tasks/main.yml", .data = "" });
-    const root = try tmp.dir.realpathAlloc(a, ".");
+    try tmp.dir.createDirPath(std.testing.io, "role/tasks");
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "role/tasks/main.yml", .data = "" });
+    const root = try tmp.dir.realPathFileAlloc(std.testing.io, ".", a);
     defer a.free(root);
 
     const role = try std.fs.path.join(a, &.{ root, "role" });
@@ -80,9 +80,9 @@ test "implementation opens tasks main" {
     const a = testing.allocator;
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.makePath("role/tasks");
-    try tmp.dir.writeFile(.{ .sub_path = "role/tasks/main.yml", .data = "" });
-    const root = try tmp.dir.realpathAlloc(a, ".");
+    try tmp.dir.createDirPath(std.testing.io, "role/tasks");
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "role/tasks/main.yml", .data = "" });
+    const root = try tmp.dir.realPathFileAlloc(std.testing.io, ".", a);
     defer a.free(root);
 
     const role = try std.fs.path.join(a, &.{ root, "role" });
@@ -98,8 +98,8 @@ test "missing targets return null" {
     const a = testing.allocator;
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.makePath("role");
-    const root = try tmp.dir.realpathAlloc(a, ".");
+    try tmp.dir.createDirPath(std.testing.io, "role");
+    const root = try tmp.dir.realPathFileAlloc(std.testing.io, ".", a);
     defer a.free(root);
 
     const role = try std.fs.path.join(a, &.{ root, "role" });

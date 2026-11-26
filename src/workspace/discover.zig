@@ -8,6 +8,7 @@
 //! `ansible_collections/`, for role and collection resolution.
 
 const std = @import("std");
+const fsio = @import("../fsio.zig");
 const Allocator = std.mem.Allocator;
 const roots = @import("roots.zig");
 
@@ -61,9 +62,9 @@ pub fn belongsToWorkspace(root: []const u8, path: []const u8, marker: []const u8
     var dir_path = std.fs.path.dirname(path) orelse return false;
     while (!std.mem.eql(u8, dir_path, root)) {
         if (isExcludedDir(std.fs.path.basename(dir_path))) return false;
-        if (std.fs.cwd().openDir(dir_path, .{})) |opened| {
+        if (fsio.openDir(dir_path, .{})) |opened| {
             var dir = opened;
-            defer dir.close();
+            defer dir.close(fsio.get());
             if (exists(dir, roots.effectiveMarker(marker)) or exists(dir, "pyvenv.cfg")) return false;
         } else |_| {}
         dir_path = std.fs.path.dirname(dir_path) orelse return false;
@@ -85,8 +86,8 @@ pub fn isInstalledCollectionFile(path: []const u8) bool {
         const collection = parts.next() orelse continue;
         if (namespace.len == 0 or collection.len == 0 or parts.peek() == null) continue;
         const root_len = at + marker.len + namespace.len + 1 + collection.len;
-        var dir = std.fs.cwd().openDir(path[0..root_len], .{}) catch continue;
-        defer dir.close();
+        var dir = fsio.openDir(path[0..root_len], .{}) catch continue;
+        defer dir.close(fsio.get());
         if (exists(dir, "MANIFEST.json")) return true;
     }
     return false;
@@ -108,8 +109,8 @@ const Walker = struct {
     collection_paths: std.array_list.Managed([]const u8),
 
     fn walk(self: *Walker, path: []const u8, is_root: bool) !void {
-        var dir = std.fs.cwd().openDir(path, .{ .iterate = true }) catch return;
-        defer dir.close();
+        var dir = fsio.openDir(path, .{ .iterate = true }) catch return;
+        defer dir.close(fsio.get());
 
         if (!is_root) {
             if (exists(dir, self.marker)) return;
@@ -124,7 +125,7 @@ const Walker = struct {
         var subdirs = std.array_list.Managed([]const u8).init(self.allocator);
         defer subdirs.deinit();
         var it = dir.iterate();
-        while (it.next() catch null) |entry| {
+        while (it.next(fsio.get()) catch null) |entry| {
             switch (entry.kind) {
                 .directory => {
                     if (isExcludedDir(entry.name)) continue;
@@ -138,7 +139,7 @@ const Walker = struct {
                     // Follow symlinked files; symlinked directories could loop.
                     const file_path = try std.fs.path.join(self.allocator, &.{ path, entry.name });
                     if (!isWorkspaceFile(file_path)) continue;
-                    const st = dir.statFile(entry.name) catch continue;
+                    const st = dir.statFile(fsio.get(), entry.name, .{}) catch continue;
                     if (st.kind == .file) try self.files.append(file_path);
                 },
                 else => {},
@@ -150,14 +151,14 @@ const Walker = struct {
     }
 };
 
-fn exists(dir: std.fs.Dir, name: []const u8) bool {
-    dir.access(name, .{}) catch return false;
+fn exists(dir: std.Io.Dir, name: []const u8) bool {
+    dir.access(fsio.get(), name, .{}) catch return false;
     return true;
 }
 
-fn existsDir(dir: std.fs.Dir, name: []const u8) bool {
-    var sub = dir.openDir(name, .{}) catch return false;
-    sub.close();
+fn existsDir(dir: std.Io.Dir, name: []const u8) bool {
+    var sub = dir.openDir(fsio.get(), name, .{}) catch return false;
+    sub.close(fsio.get());
     return true;
 }
 
@@ -172,28 +173,28 @@ const Tree = struct {
 
     fn init() !Tree {
         var n: u64 = 0;
-        std.crypto.random.bytes(std.mem.asBytes(&n));
+        fsio.randomBytes(std.mem.asBytes(&n));
         const root = try std.fmt.allocPrint(testing.allocator, "/tmp/zals-discover-{x}", .{n});
-        try std.fs.cwd().makePath(root);
+        try fsio.makePath(root);
         return .{ .root = root };
     }
 
     fn deinit(self: *Tree) void {
-        std.fs.cwd().deleteTree(self.root) catch {};
+        fsio.deleteTree(self.root) catch {};
         testing.allocator.free(self.root);
     }
 
     fn touch(self: Tree, rel: []const u8) !void {
-        var dir = try std.fs.cwd().openDir(self.root, .{});
-        defer dir.close();
-        if (std.fs.path.dirname(rel)) |parent| try dir.makePath(parent);
-        try dir.writeFile(.{ .sub_path = rel, .data = "" });
+        var dir = try fsio.openDir(self.root, .{});
+        defer dir.close(fsio.get());
+        if (std.fs.path.dirname(rel)) |parent| try dir.createDirPath(fsio.get(), parent);
+        try dir.writeFile(fsio.get(), .{ .sub_path = rel, .data = "" });
     }
 
     fn mkdir(self: Tree, rel: []const u8) !void {
-        var dir = try std.fs.cwd().openDir(self.root, .{});
-        defer dir.close();
-        try dir.makePath(rel);
+        var dir = try fsio.openDir(self.root, .{});
+        defer dir.close(fsio.get());
+        try dir.createDirPath(fsio.get(), rel);
     }
 };
 
@@ -272,12 +273,12 @@ test "a custom root marker also bounds nested workspaces" {
 test "installed collection files are recognized by their manifest" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.makePath("collections/ansible_collections/acme/installed/roles/r/tasks");
-    try tmp.dir.makePath("collections/ansible_collections/acme/source/roles/r/tasks");
-    try tmp.dir.writeFile(.{ .sub_path = "collections/ansible_collections/acme/installed/MANIFEST.json", .data = "{}" });
+    try tmp.dir.createDirPath(std.testing.io, "collections/ansible_collections/acme/installed/roles/r/tasks");
+    try tmp.dir.createDirPath(std.testing.io, "collections/ansible_collections/acme/source/roles/r/tasks");
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "collections/ansible_collections/acme/installed/MANIFEST.json", .data = "{}" });
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
-    const root = try tmp.dir.realpathAlloc(arena.allocator(), ".");
+    const root = try tmp.dir.realPathFileAlloc(std.testing.io, ".", arena.allocator());
     const installed = try std.fs.path.join(arena.allocator(), &.{ root, "collections/ansible_collections/acme/installed/roles/r/tasks/main.yml" });
     const source = try std.fs.path.join(arena.allocator(), &.{ root, "collections/ansible_collections/acme/source/roles/r/tasks/main.yml" });
     try testing.expect(isInstalledCollectionFile(installed));

@@ -50,10 +50,10 @@ test "stdio navigation can follow a returned escaped file URI" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const fixture = try std.fs.cwd().realpathAlloc(a, fixture_path);
+    const fixture = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, fixture_path, a);
     var home_dir = std.testing.tmpDir(.{});
     defer home_dir.cleanup();
-    const home = try home_dir.dir.realpathAlloc(a, ".");
+    const home = try home_dir.dir.realPathFileAlloc(std.testing.io, ".", a);
     const roles = try std.fs.path.join(a, &.{ fixture, "escaped %20#roles" });
     var client = try startClient(a, fixture, home, roles, "collection-path");
     defer client.deinit();
@@ -95,10 +95,10 @@ fn checkNavigation(case: NavigationCase) !void {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const fixture = try std.fs.cwd().realpathAlloc(a, fixture_path);
+    const fixture = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, fixture_path, a);
     var home_dir = std.testing.tmpDir(.{});
     defer home_dir.cleanup();
-    const home = try home_dir.dir.realpathAlloc(a, ".");
+    const home = try home_dir.dir.realPathFileAlloc(std.testing.io, ".", a);
     const roles = if (case.absolute_paths) try std.fs.path.join(a, &.{ fixture, case.roles_path }) else case.roles_path;
     const collections = if (case.absolute_paths) try std.fs.path.join(a, &.{ fixture, "collection-path" }) else "collection-path";
     var client = try startClient(a, fixture, home, roles, collections);
@@ -129,26 +129,26 @@ fn checkNavigation(case: NavigationCase) !void {
 // Only process setup is local: reuse the stdio framing, timeout, JSON-RPC error
 // handling, and index barrier from the shared client without changing its API.
 fn startClient(a: Allocator, fixture: []const u8, home: []const u8, roles: []const u8, collections: []const u8) !lsp.Client {
-    const binary = try std.fs.cwd().realpathAlloc(a, "zig-out/bin/zals");
-    var env = try std.process.getEnvMap(a);
+    const binary = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, "zig-out/bin/zals", a);
+    var env = try std.process.Environ.createMap(std.testing.environ, a);
     defer env.deinit();
     try env.put("ANSIBLE_ROLES_PATH", roles);
     try env.put("ANSIBLE_COLLECTIONS_PATH", collections);
-    env.remove("ANSIBLE_COLLECTIONS_PATHS");
+    _ = env.orderedRemove("ANSIBLE_COLLECTIONS_PATHS");
     try env.put("ANSIBLE_CONFIG", try std.fs.path.join(a, &.{ fixture, "workspace/ansible.cfg" }));
     try env.put("HOME", home);
     try env.put("XDG_CACHE_HOME", try std.fs.path.join(a, &.{ home, ".cache" }));
-    env.remove("VIRTUAL_ENV");
-    var child = std.process.Child.init(&.{ binary, "--stdio", "--log-level", "error" }, a);
-    child.env_map = &env;
+    _ = env.orderedRemove("VIRTUAL_ENV");
     // Relative environment paths are interpreted by filesystem lookups from
     // the server's working directory, not the referencing file's directory.
-    child.cwd = fixture;
-    child.stdin_behavior = .Pipe;
-    child.stdout_behavior = .Pipe;
-    child.stderr_behavior = .Inherit;
-    try child.spawn();
-    child.env_map = null;
+    const child = try std.process.spawn(std.testing.io, .{
+        .argv = &.{ binary, "--stdio", "--log-level", "error" },
+        .environ_map = &env,
+        .cwd = .{ .path = fixture },
+        .stdin = .pipe,
+        .stdout = .pipe,
+        .stderr = .inherit,
+    });
     return .{ .allocator = a, .child = child };
 }
 
@@ -179,8 +179,8 @@ fn openDocument(client: *lsp.Client, resolver: anchor.Resolver, path: []const u8
 fn expectFileStart(a: Allocator, fixture: []const u8, target: []const u8, uri_path: []const u8, result: Value) !void {
     const expected_path = try std.fs.path.join(a, &.{ fixture, target });
     // The written oracle names an existing file, never a fabricated fallback.
-    const file = try std.fs.openFileAbsolute(expected_path, .{});
-    file.close();
+    const file = try std.Io.Dir.openFileAbsolute(std.testing.io, expected_path, .{});
+    file.close(std.testing.io);
     // Escaped suffixes are written explicitly in each case, independently of
     // production URI conversion. Only the checkout's absolute prefix varies.
     const expected_uri = try std.fmt.allocPrint(a, "file://{s}/{s}", .{ fixture, uri_path });
@@ -191,8 +191,8 @@ fn expectFileStart(a: Allocator, fixture: []const u8, target: []const u8, uri_pa
     try std.testing.expect(parsed.query == null and parsed.fragment == null);
     const returned_path = try parsed.path.toRawMaybeAlloc(a);
     try std.testing.expectEqualStrings(expected_path, returned_path);
-    const returned_file = try std.fs.openFileAbsolute(returned_path, .{});
-    returned_file.close();
+    const returned_file = try std.Io.Dir.openFileAbsolute(std.testing.io, returned_path, .{});
+    returned_file.close(std.testing.io);
     try std.testing.expectEqualDeep(anchor.Range{
         .start = .{ .line = 0, .character = 0 },
         .end = .{ .line = 0, .character = 0 },

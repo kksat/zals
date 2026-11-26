@@ -23,43 +23,41 @@ pub const Client = struct {
     }
 
     pub fn startWithOptions(a: Allocator, binary: []const u8, fixture: []const u8, deps: []const u8, home: []const u8, options: StartOptions) !Client {
-        var env = try std.process.getEnvMap(a);
+        var env = try std.process.Environ.createMap(std.testing.environ, a);
         defer env.deinit();
         const collection_paths = options.collections_path orelse try std.fmt.allocPrint(a, "{s}{c}{s}", .{ fixture, std.fs.path.delimiter, deps });
-        if (collection_paths.len > 0) try env.put("ANSIBLE_COLLECTIONS_PATH", collection_paths) else env.remove("ANSIBLE_COLLECTIONS_PATH");
-        env.remove("ANSIBLE_COLLECTIONS_PATHS");
+        if (collection_paths.len > 0) try env.put("ANSIBLE_COLLECTIONS_PATH", collection_paths) else _ = env.orderedRemove("ANSIBLE_COLLECTIONS_PATH");
+        _ = env.orderedRemove("ANSIBLE_COLLECTIONS_PATHS");
         try env.put("ANSIBLE_ROLES_PATH", try std.fs.path.join(a, &.{ fixture, "roles" }));
         if (options.use_fixture_config) {
             try env.put("ANSIBLE_CONFIG", try std.fs.path.join(a, &.{ fixture, "ansible.cfg" }));
-        } else env.remove("ANSIBLE_CONFIG");
+        } else _ = env.orderedRemove("ANSIBLE_CONFIG");
         try env.put("HOME", home);
         // Isolate the docs cache too, even if the test runner has XDG configured.
         try env.put("XDG_CACHE_HOME", try std.fs.path.join(a, &.{ home, ".cache" }));
-        env.remove("VIRTUAL_ENV");
+        _ = env.orderedRemove("VIRTUAL_ENV");
 
         const argv: []const []const u8 = if (options.venv_override) |venv|
             &.{ binary, "--stdio", "--log-level", "error", "--venv", venv }
         else
             &.{ binary, "--stdio", "--log-level", "error" };
-        var child = std.process.Child.init(argv, a);
-        child.env_map = &env;
-        child.stdin_behavior = .Pipe;
-        child.stdout_behavior = .Pipe;
-        // Inherit diagnostics instead of risking a full, unread stderr pipe.
-        child.stderr_behavior = .Inherit;
-        try child.spawn();
-        child.env_map = null;
+        const child = try std.process.spawn(std.testing.io, .{
+            .argv = argv,
+            .environ_map = &env,
+            .stdin = .pipe,
+            .stdout = .pipe,
+            // Inherit diagnostics instead of risking a full, unread stderr pipe.
+            .stderr = .inherit,
+        });
         return .{ .allocator = a, .child = child };
     }
 
     pub fn deinit(self: *Client) void {
         if (self.child.stdin) |file| {
-            file.close();
+            file.close(std.testing.io);
             self.child.stdin = null;
         }
-        _ = self.child.kill() catch {
-            _ = self.child.wait() catch {};
-        };
+        self.child.kill(std.testing.io);
     }
 
     pub fn request(self: *Client, method: []const u8, params: anytype) !Value {
@@ -116,11 +114,11 @@ pub const Client = struct {
     /// workspace smoke test. Simply waiting for a notification can deadlock
     /// while the server is blocked reading stdin.
     pub fn waitForIndex(self: *Client) !void {
-        const began = std.time.milliTimestamp();
+        const began = std.Io.Timestamp.now(std.testing.io, .real).toMilliseconds();
         while (!self.index_ready) {
-            if (std.time.milliTimestamp() - began > 20_000) return error.WorkspaceIndexTimeout;
+            if (std.Io.Timestamp.now(std.testing.io, .real).toMilliseconds() - began > 20_000) return error.WorkspaceIndexTimeout;
             _ = try self.request("workspace/symbol", .{ .query = "__zals_e2e_wait__" });
-            if (!self.index_ready) std.Thread.sleep(10 * std.time.ns_per_ms);
+            if (!self.index_ready) sleep(10 * std.time.ns_per_ms);
         }
     }
 
@@ -128,8 +126,8 @@ pub const Client = struct {
         const body = try std.json.Stringify.valueAlloc(self.allocator, payload, .{});
         const header = try std.fmt.allocPrint(self.allocator, "Content-Length: {d}\r\n\r\n", .{body.len});
         const pipe = self.child.stdin orelse return error.ServerClosed;
-        try pipe.writeAll(header);
-        try pipe.writeAll(body);
+        try pipe.writeStreamingAll(std.testing.io, header);
+        try pipe.writeStreamingAll(std.testing.io, body);
     }
 
     fn readMessage(self: *Client) !Value {
@@ -159,15 +157,22 @@ pub const Client = struct {
     }
 };
 
-fn readExact(file: std.fs.File, buffer: []u8) !void {
+fn readExact(file: std.Io.File, buffer: []u8) !void {
     var offset: usize = 0;
     while (offset < buffer.len) {
         var ready = [_]std.posix.pollfd{.{ .fd = file.handle, .events = std.posix.POLL.IN, .revents = 0 }};
         if (try std.posix.poll(&ready, 20_000) == 0) return error.ServerResponseTimeout;
-        const count = try file.read(buffer[offset..]);
+        const count = file.readStreaming(std.testing.io, &.{buffer[offset..]}) catch |err| switch (err) {
+            error.EndOfStream => return error.ServerClosed,
+            else => return err,
+        };
         if (count == 0) return error.ServerClosed;
         offset += count;
     }
+}
+
+fn sleep(ns: u64) void {
+    std.testing.io.sleep(.fromNanoseconds(ns), .awake) catch {};
 }
 
 pub fn field(value: Value, name: []const u8) ?Value {
