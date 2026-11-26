@@ -1,0 +1,57 @@
+# Helix configuration for Ansible Language Server (zals)
+#
+# Usage:
+# Copy these contents into ~/.config/helix/languages.toml (global)
+# or <workspace>/.helix/languages.toml (project-local).
+
+[language-server.zals]
+command = "zals"
+args = ["--stdio"]
+
+[language-server.zals.config.ansible]
+validation.enabled = true
+validation.lint.enabled = true
+validation.lint.path = "ansible-lint"
+completion.provideRedirectModules = true
+completion.provideDisabledModules = true
+
+[[language]]
+name = "ansible"
+scope = "source.ansible"
+injection-regex = "ansible"
+file-types = [
+  "playbook.yml",
+  "playbook.yaml",
+  "site.yml",
+  "site.yaml",
+  { glob = "**/playbooks/*.yml" },
+  { glob = "**/playbooks/*.yaml" },
+  { glob = "**/roles/*/tasks/*.yml" },
+  { glob = "**/roles/*/tasks/*.yaml" },
+  { glob = "**/roles/*/handlers/*.yml" },
+  { glob = "**/roles/*/handlers/*.yaml" },
+  { glob = "**/roles/*/defaults/*.yml" },
+  { glob = "**/roles/*/defaults/*.yaml" },
+  { glob = "**/roles/*/vars/*.yml" },
+  { glob = "**/roles/*/vars/*.yaml" },
+  { glob = "**/roles/*/meta/*.yml" },
+  { glob = "**/roles/*/meta/*.yaml" },
+  { glob = "**/tasks/*.yml" },
+  { glob = "**/tasks/*.yaml" },
+  { glob = "**/handlers/*.yml" },
+  { glob = "**/handlers/*.yaml" },
+  { glob = "**/defaults/*.yml" },
+  { glob = "**/defaults/*.yaml" },
+  { glob = "**/vars/*.yml" },
+  { glob = "**/vars/*.yaml" },
+  { glob = "**/meta/*.yml" },
+  { glob = "**/meta/*.yaml" },
+  { glob = "**/molecule/*/*.yml" },
+  { glob = "**/molecule/*/*.yaml" },
+  { glob = "*.ansible.yml" },
+  { glob = "*.ansible.yaml" },
+]
+roots = ["ansible.cfg", ".git", "requirements.yml", "galaxy.yml"]
+language-servers = [ "zals" ]
+indent = { tab-width = 2, unit = "  " }
+comment-token = "#"

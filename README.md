@@ -194,6 +194,11 @@ See the [architecture](docs/DESIGN.md) and
 [native Ansible AST and CEL diagnostics PRDs](docs/prd/README.md) record proposed
 feature requirements and acceptance criteria, not shipped functionality.
 
+### Editor Integrations
+
+* **Helix**: See [`docs/editors/helix.md`](docs/editors/helix.md) or [`editors/helix`](editors/helix/) for `languages.toml` configuration.
+
+
 ## Releasing
 
 Releases are driven by [release-please](https://github.com/googleapis/release-please)
