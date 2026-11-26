@@ -29,7 +29,7 @@ helper digest is pinned in config and the same helper runs for both endpoints.
 ## Run the complete live suite
 
 Use separate clean checkouts, one at the fixed baseline SHA and one at the
-current revision. Install Zig 0.15.1 and Python 3.12 (CI's interpreter version).
+current revision. Install Zig 0.17.1 and Python 3.12 (CI's interpreter version).
 Local runs record their actual Python version; compare endpoints within one
 run, not results from different hosts/interpreters.
 

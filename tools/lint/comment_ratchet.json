@@ -2,7 +2,7 @@
   "files": {
     ".githooks/commit-msg": 2,
     ".githooks/pre-commit": 1,
-    "Makefile": 13,
+    "Makefile": 6,
     "build.zig": 4,
     "editors/vscode/test/manifest.test.ts": 1,
     "python/src/zals/_run.py": 2,

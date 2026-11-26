@@ -202,7 +202,7 @@ See [ADR-0043](adr/0043-custom-readiness-without-refresh.md).
 
 ## 11. Build and platforms
 
-- Zig **0.15.1** (pinned via `build.zig.zon`).
+- Zig **0.17.1** (pinned via `build.zig.zon`).
 - Linux and macOS first; Windows later.
 - Static binaries where feasible.
 - Schemas are materialized into `vendor/schemas/` at build time.
