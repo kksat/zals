@@ -63,6 +63,8 @@ def candidate_files():
             rel = path.relative_to(ROOT).as_posix()
             if any(rel.startswith(excluded) for excluded in EXCLUDED_DIRS):
                 continue
+            if "node_modules" in rel.split("/"):
+                continue
             if path.suffix in suffixes:
                 files.append((rel, path.suffix))
     for rel, suffix in sorted(EXPLICIT_FILES.items()):
