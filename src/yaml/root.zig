@@ -12,6 +12,7 @@ pub const collections = @import("collections.zig");
 pub const options = @import("options.zig");
 pub const jsonify = @import("jsonify.zig");
 pub const block_scalar = @import("block_scalar.zig");
+pub const python_json = @import("python_json.zig");
 pub const keyword_docs = @import("keyword_docs.zig");
 pub const parser = @import("parser.zig");
 pub const treesitter = @import("treesitter.zig");

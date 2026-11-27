@@ -12,6 +12,7 @@ pub const Options = struct {
     /// `--venv <path>`: the virtual environment whose collections are
     /// searched. Overrides `ansible.python.venvPath`.
     venv: ?[]const u8 = null,
+    yaml_lower: ?[]const u8 = null,
 };
 
 pub const ParseError = error{
@@ -39,6 +40,10 @@ pub fn parse(args: []const []const u8, options: *Options) ParseError!void {
             i += 1;
             if (i >= args.len) return error.MissingValue;
             options.venv = args[i];
+        } else if (std.mem.eql(u8, arg, "--yaml-lower")) {
+            i += 1;
+            if (i >= args.len) return error.MissingValue;
+            options.yaml_lower = args[i];
         } else if (std.mem.eql(u8, arg, "--log-level")) {
             i += 1;
             if (i >= args.len) return error.MissingValue;
