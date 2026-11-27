@@ -1,5 +1,66 @@
 # Changelog
 
+## [1.0.0](https://github.com/kksat/zals/compare/v0.3.1...v1.0.0) (2026-11-27)
+
+
+### ⚠ BREAKING CHANGES
+
+* port to Zig 0.17.1
+
+### Features
+
+* **ast:** add recovered Ansible AST and tolerant YAML parser ([d3583e8](https://github.com/kksat/zals/commit/d3583e8e3a1ad68db6573a7be92b2c584993ee5b))
+* **ast:** lower vars, debugger, connection, and collections value kinds ([b35e9dc](https://github.com/kksat/zals/commit/b35e9dc2a8a9d33ab74f0479ed86ce2ba7cda845))
+* **ast:** record play/block context, option defaults, and nested template flags ([801b33c](https://github.com/kksat/zals/commit/801b33c85e8fb99dee9cc2a80be9116887a15662))
+* **cel:** add argument_spec targets for meta/argument_specs.yml ([deb77cc](https://github.com/kksat/zals/commit/deb77cc7f3e90fdabf5d5ee76e8d5ce265c30751))
+* **cel:** add builtin structural and value hygiene rules ([3a54da1](https://github.com/kksat/zals/commit/3a54da17f30a726df087e4060b6dec7c9794476d))
+* **cel:** add cross-file ansible-docsmith argument-specs rules ([dd4482f](https://github.com/kksat/zals/commit/dd4482f7dcac573fab29bf8f2b1c4213f59c57b1))
+* **cel:** add typed CEL rule loader and evaluator ([826c827](https://github.com/kksat/zals/commit/826c8274760e278092ef68cada7ed19c6520a0a5))
+* **cel:** bound rule runs with a step budget and engine cancellation ([b459017](https://github.com/kksat/zals/commit/b4590176e6812c8050ec37d89d1203323e06b63d))
+* **cel:** populate namespaced context (role, collection, play, block) ([c6c20c3](https://github.com/kksat/zals/commit/c6c20c33f166c1ba261ce890bb0fcc5de9702325))
+* **cel:** port ansible-docsmith argument-specs checks as builtin rules ([265a9b4](https://github.com/kksat/zals/commit/265a9b41305856fe3ca21a1601bded91116736b1))
+* **cel:** port complete approved builtin rule catalog and environment schema ([235bef5](https://github.com/kksat/zals/commit/235bef5cc2c4fe720054195ef815c102ae604d52))
+* **cel:** use native node spans for rule-file diagnostic ranges ([64ce344](https://github.com/kksat/zals/commit/64ce34483128e22421dd17cc0f0b7ebcda98fdc9))
+* **cli:** add --yaml-lower to print a document's JSON lowering ([338c3b2](https://github.com/kksat/zals/commit/338c3b282d1dc4b25df1a944e4d8c793c7b9c32c))
+* **diagnostics:** integrate native workspace-wide CEL diagnostics over LSP ([973d8d5](https://github.com/kksat/zals/commit/973d8d518cd275295217eb17feca9fce4a90e23b))
+* **docs:** bootstrap all module docs from one ansible-doc --metadata-dump ([6d8e9a4](https://github.com/kksat/zals/commit/6d8e9a48aea62caf882d1c2075742c66dcd94e97))
+* **workspace:** add generation counters to index, documents, and session ([fc41737](https://github.com/kksat/zals/commit/fc417375a4ff44f438b38b09f6e50442c265ffe6))
+* **yaml:** lower anchors, tags, timestamps, and exotic keys like ansible-core ([8b3c235](https://github.com/kksat/zals/commit/8b3c23523826927106e319bb317ca3819ef834a7))
+* **yaml:** parse block-style YAML through an audited subset fast path ([b4e7df0](https://github.com/kksat/zals/commit/b4e7df065765dcdd9de4de3b374f4da028d6d050))
+
+
+### Bug Fixes
+
+* **build:** clean the zig-pkg local package cache ([d9bce97](https://github.com/kksat/zals/commit/d9bce971c9e4ba1e364bc82a12e036478ce0ee07))
+* **docs:** gate cache completeness on success and strengthen fingerprint ([bef82e8](https://github.com/kksat/zals/commit/bef82e8a8c24d0ffb152e4969eeb030ebf0c6d88))
+* **docs:** guard readiness write, parse outside lock, and commit atomically ([be7589a](https://github.com/kksat/zals/commit/be7589a17c0fd3d69884b94406a2ad09ccef5efc))
+* **docs:** restore streaming JSON parity and eliminate arena/scratch waste ([a1f1614](https://github.com/kksat/zals/commit/a1f16149de9f4520b226c196073cef50393a1f08))
+* **fs:** preserve per-call-site read size caps in paths.readFile ([95a1cf3](https://github.com/kksat/zals/commit/95a1cf3992ac6343baaeb1bca23f416de96ca853))
+* **index:** preserve YAML semantics in runtime.yml route scanner ([b961b1d](https://github.com/kksat/zals/commit/b961b1db422b60b53496ae9e3fce9c5f6e0caacd))
+* **lint:** exclude nested node_modules from the comment ratchet ([1a977e7](https://github.com/kksat/zals/commit/1a977e729864c149e0acc491919c74387e014f06))
+* **memory:** use C ABI and restrict malloc_trim to GNU libc ([8877e47](https://github.com/kksat/zals/commit/8877e47af32388f8280e6bb0f4083d7ccb0051f2))
+* **release:** publish PyPI and Homebrew automatically ([908706e](https://github.com/kksat/zals/commit/908706e3b4f9d5e0106aefb49eab5b9924378d7f))
+* **yaml:** end subset block scalars at dedented sequence items ([e37ad2c](https://github.com/kksat/zals/commit/e37ad2c44d1905d48bdf240c6fdca338565d1f37))
+* **yaml:** lower quoted and block scalars as strings for schema validation ([c71fa9a](https://github.com/kksat/zals/commit/c71fa9a4c5b09344f815ae21ec8b032c4d8a6498))
+* **yaml:** only open comments on whitespace-preceded hash ([a0404d9](https://github.com/kksat/zals/commit/a0404d96ec033a4d2c933f96b78dbeaff8022660))
+* **yaml:** render block scalars and fold multi-line scalars like PyYAML ([0f1b447](https://github.com/kksat/zals/commit/0f1b447463a701048771649723f392c1521626e1))
+* **yaml:** span the item for an empty sequence-item scalar ([2858303](https://github.com/kksat/zals/commit/2858303f748a4481f270ca8b82700e756789ac27))
+
+
+### Performance Improvements
+
+* **docs:** skip the metadata dump when the cache is complete ([30dac9c](https://github.com/kksat/zals/commit/30dac9cdb835599bd69ba364f20783af306c47d9))
+* **docs:** stream ansible-doc JSON directly into the docs arena ([32a1215](https://github.com/kksat/zals/commit/32a1215231c0c01f0a58c62edf23a34fe4043c47))
+* **index:** scan runtime.yml routes without a parse tree ([4efc545](https://github.com/kksat/zals/commit/4efc5454a2060e8ed5be41049a657d475f8c49d6))
+* **lsp:** release freed heap pages after bootstrap and scans ([485cb9b](https://github.com/kksat/zals/commit/485cb9b62870a70f199626214b2773d64a3db011))
+* **lsp:** wake every 5 ms while background work is in flight ([83300d6](https://github.com/kksat/zals/commit/83300d6dc385839afb8a4f73a5900464c173f95e))
+* **queries:** cache navigation derivations across requests ([1c3c16c](https://github.com/kksat/zals/commit/1c3c16c1734e6ffa1c902e0d8c8da435c84678d4))
+
+
+### Build System
+
+* port to Zig 0.17.1 ([789aeac](https://github.com/kksat/zals/commit/789aeac6fbe49ac234f3772d9699a4c20d8c9d1d))
+
 ## [0.3.1](https://github.com/kksat/zals/compare/v0.3.0...v0.3.1) (2026-11-05)
 
 
