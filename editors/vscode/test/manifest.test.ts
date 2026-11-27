@@ -89,3 +89,16 @@ test("manifest contributes language and grammar", () => {
   assert.equal(grammars[0].language, "ansible");
   assert.equal(grammars[0].scopeName, "source.ansible");
 });
+
+test("manifest attaches role templates for Jinja navigation", () => {
+  const patterns = pkg.contributes?.languages?.[0]?.filenamePatterns;
+  assert.ok(patterns, "languages[0].filenamePatterns should exist");
+  assert.ok(
+    patterns.includes("**/roles/**/templates/**/*.j2"),
+    "role template .j2 files must map to the ansible language so zals attaches",
+  );
+  assert.ok(
+    !patterns.some((p: string) => p.endsWith(".j2") && !p.includes("/roles/")),
+    "no .j2 pattern may attach templates outside roles",
+  );
+});

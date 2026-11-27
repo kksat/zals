@@ -156,8 +156,10 @@ Use the **Outline** view to navigate the current file.
 zals recognizes common playbook and role paths, including tasks, handlers,
 defaults, vars, and metadata. It also supports Ansible metadata files such as
 `galaxy.yml`, `requirements.yml`, and `execution-environment.yml` with bundled
-schema validation. For other filenames, select **Ansible** as the language mode
-or add a targeted `files.associations` entry in VS Code settings.
+schema validation. Jinja templates under `roles/**/templates/` (`.j2`) are
+attached too, so variable navigation and hover work inside role templates.
+For other filenames, select **Ansible** as the language mode or add a targeted
+`files.associations` entry in VS Code settings.
 
 Open **Settings** and search for `@ext:kksat.zals` to adjust completion and
 validation. Common options:
