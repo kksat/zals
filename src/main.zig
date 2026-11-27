@@ -13,6 +13,7 @@ const usage =
     \\  --log-level <level>  error | warn | info | debug
     \\  --venv <path>        Virtual environment whose collections are searched
     \\                       (default: .venv, or ansible.python.venvPath)
+    \\  --yaml-lower <path>  Parse YAML, print its JSON lowering, and exit
     \\  --version            Print version and exit
     \\  -h, --help           Print this help and exit
     \\
@@ -87,6 +88,10 @@ pub fn main(init: std.process.Init) !void {
         std.debug.print("{s}", .{usage});
         return;
     }
+    if (options.yaml_lower) |path| {
+        try runYamlLower(allocator, io, path);
+        return;
+    }
 
     runtime_log_level = applyLogLevel(options.log_level);
     if (options.log_file) |path| {
@@ -102,4 +107,20 @@ pub fn main(init: std.process.Init) !void {
     var server = try zals.lsp.Server.init(allocator, transport, options.venv);
     defer server.deinit();
     try server.run();
+}
+
+fn runYamlLower(allocator: std.mem.Allocator, io: std.Io, path: []const u8) !void {
+    const text = try zals.fsio.readFileAlloc(allocator, path, 1 << 20);
+    defer allocator.free(text);
+    var forest = try zals.yaml.parse(allocator, text);
+    defer forest.deinit();
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const value = if (forest.roots.len > 0)
+        try zals.yaml.jsonify.toJson(arena.allocator(), forest.roots[0])
+    else
+        std.json.Value.null;
+    const out = try zals.yaml.python_json.render(arena.allocator(), value);
+    try std.Io.File.stdout().writeStreamingAll(io, out);
+    try std.Io.File.stdout().writeStreamingAll(io, "\n");
 }
