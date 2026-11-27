@@ -1,0 +1,24 @@
+str_tag: !!str 5
+str_tag_quoted: !!str "5"
+int_tag: !!int "7"
+int_tag_hex: !!int 0x1f
+float_tag: !!float "2.5"
+float_tag_int_text: !!float 1
+bool_tag: !!bool yes
+bool_tag_upper: !!bool YES
+null_tag: !!null ''
+timestamp_tag: !!timestamp 2024-1-1
+unsafe_tag: !unsafe foo
+binary_tag: !!binary aGVsbG8=
+vault_tag: !vault |
+  $ANSIBLE_VAULT;1.1;AES
+  abc
+map_tag: !!map
+  a: 1
+seq_tag: !!seq
+  - 1
+  - 2
+omap_tag: !!omap
+  - a: 1
+  - b: 2
+tag_on_empty_value: !!str

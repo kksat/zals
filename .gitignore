@@ -17,6 +17,7 @@ zig-pkg/
 
 # Python build artifacts
 __pycache__/
+test/parity/.venv/
 *.py[cod]
 python/build/
 python/dist/

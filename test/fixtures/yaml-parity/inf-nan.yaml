@@ -1,0 +1,5 @@
+pos_inf: .inf
+neg_inf: -.inf
+nan: .nan
+nan_mixed: .NaN
+quoted_inf: ".inf"

@@ -1,0 +1,11 @@
+- |
+  literal in seq
+- >
+  folded in seq
+- |- 
+  stripped
+- |+
+  kept
+
+
+- after

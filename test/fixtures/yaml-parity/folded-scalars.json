@@ -1,0 +1,1 @@
+{"simple": "one two three\n", "one_blank": "para one\npara two\n", "two_blanks": "para one\n\npara two\n", "more_indented": "para\n more indented\nback\n", "blank_then_indented": "a\n\n ind\nb\n", "strip": "a\nb", "keep": "a\n\n", "keep_mid_blank": "a\nb\n", "trailing_spaces_line": "a   b\n", "ws_line": "a\n \nb\n"}

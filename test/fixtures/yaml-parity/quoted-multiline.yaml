@@ -1,0 +1,20 @@
+double_fold: "line one
+  line two"
+double_blank: "line one
+
+  line two"
+double_trailing_spaces: "a  
+  b"
+double_leading_spaces: "  a
+  b"
+single_fold: 'line one
+  line two'
+single_blank: 'line one
+
+  line two'
+double_escaped_join: "a\
+  b"
+double_escape_then_fold: "a\nb
+  c"
+single_quote_escape_multiline: 'it''s
+  here'

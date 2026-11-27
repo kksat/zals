@@ -1,0 +1,5 @@
+# Frozen Python environment for the ansible-core YAML parity harness
+# (ADR-0053). PyYAML is pinned alongside ansible-core because it implements
+# the YAML 1.1 resolution the comparison asserts against.
+ansible-core==2.21.6
+PyYAML==6.0.4
