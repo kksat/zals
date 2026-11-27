@@ -225,6 +225,10 @@ fn parseSeqItem(p: *Parser) anyerror!*Node {
     if (keyColonPos(line.body) != null) {
         return parseMapStartingAt(p, line, contentIndent(line));
     }
+    if (line.body.len > 0 and (line.body[0] == '|' or line.body[0] == '>')) {
+        if (p.audit) auditBlockScalarHeader(line.body, p);
+        return try parseBlockScalar(p, line.body_start, line.body, line.indent);
+    }
     return try parseScalarItem(p, line);
 }
 
@@ -326,21 +330,11 @@ fn emptyScalar(p: *Parser, at: usize) !*Node {
 }
 
 fn parseBlockScalar(p: *Parser, start: usize, header: []const u8, parent_indent: usize) !*Node {
-    const folded = header.len > 0 and header[0] == '>';
-    const strip = std.mem.indexOfScalar(u8, header, '-') != null;
-    const keep = std.mem.indexOfScalar(u8, header, '+') != null;
-    var buf = std.array_list.Managed(u8).init(p.arena);
-    while (p.peek()) |line| {
-        if (line.indent <= parent_indent) break;
-        if (buf.items.len > 0) try buf.append(if (folded) ' ' else '\n');
-        try buf.appendSlice(p.text[line.start..line.end]);
-        p.bump();
-    }
-    // Clip chomping keeps a single trailing newline; `-` strips it, `+` keeps all.
-    if (!strip) try buf.append('\n');
-    if (keep) try buf.append('\n');
+    _ = header;
+    const rendered = try @import("block_scalar.zig").render(p.arena, p.text, start, parent_indent);
+    while (p.i < p.lines.len and p.lines[p.i].start < rendered.content_end) p.i += 1;
     const n = try p.allocNode(.scalar, start, contentEnd(p));
-    n.value = try buf.toOwnedSlice();
+    n.value = rendered.value;
     n.style = .block;
     return n;
 }
