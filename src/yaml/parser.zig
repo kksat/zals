@@ -215,8 +215,11 @@ fn parseSeqItem(p: *Parser) anyerror!*Node {
     const line = p.peek() orelse return error.UnexpectedEof;
     p.bump();
     if (line.body.len == 0) {
-        const child = try parseNode(p, line.indent + 1) orelse
-            try p.allocNode(.scalar, line.end, line.end);
+        const child = try parseNode(p, line.indent + 1) orelse blk: {
+            const empty = try emptyScalar(p, line.start);
+            empty.end = line.end;
+            break :blk empty;
+        };
         return child;
     }
     if (keyColonPos(line.body) != null) {
