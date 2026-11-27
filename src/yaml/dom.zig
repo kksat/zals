@@ -10,6 +10,8 @@ const Allocator = std.mem.Allocator;
 
 pub const Kind = enum { scalar, map, seq, pair, alias };
 
+pub const ScalarStyle = enum { plain, quoted, block };
+
 pub const Node = struct {
     kind: Kind,
     /// Inclusive start byte offset.
@@ -19,6 +21,7 @@ pub const Node = struct {
     parent: ?*Node = null,
     /// Scalar value (unquoted, unescaped) or alias target name.
     value: ?[]const u8 = null,
+    style: ScalarStyle = .plain,
     /// Map: pairs. Seq: items.
     items: []*Node = &.{},
     /// Pair key.
