@@ -37,7 +37,7 @@ pub fn parse(allocator: Allocator, text: []const u8) !dom.Forest {
     while (i < n) : (i += 1) {
         const child = c.ts_node_named_child(root, i);
         if (isType(child, "document")) {
-            if (try convert(a, text, child)) |node| {
+            if (try convert(a, text, child, 0)) |node| {
                 try roots.append(a, node);
                 // The document range includes markers/directives that its
                 // lowered content root does not necessarily contain.
@@ -70,45 +70,55 @@ fn end(node: c.TSNode) usize {
     return c.ts_node_end_byte(node);
 }
 
+/// Convert the first content child of a wrapper node (`document`, `block_node`,
+/// `flow_node`, `block_sequence_item`), capturing any anchor or tag.
+fn convertChild(a: Allocator, text: []const u8, node: c.TSNode, parent_col: usize) anyerror!?*Node {
+    const n = c.ts_node_named_child_count(node);
+    var out: ?*Node = null;
+    var i: u32 = 0;
+    while (i < n) : (i += 1) {
+        const ch = c.ts_node_named_child(node, i);
+        const ty = typeName(ch);
+        if (isMeta(ty)) continue;
+        if (out == null) out = try convert(a, text, ch, parent_col);
+    }
+    if (out == null) {
+        const empty = try a.create(Node);
+        empty.* = .{ .kind = .scalar, .start = start(node), .end = end(node), .value = "" };
+        out = empty;
+    }
+    return out;
+}
+
 fn isMeta(ty: []const u8) bool {
     return std.mem.eql(u8, ty, "comment") or
         std.mem.eql(u8, ty, "anchor") or
         std.mem.eql(u8, ty, "tag");
 }
 
-/// Convert the first content child of a wrapper node (`document`, `block_node`,
-/// `flow_node`, `block_sequence_item`).
-fn convertChild(a: Allocator, text: []const u8, node: c.TSNode) !?*Node {
-    const n = c.ts_node_named_child_count(node);
-    var i: u32 = 0;
-    while (i < n) : (i += 1) {
-        const ch = c.ts_node_named_child(node, i);
-        if (isMeta(typeName(ch))) continue;
-        if (try convert(a, text, ch)) |out| return out;
-    }
-    // Empty document / null value: an empty scalar spanning the node.
-    const out = try a.create(Node);
-    out.* = .{ .kind = .scalar, .start = start(node), .end = end(node), .value = "" };
-    return out;
+fn columnOf(text: []const u8, byte: usize) usize {
+    var i = byte;
+    while (i > 0 and text[i - 1] != '\n') i -= 1;
+    return byte - i;
 }
 
-fn convert(a: Allocator, text: []const u8, node: c.TSNode) anyerror!?*Node {
+fn convert(a: Allocator, text: []const u8, node: c.TSNode, parent_col: usize) anyerror!?*Node {
     const ty = typeName(node);
     if (std.mem.eql(u8, ty, "document") or
         std.mem.eql(u8, ty, "block_node") or
         std.mem.eql(u8, ty, "flow_node") or
         std.mem.eql(u8, ty, "block_sequence_item"))
-        return convertChild(a, text, node);
+        return convertChild(a, text, node, parent_col);
     if (std.mem.eql(u8, ty, "block_mapping") or std.mem.eql(u8, ty, "flow_mapping"))
         return convertMap(a, text, node);
     if (std.mem.eql(u8, ty, "block_sequence") or std.mem.eql(u8, ty, "flow_sequence"))
         return convertSeq(a, text, node);
     if (std.mem.eql(u8, ty, "block_mapping_pair") or std.mem.eql(u8, ty, "flow_pair"))
-        return convertPair(a, text, node);
+        return convertPair(a, text, node, parent_col);
     if (std.mem.eql(u8, ty, "plain_scalar")) return convertPlain(a, text, node);
     if (std.mem.eql(u8, ty, "single_quote_scalar")) return convertSingle(a, text, node);
     if (std.mem.eql(u8, ty, "double_quote_scalar")) return convertDouble(a, text, node);
-    if (std.mem.eql(u8, ty, "block_scalar")) return convertBlockScalar(a, text, node);
+    if (std.mem.eql(u8, ty, "block_scalar")) return convertBlockScalar(a, text, node, parent_col);
     if (std.mem.eql(u8, ty, "alias")) return convertAlias(a, text, node);
     return null;
 }
@@ -116,6 +126,7 @@ fn convert(a: Allocator, text: []const u8, node: c.TSNode) anyerror!?*Node {
 fn convertMap(a: Allocator, text: []const u8, node: c.TSNode) !*Node {
     const out = try a.create(Node);
     out.* = .{ .kind = .map, .start = start(node), .end = end(node) };
+    const col = columnOf(text, start(node));
     var items = std.ArrayList(*Node).empty;
     const n = c.ts_node_named_child_count(node);
     var i: u32 = 0;
@@ -123,10 +134,10 @@ fn convertMap(a: Allocator, text: []const u8, node: c.TSNode) !*Node {
         const ch = c.ts_node_named_child(node, i);
         const ty = typeName(ch);
         if (std.mem.eql(u8, ty, "block_mapping_pair") or std.mem.eql(u8, ty, "flow_pair")) {
-            try items.append(a, try convertPair(a, text, ch));
+            try items.append(a, try convertPair(a, text, ch, col));
         } else if (std.mem.eql(u8, ty, "flow_node") or std.mem.eql(u8, ty, "block_node")) {
             // Flow mapping bare key with no value.
-            if (try convert(a, text, ch)) |k| {
+            if (try convert(a, text, ch, col)) |k| {
                 const p = try a.create(Node);
                 p.* = .{ .kind = .pair, .start = k.start, .end = k.end, .key = k };
                 k.parent = p;
@@ -142,6 +153,7 @@ fn convertMap(a: Allocator, text: []const u8, node: c.TSNode) !*Node {
 fn convertSeq(a: Allocator, text: []const u8, node: c.TSNode) !*Node {
     const out = try a.create(Node);
     out.* = .{ .kind = .seq, .start = start(node), .end = end(node) };
+    const col = columnOf(text, start(node));
     var items = std.ArrayList(*Node).empty;
     const n = c.ts_node_named_child_count(node);
     var i: u32 = 0;
@@ -149,9 +161,9 @@ fn convertSeq(a: Allocator, text: []const u8, node: c.TSNode) !*Node {
         const ch = c.ts_node_named_child(node, i);
         const ty = typeName(ch);
         if (std.mem.eql(u8, ty, "block_sequence_item")) {
-            if (try convertChild(a, text, ch)) |it| try items.append(a, it);
+            if (try convertChild(a, text, ch, col)) |it| try items.append(a, it);
         } else if (std.mem.eql(u8, ty, "flow_node") or std.mem.eql(u8, ty, "block_node")) {
-            if (try convert(a, text, ch)) |it| try items.append(a, it);
+            if (try convert(a, text, ch, col)) |it| try items.append(a, it);
         }
     }
     out.items = try items.toOwnedSlice(a);
@@ -159,17 +171,18 @@ fn convertSeq(a: Allocator, text: []const u8, node: c.TSNode) !*Node {
     return out;
 }
 
-fn convertPair(a: Allocator, text: []const u8, node: c.TSNode) !*Node {
+fn convertPair(a: Allocator, text: []const u8, node: c.TSNode, _: usize) !*Node {
     const out = try a.create(Node);
     out.* = .{ .kind = .pair, .start = start(node), .end = end(node) };
+    const col = columnOf(text, start(node));
     const key_ts = c.ts_node_child_by_field_name(node, "key", 3);
     const val_ts = c.ts_node_child_by_field_name(node, "value", 5);
     if (!c.ts_node_is_null(key_ts)) {
-        out.key = try convert(a, text, key_ts);
+        out.key = try convert(a, text, key_ts, col);
         if (out.key) |k| k.parent = out;
     }
     if (!c.ts_node_is_null(val_ts)) {
-        out.val = try convert(a, text, val_ts);
+        out.val = try convert(a, text, val_ts, col);
         if (out.val) |v| v.parent = out;
     }
     return out;
@@ -183,7 +196,7 @@ fn convertPlain(a: Allocator, text: []const u8, node: c.TSNode) !*Node {
         const ch = c.ts_node_named_child(node, 0);
         raw = text[start(ch)..end(ch)];
     }
-    out.value = std.mem.trim(u8, raw, " \t\r\n");
+    out.value = try foldPlain(a, raw);
     return out;
 }
 
@@ -192,6 +205,7 @@ fn convertSingle(a: Allocator, text: []const u8, node: c.TSNode) !*Node {
     var inner = raw;
     if (inner.len >= 2 and inner[0] == '\'' and inner[inner.len - 1] == '\'')
         inner = inner[1 .. inner.len - 1];
+    inner = try foldQuoted(a, inner);
     if (std.mem.indexOf(u8, inner, "''") == null) {
         const out = try a.create(Node);
         out.* = .{ .kind = .scalar, .start = start(node), .end = end(node), .value = inner, .style = .quoted };
@@ -220,6 +234,8 @@ fn convertDouble(a: Allocator, text: []const u8, node: c.TSNode) !*Node {
     var inner = raw;
     if (inner.len >= 2 and inner[0] == '"' and inner[inner.len - 1] == '"')
         inner = inner[1 .. inner.len - 1];
+    inner = try joinEscapedBreaks(a, inner);
+    inner = try foldQuoted(a, inner);
     if (std.mem.indexOfScalar(u8, inner, '\\') == null) {
         const out = try a.create(Node);
         out.* = .{ .kind = .scalar, .start = start(node), .end = end(node), .value = inner, .style = .quoted };
@@ -261,47 +277,91 @@ fn convertDouble(a: Allocator, text: []const u8, node: c.TSNode) !*Node {
     return out;
 }
 
-fn convertBlockScalar(a: Allocator, text: []const u8, node: c.TSNode) !*Node {
-    const raw = text[start(node)..end(node)];
-    var nl: usize = 0;
-    while (nl < raw.len and raw[nl] != '\n') : (nl += 1) {}
-    const header = raw[0..nl];
-    const body = if (nl < raw.len) raw[nl + 1 ..] else "";
-    const folded = header.len > 0 and header[0] == '>';
-    const strip = std.mem.indexOfScalar(u8, header, '-') != null;
-    const keep = std.mem.indexOfScalar(u8, header, '+') != null;
-
-    var min_indent: usize = std.math.maxInt(usize);
-    var it = std.mem.splitScalar(u8, body, '\n');
-    while (it.next()) |line| {
-        if (line.len == 0) continue;
-        var ind: usize = 0;
-        while (ind < line.len and line[ind] == ' ') : (ind += 1) {}
-        if (ind < line.len) min_indent = @min(min_indent, ind);
-    }
-    if (min_indent == std.math.maxInt(usize)) min_indent = 0;
-
-    var lines = std.ArrayList([]const u8).empty;
-    var it2 = std.mem.splitScalar(u8, body, '\n');
-    while (it2.next()) |line| {
-        const stripped = if (line.len >= min_indent) line[min_indent..] else "";
-        try lines.append(a, stripped);
-    }
-    // Drop trailing empty lines produced by the final newline.
-    while (lines.items.len > 0 and lines.items[lines.items.len - 1].len == 0)
-        _ = lines.pop();
-
-    var buf = std.ArrayList(u8).empty;
-    for (lines.items, 0..) |line, idx| {
-        if (idx > 0) try buf.append(a, if (folded) ' ' else '\n');
-        try buf.appendSlice(a, line);
-    }
-    if (!strip) try buf.append(a, '\n');
-    if (keep) try buf.append(a, '\n');
-
+fn convertBlockScalar(a: Allocator, text: []const u8, node: c.TSNode, parent_col: usize) !*Node {
+    const rendered = try @import("block_scalar.zig").render(a, text, start(node), parent_col);
     const out = try a.create(Node);
-    out.* = .{ .kind = .scalar, .start = start(node), .end = end(node), .value = try buf.toOwnedSlice(a), .style = .block };
+    out.* = .{ .kind = .scalar, .start = start(node), .end = end(node), .value = rendered.value, .style = .block };
     return out;
+}
+
+fn foldPlain(a: Allocator, raw: []const u8) ![]const u8 {
+    if (std.mem.indexOfScalar(u8, raw, '\n') == null) return std.mem.trim(u8, raw, " \t\r");
+    var buf = std.ArrayList(u8).empty;
+    var it = std.mem.splitScalar(u8, raw, '\n');
+    var first = true;
+    var pending: usize = 0;
+    while (it.next()) |line| {
+        const stripped = std.mem.trim(u8, line, " \t\r");
+        if (stripped.len == 0) {
+            if (!first) pending += 1;
+            continue;
+        }
+        if (first) {
+            try buf.appendSlice(a, stripped);
+            first = false;
+        } else {
+            if (pending > 0) {
+                while (pending > 0) : (pending -= 1) try buf.append(a, '\n');
+            } else {
+                try buf.append(a, ' ');
+            }
+            try buf.appendSlice(a, stripped);
+        }
+    }
+    return buf.toOwnedSlice(a);
+}
+
+fn foldQuoted(a: Allocator, inner: []const u8) ![]const u8 {
+    if (std.mem.indexOfScalar(u8, inner, '\n') == null) return inner;
+    var buf = std.ArrayList(u8).empty;
+    var it = std.mem.splitScalar(u8, inner, '\n');
+    var first = true;
+    var pending: usize = 0;
+    while (it.next()) |line| {
+        if (first) {
+            try buf.appendSlice(a, std.mem.trimEnd(u8, line, " \t\r"));
+            first = false;
+            continue;
+        }
+        const stripped = std.mem.trim(u8, line, " \t\r");
+        if (stripped.len == 0) {
+            pending += 1;
+            continue;
+        }
+        if (pending > 0) {
+            while (pending > 0) : (pending -= 1) try buf.append(a, '\n');
+        } else {
+            try buf.append(a, ' ');
+        }
+        try buf.appendSlice(a, stripped);
+    }
+    return buf.toOwnedSlice(a);
+}
+
+fn joinEscapedBreaks(a: Allocator, inner: []const u8) ![]const u8 {
+    var i: usize = 0;
+    while (i + 1 < inner.len) : (i += 1) {
+        if (inner[i] == '\\' and inner[i + 1] == '\n') break;
+    }
+    if (i + 1 >= inner.len) return inner;
+    var buf = std.ArrayList(u8).empty;
+    i = 0;
+    while (i < inner.len) {
+        if (inner[i] == '\\' and i + 1 < inner.len and inner[i + 1] == '\n') {
+            i += 2;
+            while (i < inner.len and (inner[i] == ' ' or inner[i] == '\t')) i += 1;
+            continue;
+        }
+        if (inner[i] == '\\' and i + 1 < inner.len) {
+            try buf.append(a, inner[i]);
+            try buf.append(a, inner[i + 1]);
+            i += 2;
+            continue;
+        }
+        try buf.append(a, inner[i]);
+        i += 1;
+    }
+    return buf.toOwnedSlice(a);
 }
 
 fn convertAlias(a: Allocator, text: []const u8, node: c.TSNode) !*Node {
@@ -418,7 +478,6 @@ test "tree-sitter and subset backends agree on block YAML" {
 
 test "the audit defers constructs the subset parser does not model" {
     const corpus = [_][]const u8{
-        "- |\n  block\n",
         "when: {{ x }}\n",
         "vars: {port: 80}\n",
         "when: [a, b]\n",
