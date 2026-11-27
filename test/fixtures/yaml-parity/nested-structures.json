@@ -1,0 +1,1 @@
+{"map": {"a": 1, "b": ["x", "y"], "c": {"inner": {"k": "v"}}}, "list_of_maps": [{"name": "first", "enabled": true, "values": [1, 2, 3]}, {"name": "second", "mapping": {"a": 1, "b": "two"}}], "empty_map": {}, "empty_seq": [], "nested_seq": [["a", "b"]]}

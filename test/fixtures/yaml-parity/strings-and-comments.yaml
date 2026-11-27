@@ -1,0 +1,10 @@
+# '#' only opens a comment at line start or after whitespace.
+hash_inside_plain: a#b
+url_with_hash: http://example.com/#frag
+url_with_port: http://example.com:8080/path
+trailing_comment: value # comment
+quoted_hash: "a # b"
+empty_then_comment: # comment
+empty_with_comment_after: # also null
+jinja: "{{ lookup('file', 'x') }}"
+unicode_plain: café

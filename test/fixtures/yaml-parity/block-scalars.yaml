@@ -1,0 +1,13 @@
+# Block scalars are strings regardless of content.
+literal: |
+  line one
+  line two
+folded: >
+  one two
+  three
+strip: |-
+  no trailing newline
+literal_number: |
+  42
+literal_bool: |
+  true

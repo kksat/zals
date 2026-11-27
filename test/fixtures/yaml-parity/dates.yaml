@@ -1,0 +1,4 @@
+# Date-like and version-like plain scalars stay strings.
+date_only: 2024-01-01
+release: 2023-05-17
+version_like: 1.0.0

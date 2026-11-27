@@ -1,0 +1,11 @@
+# Empty and null scalars across styles.
+empty_double: ""
+empty_single: ''
+plain_empty:
+tilde: ~
+null_word: null
+null_cap: Null
+null_upper: NULL
+quoted_null: "null"
+quoted_tilde: "~"
+quoted_empty_then_text: "x"

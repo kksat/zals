@@ -1,0 +1,1 @@
+{"mode": "0644", "version": "1.0.0", "number": "42", "float": "2.5", "bool": "true", "null_word": "null", "time": "12:30", "padded": "  padded  ", "single_quote_escape": "it's", "double_quote_escape": "tab\there", "unicode_escape": "caf\u00e9"}

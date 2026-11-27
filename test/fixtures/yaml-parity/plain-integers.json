@@ -1,0 +1,1 @@
+{"int_pos": 42, "int_neg": -42, "int_plus": 5, "zero": 0, "plus_zero": 0, "negative_zero": 0, "underscores": 1000, "hex_lower": 31, "hex_upper": 31, "hex_signed": -16, "binary": 10, "octal": 420, "octal_zero": 0, "not_octal": "08", "not_octal_prefixed": "0o17", "sexagesimal": 750, "sexagesimal_long": 685230, "plain_string": "42abc"}

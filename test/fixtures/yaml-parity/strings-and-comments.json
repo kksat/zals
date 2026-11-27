@@ -1,0 +1,1 @@
+{"hash_inside_plain": "a#b", "url_with_hash": "http://example.com/#frag", "url_with_port": "http://example.com:8080/path", "trailing_comment": "value", "quoted_hash": "a # b", "empty_then_comment": null, "empty_with_comment_after": null, "jinja": "{{ lookup('file', 'x') }}", "unicode_plain": "caf\u00e9"}

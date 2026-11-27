@@ -1,0 +1,15 @@
+# YAML 1.1 floats; the exponent requires a sign and -.5 is not a float.
+f_plain: 3.14
+f_neg: -2.5
+f_pos: +2.5
+f_dot_end: 2.
+f_dot_start: .5
+f_exp: 2.5e+3
+f_exp_upper: 2.5E+3
+f_exp_neg: -1.5e-2
+f_underscores: 1_0.5
+sexagesimal_float: 190:20:30.15
+not_float_exp_without_sign: 1e3
+not_float_neg_dot: -.5
+not_float_pos_dot: +.5
+not_float_two_dots: 1.2.3

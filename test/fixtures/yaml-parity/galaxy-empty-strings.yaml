@@ -1,0 +1,15 @@
+# The repro from zals issue #47: quoted empty strings must stay strings.
+namespace: example
+name: sample_collection
+version: 1.0.0
+readme: README.md
+authors:
+  - Example Author <author@example.com>
+description: sample collection
+license:
+  - MIT
+license_file: ""
+tags:
+  - example
+dependencies: {}
+repository: https://example.com/repository

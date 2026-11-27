@@ -1,0 +1,1 @@
+{"t_true": true, "t_True": true, "t_TRUE": true, "t_yes": true, "t_Yes": true, "t_YES": true, "t_on": true, "t_On": true, "t_ON": true, "f_false": false, "f_False": false, "f_FALSE": false, "f_no": false, "f_No": false, "f_NO": false, "f_off": false, "f_Off": false, "f_OFF": false, "single_y": "y", "single_n": "n", "quoted_true": "true", "single_no": "no"}
