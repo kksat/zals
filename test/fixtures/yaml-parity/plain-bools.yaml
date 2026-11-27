@@ -1,0 +1,23 @@
+# YAML 1.1 booleans: full words, three casings. Single letters stay strings.
+t_true: true
+t_True: True
+t_TRUE: TRUE
+t_yes: yes
+t_Yes: Yes
+t_YES: YES
+t_on: on
+t_On: On
+t_ON: ON
+f_false: false
+f_False: False
+f_FALSE: FALSE
+f_no: no
+f_No: No
+f_NO: NO
+f_off: off
+f_Off: Off
+f_OFF: OFF
+single_y: y
+single_n: n
+quoted_true: "true"
+single_no: 'no'

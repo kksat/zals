@@ -1,0 +1,11 @@
+# Sequence items lower each scalar by its own style.
+mixed:
+  - ""
+  - ''
+  -
+  - ~
+  - 5
+  - yes
+  - "5"
+  - plain text
+  - 0644

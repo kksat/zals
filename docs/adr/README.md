@@ -56,6 +56,7 @@ Each ADR captures one decision, its context, and its consequences. Statuses are
 | [0050](0050-cel-rule-engine.md) | Native CEL rule engine via zig-cel package dependency | Accepted |
 | [0051](0051-cross-request-navigation-cache.md) | Cross-request navigation cache | Accepted |
 | [0052](0052-audited-subset-fast-path.md) | Audited subset fast path for YAML parsing | Accepted |
+| [0053](0053-yaml-lowering-follows-ansible-core.md) | YAML-to-JSON lowering follows ansible-core | Accepted |
 
 ## Template
 

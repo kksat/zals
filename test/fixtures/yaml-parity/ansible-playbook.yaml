@@ -1,0 +1,25 @@
+---
+- name: Apply common configuration
+  hosts: all
+  become: true
+  vars:
+    app_port: 8080
+    app_debug: false
+    app_mode: "0640"
+    app_name: demo
+  tasks:
+    - name: install package
+      ansible.builtin.package:
+        name: nginx
+        state: present
+    - name: template config
+      ansible.builtin.template:
+        src: nginx.j2
+        dest: /etc/nginx/nginx.conf
+        mode: "0644"
+      when: not app_debug
+      loop:
+        - one
+        - two
+      tags:
+        - config

@@ -1,0 +1,19 @@
+# YAML 1.1 integers, including PyYAML's octal and base-60 forms.
+int_pos: 42
+int_neg: -42
+int_plus: +5
+zero: 0
+plus_zero: +0
+negative_zero: -0
+underscores: 1_000
+hex_lower: 0x1f
+hex_upper: 0x1F
+hex_signed: -0x10
+binary: 0b1010
+octal: 0644
+octal_zero: 00
+not_octal: 08
+not_octal_prefixed: 0o17
+sexagesimal: 12:30
+sexagesimal_long: 190:20:30
+plain_string: 42abc

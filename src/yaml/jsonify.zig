@@ -310,3 +310,86 @@ test "plain scalars resolve per YAML 1.1" {
     };
     for (cases) |case| try std.testing.expectEqual(case.out, resolvePlain(case.in));
 }
+
+test "ansible-core YAML parity" {
+    const fsio = @import("../fsio.zig");
+    const yaml = @import("root.zig");
+    const a = std.testing.allocator;
+
+    var dir = fsio.openDir("test/fixtures/yaml-parity", .{ .iterate = true }) catch |err| {
+        std.debug.print("could not open parity corpus: {s}\n", .{@errorName(err)});
+        return error.TestUnexpectedResult;
+    };
+    defer dir.close(fsio.get());
+    var walker = try dir.walk(a);
+    defer walker.deinit();
+
+    var checked: usize = 0;
+    while (try walker.next(fsio.get())) |entry| {
+        if (entry.kind != .file or !std.mem.endsWith(u8, entry.path, ".yaml")) continue;
+        const text = try entry.dir.readFileAlloc(fsio.get(), entry.basename, a, .limited(1 << 20));
+        defer a.free(text);
+
+        const stem = entry.path[0 .. entry.path.len - ".yaml".len];
+        const expected_path = try std.fmt.allocPrint(a, "{s}.json", .{stem});
+        defer a.free(expected_path);
+        const expected_text = dir.readFileAlloc(fsio.get(), expected_path, a, .limited(1 << 20)) catch |err| {
+            std.debug.print("missing expectation for {s}: {s}\n", .{ entry.path, @errorName(err) });
+            return error.TestUnexpectedResult;
+        };
+        defer a.free(expected_text);
+
+        var parsed = try std.json.parseFromSlice(Value, a, expected_text, .{});
+        defer parsed.deinit();
+
+        var forest = try yaml.parse(a, text);
+        defer forest.deinit();
+        try std.testing.expect(forest.roots.len > 0);
+        var arena = std.heap.ArenaAllocator.init(a);
+        defer arena.deinit();
+        const actual = try toJson(arena.allocator(), forest.roots[0]);
+        try expectJsonEqual(parsed.value, actual);
+        checked += 1;
+    }
+    try std.testing.expect(checked > 5);
+}
+
+fn expectJsonEqual(expected: Value, actual: Value) !void {
+    switch (expected) {
+        .null => try std.testing.expect(actual == .null),
+        .bool => |b| {
+            try std.testing.expect(actual == .bool);
+            try std.testing.expectEqual(b, actual.bool);
+        },
+        .integer => |n| {
+            try std.testing.expect(actual == .integer);
+            try std.testing.expectEqual(n, actual.integer);
+        },
+        .float => |f| {
+            try std.testing.expect(actual == .float);
+            try std.testing.expectEqual(f, actual.float);
+        },
+        .number_string => try std.testing.expect(actual == .number_string),
+        .string => |s| {
+            try std.testing.expect(actual == .string);
+            try std.testing.expectEqualStrings(s, actual.string);
+        },
+        .array => |arr| {
+            try std.testing.expect(actual == .array);
+            try std.testing.expectEqual(arr.items.len, actual.array.items.len);
+            for (arr.items, actual.array.items) |e, x| try expectJsonEqual(e, x);
+        },
+        .object => |obj| {
+            try std.testing.expect(actual == .object);
+            try std.testing.expectEqual(obj.count(), actual.object.count());
+            var it = obj.iterator();
+            while (it.next()) |kv| {
+                const x = actual.object.get(kv.key_ptr.*) orelse {
+                    std.debug.print("missing key: {s}\n", .{kv.key_ptr.*});
+                    return error.TestUnexpectedResult;
+                };
+                try expectJsonEqual(kv.value_ptr.*, x);
+            }
+        },
+    }
+}

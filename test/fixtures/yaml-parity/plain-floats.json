@@ -1,0 +1,1 @@
+{"f_plain": 3.14, "f_neg": -2.5, "f_pos": 2.5, "f_dot_end": 2.0, "f_dot_start": 0.5, "f_exp": 2500.0, "f_exp_upper": 2500.0, "f_exp_neg": -0.015, "f_underscores": 10.5, "sexagesimal_float": 685230.15, "not_float_exp_without_sign": "1e3", "not_float_neg_dot": "-.5", "not_float_pos_dot": "+.5", "not_float_two_dots": "1.2.3"}
