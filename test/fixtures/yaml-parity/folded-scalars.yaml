@@ -1,0 +1,39 @@
+simple: >
+  one two
+  three
+one_blank: >
+  para one
+
+  para two
+two_blanks: >
+  para one
+
+
+  para two
+more_indented: >
+  para
+   more indented
+  back
+blank_then_indented: >
+  a
+
+   ind
+  b
+strip: >-
+  a
+
+  b
+keep: >+
+  a
+
+keep_mid_blank: >+
+  a
+
+  b
+trailing_spaces_line: >
+  a  
+  b
+ws_line: >
+  a
+   
+  b

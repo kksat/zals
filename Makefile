@@ -4,7 +4,7 @@ SUITE ?=
 FILE ?=
 FILTER ?=
 
-.PHONY: help check lint hooks build test e2e e2e-negative zig-test zig neovim-test run fmt clean parity smoke benchmark-operations performance-ci
+.PHONY: help check lint hooks build test e2e e2e-negative zig-test zig neovim-test run fmt clean parity yaml-parity smoke benchmark-operations performance-ci
 
 help:
 	@echo 'make check                          lint + build + unit tests; run before committing'
@@ -15,12 +15,32 @@ help:
 	@echo 'make zig-test FILE=test/x.zig [FILTER=name]  build, then run one Zig test root'
 	@echo 'make zig ARGS="build -l"            any zig command with the macOS workaround'
 	@echo 'make performance-ci ARGS="run --baseline-tree <path> --output <path>"  optimized CI comparison'
+	@echo 'make yaml-parity                   compare zals YAML parsing with frozen ansible-core'
 	@echo 'make smoke | parity | fmt | hooks | run ARGS=--version'
 
 # Pre-commit gate; CI runs lint, test, e2e, and smoke as separate jobs.
 check: lint build test
 
-lint:
+PARITY_VENV := test/parity/.venv
+PARITY_REQUIREMENTS := test/parity/requirements.txt
+
+$(PARITY_VENV): $(PARITY_REQUIREMENTS)
+	if command -v uv >/dev/null 2>&1; then \
+		uv venv --python 3.12 $(PARITY_VENV) && \
+		uv pip install --python $(PARITY_VENV)/bin/python -r $(PARITY_REQUIREMENTS); \
+	elif command -v python3.12 >/dev/null 2>&1; then \
+		python3.12 -m venv $(PARITY_VENV) && \
+		$(PARITY_VENV)/bin/pip install -q -r $(PARITY_REQUIREMENTS); \
+	else \
+		python3 -m venv $(PARITY_VENV) && \
+		$(PARITY_VENV)/bin/pip install -q -r $(PARITY_REQUIREMENTS); \
+	fi
+	@touch $(PARITY_VENV)
+
+yaml-parity: build $(PARITY_VENV)
+	$(PARITY_VENV)/bin/python test/parity/yaml_parity.py
+
+lint: yaml-parity
 	zig fmt --check src build.zig build.zig.zon test
 	python3 tools/lint/comments.py
 

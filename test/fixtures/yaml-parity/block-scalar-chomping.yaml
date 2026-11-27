@@ -1,0 +1,42 @@
+clip: |
+  one
+clip_trailing_empties: |
+  one
+
+
+strip: |-
+  one
+
+keep_one: |+
+  one
+keep_two: |+
+  one
+
+keep_three: |+
+  one
+
+
+keep_then_next: |+
+  one
+
+
+next: 2
+clip_ws_line: |
+  one
+
+keep_ws_line: |+
+  one
+  
+
+clip_eof_no_newline: |
+  one
+keep_eof_no_newline: |+
+  one
+literal_inner_blank: |
+  a
+
+  b
+literal_ws_line: |
+  a
+  
+  b

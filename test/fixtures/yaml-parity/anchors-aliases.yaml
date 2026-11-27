@@ -1,0 +1,20 @@
+scalar_anchor: &x hello
+scalar_alias: *x
+map_anchor: &base
+  k: 1
+  nested:
+    deep: true
+map_alias: *base
+seq_anchor: &s
+  - 1
+  - two
+seq_alias: *s
+flow_anchor: &v {p: 1, q: on}
+flow_alias: *v
+anchor_in_seq:
+  - &a shared
+  - *a
+tagged_anchor: &t !!str 5
+tagged_alias: *t
+anchor_with_tag_after: &u !unsafe raw
+alias_of_alias_target: *u

@@ -1,0 +1,1 @@
+{"clip": "one\n", "clip_trailing_empties": "one\n", "strip": "one", "keep_one": "one\n", "keep_two": "one\n\n", "keep_three": "one\n\n\n", "keep_then_next": "one\n\n\n", "next": 2, "clip_ws_line": "one\n", "keep_ws_line": "one\n\n\n", "clip_eof_no_newline": "one\n", "keep_eof_no_newline": "one\n", "literal_inner_blank": "a\n\nb\n", "literal_ws_line": "a\n\nb\n"}

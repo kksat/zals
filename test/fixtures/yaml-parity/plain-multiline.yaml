@@ -1,0 +1,17 @@
+simple: some long
+  value continued
+one_blank: some long
+
+  value continued
+two_blanks: some long
+
+
+  value continued
+trailing_spaces: some  
+  long
+value_next_line:
+  some
+  long
+indented_variously: some
+   long
+  back

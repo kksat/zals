@@ -1,0 +1,19 @@
+base: &b
+  a: 1
+  b: 2
+other: &o
+  c: 3
+  b: overridden_in_merge_list
+merged:
+  <<: *b
+  b: 3
+list_merge:
+  <<: [*b, *o]
+inline_merge:
+  <<: {x: 10, y: 20}
+  y: 30
+nested_merge:
+  <<: *b
+  inner:
+    <<: *o
+    c: 99

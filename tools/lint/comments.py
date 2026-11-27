@@ -31,7 +31,7 @@ EXPLICIT_FILES = {
     ".githooks/commit-msg": "sh",
     ".githooks/pre-commit": "sh",
 }
-EXCLUDED_DIRS = {"test/fixtures", "zig-out", ".zig-cache", "node_modules"}
+EXCLUDED_DIRS = {"test/fixtures", "test/parity/.venv", "zig-out", ".zig-cache", "node_modules"}
 
 SUFFIX_MARKER = {
     ".zig": SLASH_MARKER,

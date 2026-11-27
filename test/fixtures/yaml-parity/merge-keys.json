@@ -1,0 +1,1 @@
+{"base": {"a": 1, "b": 2}, "other": {"c": 3, "b": "overridden_in_merge_list"}, "merged": {"a": 1, "b": 3}, "list_merge": {"a": 1, "b": 2, "c": 3}, "inline_merge": {"x": 10, "y": 30}, "nested_merge": {"a": 1, "b": 2, "inner": {"c": 99, "b": "overridden_in_merge_list"}}}

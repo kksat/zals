@@ -1,0 +1,10 @@
+root_ind: |2
+    text
+nested:
+  key_ind: |2
+      text
+    more
+seq_ind:
+  - |2
+     x
+  - plain

@@ -1,0 +1,12 @@
+date_only: 2024-01-01
+time_z: 2024-01-01T10:20:30Z
+time_lower_t: 2024-01-01t10:20:30Z
+time_space: 2024-01-01 10:20:30
+time_frac: 2024-01-01T10:20:30.5
+time_frac_zero: 2024-01-01T10:20:30.000
+time_frac_long: 2024-01-01T10:20:30.1234567
+time_offset: 2024-01-01T10:20:30+05:30
+time_hour_offset: 2024-01-01T10:20:30+5
+time_neg_offset: 2024-01-01T10:20:30-07:00
+short_date_stays_string: 2024-1-1
+quoted_date: "2024-01-01"
