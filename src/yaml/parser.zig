@@ -400,7 +400,10 @@ fn keyColonPos(body: []const u8) ?usize {
             quote = c;
             continue;
         }
-        if (c == '#') return null;
+        if (c == '#') {
+            if (i == 0 or body[i - 1] == ' ' or body[i - 1] == '\t') return null;
+            continue;
+        }
         if (c == ':') {
             // Mapping key only when `:` ends the token or is followed by space/comment.
             // Bare URLs like `http://example.com` are scalars, not keys.
@@ -422,7 +425,10 @@ fn unquotedHash(s: []const u8) ?usize {
             quote = c;
             continue;
         }
-        if (c == '#') return i;
+        if (c == '#') {
+            if (i == 0 or s[i - 1] == ' ' or s[i - 1] == '\t') return i;
+            continue;
+        }
     }
     return null;
 }
