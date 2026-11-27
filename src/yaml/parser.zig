@@ -338,6 +338,7 @@ fn parseBlockScalar(p: *Parser, start: usize, header: []const u8, parent_indent:
     if (keep) try buf.append('\n');
     const n = try p.allocNode(.scalar, start, contentEnd(p));
     n.value = try buf.toOwnedSlice();
+    n.style = .block;
     return n;
 }
 
@@ -345,6 +346,7 @@ fn parseScalarFrom(p: *Parser, raw: []const u8, start: usize, end: usize) !*Node
     if (p.audit) auditScalar(raw, p);
     const n = try p.allocNode(.scalar, start, end);
     n.value = unquote(raw);
+    n.style = if (n.value.?.len != raw.len) .quoted else .plain;
     return n;
 }
 

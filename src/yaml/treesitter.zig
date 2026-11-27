@@ -194,7 +194,7 @@ fn convertSingle(a: Allocator, text: []const u8, node: c.TSNode) !*Node {
         inner = inner[1 .. inner.len - 1];
     if (std.mem.indexOf(u8, inner, "''") == null) {
         const out = try a.create(Node);
-        out.* = .{ .kind = .scalar, .start = start(node), .end = end(node), .value = inner };
+        out.* = .{ .kind = .scalar, .start = start(node), .end = end(node), .value = inner, .style = .quoted };
         return out;
     }
     const buf = try a.alloc(u8, inner.len);
@@ -211,7 +211,7 @@ fn convertSingle(a: Allocator, text: []const u8, node: c.TSNode) !*Node {
         }
     }
     const out = try a.create(Node);
-    out.* = .{ .kind = .scalar, .start = start(node), .end = end(node), .value = buf[0..j] };
+    out.* = .{ .kind = .scalar, .start = start(node), .end = end(node), .value = buf[0..j], .style = .quoted };
     return out;
 }
 
@@ -222,7 +222,7 @@ fn convertDouble(a: Allocator, text: []const u8, node: c.TSNode) !*Node {
         inner = inner[1 .. inner.len - 1];
     if (std.mem.indexOfScalar(u8, inner, '\\') == null) {
         const out = try a.create(Node);
-        out.* = .{ .kind = .scalar, .start = start(node), .end = end(node), .value = inner };
+        out.* = .{ .kind = .scalar, .start = start(node), .end = end(node), .value = inner, .style = .quoted };
         return out;
     }
     var buf = std.ArrayList(u8).empty;
@@ -257,7 +257,7 @@ fn convertDouble(a: Allocator, text: []const u8, node: c.TSNode) !*Node {
         }
     }
     const out = try a.create(Node);
-    out.* = .{ .kind = .scalar, .start = start(node), .end = end(node), .value = try buf.toOwnedSlice(a) };
+    out.* = .{ .kind = .scalar, .start = start(node), .end = end(node), .value = try buf.toOwnedSlice(a), .style = .quoted };
     return out;
 }
 
@@ -300,7 +300,7 @@ fn convertBlockScalar(a: Allocator, text: []const u8, node: c.TSNode) !*Node {
     if (keep) try buf.append(a, '\n');
 
     const out = try a.create(Node);
-    out.* = .{ .kind = .scalar, .start = start(node), .end = end(node), .value = try buf.toOwnedSlice(a) };
+    out.* = .{ .kind = .scalar, .start = start(node), .end = end(node), .value = try buf.toOwnedSlice(a), .style = .block };
     return out;
 }
 
@@ -378,6 +378,7 @@ test "tree-sitter DOM is acyclic" {
 fn expectSameNode(a: *const Node, b: *const Node) !void {
     try std.testing.expectEqual(a.kind, b.kind);
     if (a.value) |v| try std.testing.expectEqualStrings(v, b.value.?);
+    if (a.kind == .scalar) try std.testing.expectEqual(a.style, b.style);
     if (a.key) |k| try expectSameNode(k, b.key.?);
     if (a.val) |v| try expectSameNode(v, b.val.?);
     try std.testing.expectEqual(a.items.len, b.items.len);
