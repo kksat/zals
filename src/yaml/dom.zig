@@ -28,6 +28,8 @@ pub const Node = struct {
     key: ?*Node = null,
     /// Pair value.
     val: ?*Node = null,
+    anchor: ?[]const u8 = null,
+    tag: ?[]const u8 = null,
 
     pub fn isScalar(self: *const Node) bool {
         return self.kind == .scalar;

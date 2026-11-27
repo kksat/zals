@@ -74,12 +74,23 @@ fn end(node: c.TSNode) usize {
 /// `flow_node`, `block_sequence_item`), capturing any anchor or tag.
 fn convertChild(a: Allocator, text: []const u8, node: c.TSNode, parent_col: usize) anyerror!?*Node {
     const n = c.ts_node_named_child_count(node);
+    var anchor: ?[]const u8 = null;
+    var tag: ?[]const u8 = null;
     var out: ?*Node = null;
     var i: u32 = 0;
     while (i < n) : (i += 1) {
         const ch = c.ts_node_named_child(node, i);
         const ty = typeName(ch);
-        if (isMeta(ty)) continue;
+        if (std.mem.eql(u8, ty, "comment")) continue;
+        if (std.mem.eql(u8, ty, "anchor")) {
+            const name = text[start(ch)..end(ch)];
+            anchor = if (name.len > 0 and name[0] == '&') name[1..] else name;
+            continue;
+        }
+        if (std.mem.eql(u8, ty, "tag")) {
+            tag = text[start(ch)..end(ch)];
+            continue;
+        }
         if (out == null) out = try convert(a, text, ch, parent_col);
     }
     if (out == null) {
@@ -87,13 +98,9 @@ fn convertChild(a: Allocator, text: []const u8, node: c.TSNode, parent_col: usiz
         empty.* = .{ .kind = .scalar, .start = start(node), .end = end(node), .value = "" };
         out = empty;
     }
+    if (anchor) |an| out.?.anchor = an;
+    if (tag) |t| out.?.tag = t;
     return out;
-}
-
-fn isMeta(ty: []const u8) bool {
-    return std.mem.eql(u8, ty, "comment") or
-        std.mem.eql(u8, ty, "anchor") or
-        std.mem.eql(u8, ty, "tag");
 }
 
 fn columnOf(text: []const u8, byte: usize) usize {
@@ -439,6 +446,10 @@ fn expectSameNode(a: *const Node, b: *const Node) !void {
     try std.testing.expectEqual(a.kind, b.kind);
     if (a.value) |v| try std.testing.expectEqualStrings(v, b.value.?);
     if (a.kind == .scalar) try std.testing.expectEqual(a.style, b.style);
+    try std.testing.expectEqual(a.anchor == null, b.anchor == null);
+    if (a.anchor) |an| try std.testing.expectEqualStrings(an, b.anchor.?);
+    try std.testing.expectEqual(a.tag == null, b.tag == null);
+    if (a.tag) |t| try std.testing.expectEqualStrings(t, b.tag.?);
     if (a.key) |k| try expectSameNode(k, b.key.?);
     if (a.val) |v| try expectSameNode(v, b.val.?);
     try std.testing.expectEqual(a.items.len, b.items.len);
