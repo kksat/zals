@@ -83,4 +83,4 @@ fmt:
 	zig fmt src build.zig build.zig.zon test
 
 clean:
-	rm -rf zig-out .zig-cache
+	rm -rf zig-out .zig-cache zig-pkg
